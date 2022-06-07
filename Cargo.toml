@@ -1,0 +1,16 @@
+[package]
+name = "text-document"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Cyril Jacquet <cyril.jacquet@skribisto.eu>"]
+repository = "https://github.com/jacquetc/text-document"
+readme = "README.md"
+documentation = "https://docs.rs/text-document/"
+description = """
+Text document structure and management.
+"""
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
