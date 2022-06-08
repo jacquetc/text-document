@@ -1,7 +1,15 @@
 use crate::font::Font;
 use crate::text_document::Tab;
 
-#[derive(Default)]
+#[derive(Clone, PartialEq)]
+pub enum Format {
+    FrameFormat(FrameFormat),
+    CharFormat(CharFormat),
+    BlockFormat(BlockFormat),
+    ImageFormat(ImageFormat),
+}
+
+#[derive(Default, Clone, PartialEq)]
 pub struct FrameFormat {
     pub height: Option<usize>,
     pub width: Option<usize>,
@@ -11,19 +19,19 @@ pub struct FrameFormat {
     pub right_margin: Option<usize>,
     pub padding: Option<usize>,
     pub border: Option<usize>,
-    pub position: Option<Position>
-
+    pub position: Option<Position>,
 }
 
 impl FrameFormat {}
 
-
+#[derive(Clone, Copy, PartialEq)]
 pub enum Position {
-    InFlow, FloatLeft, FloatRight
+    InFlow,
+    FloatLeft,
+    FloatRight,
 }
 
-
-#[derive(Default)]
+#[derive(Default, Clone, PartialEq)]
 pub struct CharFormat {
     pub anchor_href: Option<String>,
     pub anchor_names: Option<Vec<String>>,
@@ -51,6 +59,7 @@ impl std::ops::Deref for CharFormat {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum CharVerticalAlignment {
     AlignNormal,
     AlignSuperScript,
@@ -61,6 +70,7 @@ pub enum CharVerticalAlignment {
     AlignBaseline,
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum UnderlineStyle {
     NoUnderline,
     SingleUnderline,
@@ -72,6 +82,7 @@ pub enum UnderlineStyle {
     SpellCheckUnderline,
 }
 
+#[derive(Clone, PartialEq)]
 pub struct BlockFormat {
     pub alignment: Option<Alignment>,
     pub top_margin: Option<usize>,
@@ -110,6 +121,7 @@ impl Default for BlockFormat {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum Alignment {
     AlignLeft,
     AlignRight,
@@ -117,13 +129,14 @@ pub enum Alignment {
     AlignJustify,
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum MarkerType {
     NoMarker,
     Unchecked,
     Checked,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, PartialEq)]
 pub struct ImageFormat {
     char_format: CharFormat,
     pub height: Option<usize>,
@@ -139,7 +152,6 @@ impl ImageFormat {
         }
     }
 }
-
 
 impl std::ops::Deref for ImageFormat {
     type Target = CharFormat;
