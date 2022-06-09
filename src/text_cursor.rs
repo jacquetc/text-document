@@ -1,22 +1,23 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::block::Block;
 use crate::text_document::TextDocument;
 pub struct TextCursor {
-    document: Rc<RefCell<TextDocument>>,
+    document: Rc<TextDocument>,
     position: usize,
     anchor_position: usize,
 }
 
 impl TextCursor {
-    pub fn new(document: Rc<RefCell<TextDocument>>) -> Self {
+    pub fn new(document: Rc<TextDocument>) -> Self {
         Self {
             document,
             ..Default::default()
         }
     }
 
-    pub fn document(&self) -> &RefCell<TextDocument> {
+    pub fn document(&self) -> &TextDocument {
         self.document.as_ref()
     }
 
@@ -30,7 +31,14 @@ impl TextCursor {
         }
     }
 
-    pub fn insert_block(&self){
+    pub fn current_block(&self) -> &Block {
+        self.document
+            .find_block(self.position)
+            .unwrap_or_else(|| self.document.last_block())
+    }
+
+    pub fn insert_block(&self) {
+        //let frame = self.document.borrow().find_frame(position);
 
     }
 }
