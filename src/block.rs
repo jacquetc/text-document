@@ -2,11 +2,11 @@ use crate::format::{BlockFormat, CharFormat};
 use crate::text_document::TextDocument;
 use std::borrow::Borrow;
 use std::cell::{RefCell, Cell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 #[derive(Clone, PartialEq)]
 pub struct Block {
-    document: Rc<TextDocument>,
+    document: Weak<TextDocument>,
     text_fragments: RefCell<Vec<TextFragment>>,
     /// Describes block-specific properties
     block_format: RefCell<BlockFormat>,
@@ -15,15 +15,14 @@ pub struct Block {
 }
 
 impl Block {
-    pub(crate) fn new(document: Rc<TextDocument>) -> Self {
+    pub(crate) fn new() -> Self {
         Block {
-            document,
             ..Default::default()
         }
     }
 
     pub fn document(&self) -> &TextDocument {
-        self.document.borrow()
+        self.document.upgrade().unwrap().as_ref()
     }
 
     /// Position of the cursor at the start of the block in the context of the document.
@@ -76,7 +75,7 @@ impl Block {
 impl Default for Block {
     fn default() -> Self {
         Self {
-            document: Default::default(),
+            document: Weak::new(),
             text_fragments: RefCell::new(vec![TextFragment::new()]),
             block_format: Default::default(),
             char_format: Default::default(),

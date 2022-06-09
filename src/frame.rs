@@ -1,21 +1,21 @@
-use std::borrow::Borrow;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Weak;
+use std::{cell::RefCell};
 use std::ops::Deref;
 
 use crate::{block::Block, format::FrameFormat, text_document::TextDocument};
 
 #[derive(Clone, PartialEq)]
 pub struct Frame {
-    document: Rc<TextDocument>,
+    document: Weak<TextDocument>,
     elements: Vec<Element>,
     /// Describes frame-specific properties
     frame_format: RefCell<FrameFormat>,
 }
 
 impl Frame {
-    pub(crate) fn new(document: Rc<TextDocument>) -> Self {
+    pub(crate) fn new() -> Self {
         // create a first empty block
-        let first_block = Block::new(document);
+        let first_block = Block::new();
 
         Frame {
             elements: vec![Element::BlockElement(first_block)],
@@ -23,12 +23,12 @@ impl Frame {
         }
     }
 
-    pub(crate) fn set_document(&mut self, document: Rc<TextDocument>) {
+    pub(crate) fn set_document(&mut self, document: Weak<TextDocument>) {
         self.document = document;
     }
 
     pub fn document(&self) -> &TextDocument {
-        self.document.borrow()
+        self.document.upgrade().unwrap().as_ref()
     }
 
     pub fn first_cursor_position(&self) -> usize {
@@ -92,7 +92,7 @@ impl Frame {
 impl Default for Frame {
     fn default() -> Self {
         Self {
-            document: Default::default(),
+            document: Weak::new(),
             elements: Vec::new(),
             frame_format: Default::default(),
         }

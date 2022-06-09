@@ -1,43 +1,66 @@
-use std::cell::RefCell;
+use std::borrow::BorrowMut;
+use std::cell::{RefCell, Cell};
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use crate::block::Block;
+use crate::frame::Element;
+use crate::frame::Element::{FrameElement, BlockElement};
 use crate::{format::Format, frame::Frame};
 
 #[derive(Default, PartialEq, Clone)]
 pub struct TextDocument {
     formats: Vec<Format>,
-    root_frame: Option<Box<Frame>>,
+    id_with_element_hash: RefCell<HashMap<usize, Box<Element>>>,
+    order_with_id_map: RefCell<BTreeMap<usize, usize>>,
+    child_id_with_parent_id_hash: RefCell<HashMap<usize, usize>>,
+    id_counter: Cell<usize>,
 }
 
 impl TextDocument {
-    pub fn new() -> Rc<Self> {
-        let mut document = Rc::new(Self {
-            root_frame: None,
+    pub fn new_rc() -> Rc<Self> {
+        let document = Rc::new(Self {
             ..Default::default()
         });
 
-        let root_frame = Frame::new(document.clone());
-        document.root_frame = Some(Box::new(root_frame));
+        // root frame:
+        document.id_with_element_hash.borrow_mut().insert(0, Box::new(Element::FrameElement(Frame::new())));
+        document.order_with_id_map.borrow_mut().insert(0,0);
+        document.child_id_with_parent_id_hash.borrow_mut().insert(0, 0);
+        document.id_counter.set(document.id_counter.get() + 1);
+
         document
+    }  
+
+    fn insert_frame(&self) -> &Box<Element> {
+
+        
     }
 
     pub fn block_count(&self) -> usize {
-        match &self.root_frame {
-            Some(frame) => frame.recursive_block_count(),
-            None => 0,
-        }
+
+        let mut counter = 1;
+        self.id_with_element_hash.borrow().values().for_each(|element| {
+            counter += match element.as_ref() {
+                BlockElement(_) =>  1,
+                _ => 0,
+            }
+        });
+        counter
     }
 
     pub(crate) fn block_list(&self) -> Vec<&Block> {
-        match self.root_frame {
-            Some(frame) => frame.recursive_block_list(),
-            None => vec![],
-        }
+        self.id_with_element_hash.borrow().values().into_iter().skip_while(|x| match x.as_ref() {
+            BlockElement(_) => true,
+            _ => false,
+        }).collect()
+        
     }
 
-    pub fn root_frame(&self) -> Option<&Box<Frame>> {
-        self.root_frame.as_ref()
+    pub fn root_frame(&self) -> &Box<Element> {
+        self.id_with_element_hash.borrow()
+            .entry(0)
+            .or_insert(Box::new(FrameElement(Frame::new())))
     }
 
     pub fn character_count(&self) -> usize {
@@ -52,7 +75,6 @@ impl TextDocument {
 
     pub fn find_block(&self, position: usize) -> Option<&Block> {
         for block in self.block_list().into_iter() {
-
             if (block.position()..block.end_position()).contains(&position) {
                 return Some(&block);
             }
