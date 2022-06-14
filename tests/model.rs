@@ -10,15 +10,38 @@ fn create_document() {
 fn add_text() {
     let mut document = TextDocument::new();
     document.clear();
-    document.clear();
     document.set_plain_text("aa\na");
 
-    //let mut cursor = document.create_cursor();
-    // cursor.set_position(0, MoveMode::KeepAnchor);
-    // cursor.insert_plain_text("\nplain_text");
     
-    assert_eq!(document.block_count(), 1);
+    assert_eq!(document.block_count(), 2);
 }
 
 
+
+#[test]
+fn cursor_insert_plain_text() {
+    let document = TextDocument::new();
+
+    let mut cursor = document.create_cursor();
+    cursor.set_position(0, MoveMode::KeepAnchor);
+    cursor.insert_plain_text("\nplain_text\ntest");
+    
+    assert_eq!(document.block_count(), 3);
+}
+
+
+
+#[test]
+fn cursor_insert_plain_text_into_filled_block() {
+    let mut document = TextDocument::new();
+    document.set_plain_text("beginningend");
+    document.print_debug_elements();
+
+    let mut cursor = document.create_cursor();
+    cursor.set_position(9, MoveMode::KeepAnchor);
+    cursor.insert_plain_text("new\nplain_text\ntest");
+    document.print_debug_elements();
+
+    assert_eq!(document.block_count(), 3);
+}
 

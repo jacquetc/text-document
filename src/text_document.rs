@@ -4,12 +4,13 @@ use crate::frame::Element;
 use crate::frame::Element::{BlockElement, FrameElement};
 use crate::text_cursor::TextCursor;
 use crate::{format::Format, frame::Frame};
-use anyhow::Result;
-use std::borrow::Borrow;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
 use uuid::Uuid;
+
+#[cfg(test)]
+use std::{println as info, println as warn};
 
 #[derive(PartialEq, Clone)]
 pub struct TextDocument {
@@ -85,6 +86,10 @@ impl TextDocument {
 
     pub fn clear(&mut self) {
         self.element_manager.clear();
+    }
+
+    pub fn print_debug_elements(&self) {
+        self.element_manager.debug_elements();
     }
 }
 
@@ -364,27 +369,27 @@ impl ElementManager {
     }
 
     pub(crate) fn root_frame(&self) -> Rc<Frame> {
-        let frame_option;
-        {
-            let id_with_element_hash = self.id_with_element_hash.borrow();
-
-            frame_option = id_with_element_hash.get(&1);
-        }
-        let element = match frame_option {
-            Some(element) => element.clone(),
-            None => {
-                let mut mut_hash = self.id_with_element_hash.borrow_mut();
-                mut_hash
-                    .insert(
-                        1,
-                        FrameElement(ElementManager::create_root_frame(
-                            self.self_weak.borrow().upgrade().unwrap(),
-                        )),
-                    )
-                    .unwrap()
-                    .clone()
-            }
-        };
+        // let frame_option;
+        // {
+        let id_with_element_hash = self.id_with_element_hash.borrow();
+        let element = id_with_element_hash.get(&1).unwrap();
+        // frame_option = id_with_element_hash.get(&1);
+        // }
+        // let element = match frame_option {
+        //     Some(element) => element.clone(),
+        //     None => {
+        //         let mut mut_hash = self.id_with_element_hash.borrow_mut();
+        //         mut_hash
+        //             .insert(
+        //                 1,
+        //                 FrameElement(ElementManager::create_root_frame(
+        //                     self.self_weak.borrow().upgrade().unwrap(),
+        //                 )),
+        //             )
+        //             .unwrap()
+        //             .clone()
+        //     }
+        // };
 
         if let Element::FrameElement(c) = element {
             c.clone()
@@ -474,5 +479,51 @@ impl ElementManager {
         self.id_with_element_hash.borrow_mut().clear();
         self.id_counter.set(0);
         ElementManager::create_root_frame(self.self_weak.borrow().upgrade().unwrap());
+    }
+
+    pub(self) fn debug_elements(&self) {
+        let order_with_id_map = self.order_with_id_map.borrow();
+        let id_with_element_hash = self.id_with_element_hash.borrow();
+
+        let mut indent_with_string = Vec::new();
+
+        println!("debug_elements");
+
+        order_with_id_map.iter().for_each(|(_, id)| {
+            let indent = self.number_of_ancestors(id);
+
+            match id_with_element_hash.get(id).unwrap() {
+                FrameElement(_) => indent_with_string.push((indent, "frame".to_string())),
+                BlockElement(block) => indent_with_string.push((indent, block.plain_text())),
+            };
+        });
+
+        indent_with_string
+            .iter()
+            .for_each(|(indent, string)|  println!("{}{}", " ".repeat(*indent), string.as_str()));
+    }
+
+    fn number_of_ancestors(&self, child_id: &usize) -> usize {
+        let child_id_with_parent_id_hash = self.child_id_with_parent_id_hash.borrow();
+        let mut number_of_ancestors: usize = 0;
+        let mut loop_child_id = child_id;
+
+        loop {
+            match child_id_with_parent_id_hash.get(loop_child_id) {
+                Some(parent) => match parent {
+                    0 => {
+                        number_of_ancestors += 1;
+                        break;
+                    }
+
+                    _ => {
+                        number_of_ancestors += 1;
+                        loop_child_id = parent;
+                    }
+                },
+                None => unreachable!(),
+            }
+        }
+        number_of_ancestors
     }
 }

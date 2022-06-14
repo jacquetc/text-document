@@ -225,6 +225,19 @@ impl Block {
     fn split_text_fragment_at(&self, position_in_block: usize) -> (Rc<Text>, Rc<Text>) {
         todo!()
     }
+
+    /// returns the plain text of this block
+    pub fn plain_text(&self) ->String {
+        let texts: Vec<String> = self.ordered_fragments()
+            .iter()
+            .map(|fragment|  { match fragment {
+                BlockFragment::TextFragment(text_rc) => text_rc.text.borrow().clone(),
+                BlockFragment::ImageFragment(image_rc) => image_rc.text.borrow().clone(),
+            }}).collect();
+            texts.join("")
+
+    }
+
 }
 
 trait Fragment {
@@ -236,7 +249,7 @@ trait Fragment {
 #[derive(Default, Clone, PartialEq)]
 pub(crate) struct Text {
     uuid: usize,
-    text: RefCell<String>,
+    pub(self) text: RefCell<String>,
     char_format: RefCell<CharFormat>,
 }
 
@@ -276,7 +289,7 @@ impl Fragment for Text {
 #[derive(Default, Clone, PartialEq)]
 pub(crate) struct Image {
     uuid: usize,
-    text: RefCell<String>,
+    pub(self) text: RefCell<String>,
     image_format: RefCell<ImageFormat>,
 }
 
