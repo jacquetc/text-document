@@ -154,6 +154,8 @@ pub(crate) struct ElementManager {
     child_id_with_parent_id_hash: RefCell<HashMap<usize, usize>>,
     id_counter: Cell<usize>,
     self_weak: RefCell<Weak<ElementManager>>,
+    cursor_change_callbacks: RefCell<Vec<fn(usize, usize, usize)>>,
+
 }
 
 impl PartialEq for ElementManager {
@@ -173,6 +175,7 @@ impl ElementManager {
             child_id_with_parent_id_hash: Default::default(),
             id_counter: Default::default(),
             self_weak: RefCell::new(Weak::new()),
+            cursor_change_callbacks: Default::default(),
         });
         let new_self_weak = RefCell::new(Rc::downgrade(&rc));
         rc.self_weak.swap(&new_self_weak);
@@ -525,5 +528,15 @@ impl ElementManager {
             }
         }
         number_of_ancestors
+=======
+    fn signal_for_cursor_change(position: usize, removed_characters: usize, added_character: usize) {
+
+    }
+
+    pub(crate) fn add_cursor_change_callback(&self, callback: fn(usize, usize, usize)){
+
+
+
+>>>>>>> Stashed changes
     }
 }
