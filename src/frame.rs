@@ -45,6 +45,6 @@ impl Frame {
 
 #[derive(Clone, PartialEq)]
 pub(crate) enum Element {
-    FrameElement(Rc<Frame>),
+    FrameElement(uuid: , Rc<Frame>),
     BlockElement(Rc<Block>),
 }

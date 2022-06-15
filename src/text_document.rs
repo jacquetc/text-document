@@ -1,11 +1,11 @@
-use crate::block::Block;
+use crate::block::{Block, BlockFragment};
 use crate::format::CharFormat;
 use crate::frame::Element;
 use crate::frame::Element::{BlockElement, FrameElement};
 use crate::text_cursor::TextCursor;
 use crate::{format::Format, frame::Frame};
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, BTreeSet};
 use std::rc::{Rc, Weak};
 use uuid::Uuid;
 
@@ -91,6 +91,10 @@ impl TextDocument {
     pub fn print_debug_elements(&self) {
         self.element_manager.debug_elements();
     }
+
+    pub fn add_cursor_change_callback(&self, callback: fn(usize, usize, usize)) {
+        self.element_manager.add_cursor_change_callback(callback);
+    }
 }
 
 #[derive(Default, PartialEq, Clone)]
@@ -152,10 +156,13 @@ pub(crate) struct ElementManager {
     id_with_element_hash: RefCell<HashMap<usize, Element>>,
     order_with_id_map: RefCell<BTreeMap<usize, usize>>,
     child_id_with_parent_id_hash: RefCell<HashMap<usize, usize>>,
+    elements: RefCell<BTreeSet<Element>>,
     id_counter: Cell<usize>,
     self_weak: RefCell<Weak<ElementManager>>,
     cursor_change_callbacks: RefCell<Vec<fn(usize, usize, usize)>>,
-
+    element_change_callbacks: RefCell<Vec<fn(Element)>>,
+    fragment_change_callbacks: RefCell<Vec<fn(BlockFragment, Rc<Block>)>>,
+    
 }
 
 impl PartialEq for ElementManager {
@@ -163,19 +170,27 @@ impl PartialEq for ElementManager {
         self.id_with_element_hash == other.id_with_element_hash
             && self.order_with_id_map == other.order_with_id_map
             && self.child_id_with_parent_id_hash == other.child_id_with_parent_id_hash
+            && self.elements == other.elements
             && self.id_counter == other.id_counter
+            && self.cursor_change_callbacks == other.cursor_change_callbacks
+            && self.element_change_callbacks == other.element_change_callbacks
+            && self.fragment_change_callbacks == other.fragment_change_callbacks
     }
 }
 
 impl ElementManager {
+
     pub(crate) fn new_rc() -> Rc<Self> {
         let rc = Rc::new(Self {
             id_with_element_hash: Default::default(),
             order_with_id_map: Default::default(),
             child_id_with_parent_id_hash: Default::default(),
+            elements: Default::default(),
             id_counter: Default::default(),
             self_weak: RefCell::new(Weak::new()),
             cursor_change_callbacks: Default::default(),
+            element_change_callbacks: Default::default(),
+            fragment_change_callbacks: Default::default(),
         });
         let new_self_weak = RefCell::new(Rc::downgrade(&rc));
         rc.self_weak.swap(&new_self_weak);
@@ -273,13 +288,51 @@ impl ElementManager {
 
         new_block
     }
+
+    pub(crate) fn remove(&self,
+        position: usize,
+        anchor_position: usize,
+        send_change_signals: bool) -> Option<usize> {
+
+            let left_position = position.min(anchor_position);
+            let right_position = anchor_position.max(position);
+
+            let top_block = self.find_block(left_position)?;
+            let bottom_block = self.find_block(right_position)?;
+
+        // same block:
+        if top_block == bottom_block {
+            top_block.remove_between_positions(top_block.left_position, right_position);    
+        
+        
+        }
+
+
+    
+/*         if send_change_signals {
+                self.signal_for_cursor_change(position, 0, new_position);
+        } */
+
+
+        }
+
     /// returns the new cursor position
     pub(crate) fn insert_plain_text<S: Into<String>>(
         &self,
         plain_text: S,
         position: usize,
+        anchor_position: usize,
         char_format: CharFormat,
+        send_change_signals: bool
     ) -> usize {
+
+        let left_position = position.min(anchor_position);
+        let right_position = anchor_position.max(position);
+
+        if left_position != right_position {
+            self.remove(left_position, right_position, false)
+        }
+
         let mut first_loop = true;
         let mut new_position = position;
 
@@ -307,7 +360,13 @@ impl ElementManager {
             new_position += text.len();
         }
 
+        if send_change_signals {
+                self.signal_for_cursor_change(position, 0, new_position);
+        }
+
         new_position
+
+
     }
 
     // only needed when TextDocument isn't yet initialized
@@ -503,7 +562,7 @@ impl ElementManager {
 
         indent_with_string
             .iter()
-            .for_each(|(indent, string)|  println!("{}{}", " ".repeat(*indent), string.as_str()));
+            .for_each(|(indent, string)| println!("{}{}", " ".repeat(*indent), string.as_str()));
     }
 
     fn number_of_ancestors(&self, child_id: &usize) -> usize {
@@ -528,15 +587,51 @@ impl ElementManager {
             }
         }
         number_of_ancestors
-=======
-    fn signal_for_cursor_change(position: usize, removed_characters: usize, added_character: usize) {
-
     }
 
-    pub(crate) fn add_cursor_change_callback(&self, callback: fn(usize, usize, usize)){
+    pub(self) fn signal_for_cursor_change(
+        &self,
+        position: usize,
+        removed_characters: usize,
+        added_character: usize,
+    ) {
+        self.cursor_change_callbacks
+            .borrow()
+            .iter()
+            .for_each(|callback| callback(position, removed_characters, added_character));
+    }
 
+    pub(self) fn add_cursor_change_callback(&self, callback: fn(usize, usize, usize)) {
+        self.cursor_change_callbacks.borrow_mut().push(callback);
+    }
 
+    /// Signal for when a Frame (and/or more than one child Blocks) is modified. If only one Block is modified, only an element Block is sent.
+    pub(self) fn signal_for_element_change(&self, changed_element: Element) {
+        self.element_change_callbacks
+            .borrow()
+            .iter()
+            .for_each(|callback| callback(changed_element.clone()));
+    }
 
->>>>>>> Stashed changes
+    /// Add callback for when a Frame (and/or more than one child Blocks) is modified. If only one Block is modified, only an element Block is sent.
+    pub(self) fn add_element_change_callback(&self, callback: fn(Element)) {
+        self.element_change_callbacks.borrow_mut().push(callback);
+    }
+
+    /// Signal for when a Fragment inside a block (and/or more than one child Blocks) is modified. If only one Block is modified, only an element Block is sent.
+    pub(self) fn signal_for_fragment_change(
+        &self,
+        changed_fragment: BlockFragment,
+        parent_block: Rc<Block>,
+    ) {
+        self.fragment_change_callbacks
+            .borrow()
+            .iter()
+            .for_each(|callback| callback(changed_fragment.clone(), parent_block.clone()));
+    }
+
+    /// Add callback for when a Frame (and/or more than one child Blocks) is modified. If only one Block is modified, only an element Block is sent.
+    pub(self) fn add_fragment_change_callback(&self, callback: fn(BlockFragment, Rc<Block>)) {
+        self.fragment_change_callbacks.borrow_mut().push(callback);
     }
 }

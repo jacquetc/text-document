@@ -231,10 +231,14 @@ impl Block {
         let texts: Vec<String> = self.ordered_fragments()
             .iter()
             .map(|fragment|  { match fragment {
-                BlockFragment::TextFragment(text_rc) => text_rc.text.borrow().clone(),
-                BlockFragment::ImageFragment(image_rc) => image_rc.text.borrow().clone(),
+                BlockFragment::TextFragment(text_rc) => text_rc.text(),
+                BlockFragment::ImageFragment(image_rc) => image_rc.text(),
             }}).collect();
             texts.join("")
+
+    }
+
+    pub(crate) fn remove_between_positions(&self, position_in_block: usize, anchor_position_in_block: usize){
 
     }
 
@@ -247,7 +251,7 @@ trait Fragment {
 }
 
 #[derive(Default, Clone, PartialEq)]
-pub(crate) struct Text {
+pub struct Text {
     uuid: usize,
     pub(self) text: RefCell<String>,
     char_format: RefCell<CharFormat>,
@@ -269,7 +273,13 @@ impl Text {
         self.char_format.replace(char_format.clone());
     }
 
+    pub fn text(&self) -> String {
+        self.text.borrow().clone()
+    }
 
+    pub(crate) fn set_text(&self, text: String) {
+        self.text.replace(text);
+    }
 }
 
 impl Fragment for Text {
@@ -287,9 +297,9 @@ impl Fragment for Text {
 }
 
 #[derive(Default, Clone, PartialEq)]
-pub(crate) struct Image {
+pub struct Image {
     uuid: usize,
-    pub(self) text: RefCell<String>,
+    text: RefCell<String>,
     image_format: RefCell<ImageFormat>,
 }
 
@@ -297,9 +307,24 @@ impl Image {
     pub(crate) fn new(uuid: usize) -> Self {
         Self {
             uuid,
+            text: RefCell::new(char::from_u32(0xfffc).unwrap().to_string()),
             ..Default::default()
         }
     }
+
+
+    pub(crate) fn image_format(&self) -> ImageFormat {
+        self.image_format.borrow().clone()
+    }
+
+    pub(crate) fn set_image_format(&self, image_format: &ImageFormat) {
+        self.image_format.replace(image_format.clone());
+    }
+
+    pub fn text(&self) -> String {
+        self.text.borrow().clone()
+    }
+
 }
 
 impl Fragment for Image {
@@ -316,10 +341,12 @@ impl Fragment for Image {
             self.uuid
     }
 
+    
+
 }
 
 #[derive(Clone, PartialEq)]
-enum BlockFragment {
+pub enum BlockFragment {
     TextFragment(Rc<Text>),
     ImageFragment(Rc<Image>),
 }

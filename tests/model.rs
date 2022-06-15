@@ -36,6 +36,7 @@ fn cursor_insert_plain_text_into_filled_block() {
     let mut document = TextDocument::new();
     document.set_plain_text("beginningend");
     document.print_debug_elements();
+    document.add_cursor_change_callback(|position, removed_characters, added_characters|{ println!("");} );
 
     let mut cursor = document.create_cursor();
     cursor.set_position(9, MoveMode::KeepAnchor);
