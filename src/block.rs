@@ -1,47 +1,31 @@
 use crate::format::{BlockFormat, CharFormat, ImageFormat};
-use crate::text_document::ElementManager;
-use std::borrow::Borrow;
+use crate::text::Text;
+use crate::text_document::Element::{ImageElement, TextElement};
+use crate::text_document::{Element, ElementManager, ElementTrait, ModelError};
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::{Rc, Weak};
 
 #[derive(Clone)]
 pub struct Block {
-    uuid: usize,
-    uuid_counter: Cell<usize>,
+    uuid: Cell<usize>,
     element_manager: Weak<ElementManager>,
-    id_with_fragment_hash: RefCell<HashMap<usize, BlockFragment>>,
-    order_with_id_map: RefCell<BTreeMap<usize, usize>>,
     /// Describes block-specific properties
     block_format: RefCell<BlockFormat>,
 }
 
 impl PartialEq for Block {
     fn eq(&self, other: &Self) -> bool {
-        self.uuid == other.uuid
-            && self.id_with_fragment_hash == other.id_with_fragment_hash
-            && self.order_with_id_map == other.order_with_id_map
-            && self.block_format == other.block_format
-            && self.uuid_counter == other.uuid_counter
+        self.uuid == other.uuid && self.block_format == other.block_format
     }
 }
 
 impl Block {
-    pub(crate) fn new(uuid: usize, element_manager: Weak<ElementManager>) -> Self {
-        
-        // create first empty text fragment:
-        
-        let mut hash = HashMap::new();
-        hash.insert(0, Text::create_fragment(0));
-        let mut map = BTreeMap::new();
-        map.insert(0, 0);
-        
+    pub(crate) fn new(element_manager: Weak<ElementManager>) -> Self {
         Block {
-            uuid,
+            uuid: Default::default(),
             element_manager,
-            uuid_counter: Cell::new(1),
-            id_with_fragment_hash: RefCell::new(hash),
-            order_with_id_map: RefCell::new(map),
             block_format: Default::default(),
         }
     }
@@ -61,7 +45,11 @@ impl Block {
     }
 
     pub(crate) fn uuid(&self) -> usize {
-        self.uuid
+        self.uuid.get()
+    }
+
+    pub fn set_uuid(&self, uuid: usize) {
+        self.uuid.set(uuid);
     }
 
     // position of the end of the block in the context of the document
@@ -71,12 +59,16 @@ impl Block {
 
     /// Length of text in the block
     pub fn length(&self) -> usize {
+        let element_manager = self.element_manager.upgrade().unwrap();
+
+        let all_children = self.list_all_children();
         let mut counter: usize = 0;
 
-        for fragment in self.id_with_fragment_hash.borrow().values() {
-            counter += match fragment {
-                BlockFragment::TextFragment(text) => text.text.borrow().len(),
-                BlockFragment::ImageFragment(_) => 1,
+        for element in all_children {
+            counter += match element {
+                TextElement(text) => text.plain_text().len(),
+                ImageElement(_) => 1,
+                _ => 0,
             };
         }
 
@@ -101,15 +93,36 @@ impl Block {
     pub(crate) fn convert_position_from_document(&self, position_in_document: usize) -> usize {
         position_in_document - self.position()
     }
+    pub(crate) fn convert_position_from_block_to_child(&self, position_in_block: usize) -> usize {
+        let mut position = 0;
+        for child in self.list_all_children() {
+            if position_in_block == 0 {
+                return 0;
+            }
+
+            let child_end_position = match &child {
+                TextElement(text_rc) => text_rc.len(),
+                ImageElement(image_rc) => image_rc.len(),
+                _ => unreachable!(),
+            };
+
+            if (position..=child_end_position).contains(&position_in_block) {
+                return position_in_block - position;
+            }
+
+            position += child_end_position;
+        }
+
+        position
+    }
 
     pub(crate) fn char_format_at(&self, position_in_block: usize) -> Option<CharFormat> {
         if position_in_block == 0 {
-            match self.first_fragment() {
-                Some(fragment) => match fragment {
-                    BlockFragment::TextFragment(text_fragment) => {
-                        Some(text_fragment.char_format().clone())
-                    }
-                    BlockFragment::ImageFragment(_) => return None,
+            match self.first_child() {
+                Some(element) => match element {
+                    TextElement(text) => Some(text.char_format().clone()),
+                    ImageElement(_) => None,
+                    _ => None,
                 },
                 None => return None,
             }
@@ -118,103 +131,177 @@ impl Block {
         }
     }
 
-    fn first_fragment(&self) -> Option<BlockFragment> {
-        let map = self.order_with_id_map.borrow();
-        let first_uuid = match map.values().min() {
-            Some(minimum_sort_order) => match map.get(minimum_sort_order) {
-                Some(first_uuid) => first_uuid,
-                None => return None,
-            },
-            None => return None,
-        };
+    fn first_child(&self) -> Option<Element> {
+        let element_manager = self.element_manager.upgrade().unwrap();
 
-        let hash = self.id_with_fragment_hash.borrow();
-        match hash.get(first_uuid) {
-            Some(fragment) => Some(fragment.clone()),
-            None => None,
+        let next_element = element_manager.next_element(self.uuid())?;
+        match next_element {
+            TextElement(_) => Some(next_element),
+            ImageElement(_) => Some(next_element),
+            _ => None,
         }
-
-        
     }
 
-    fn find_fragment(&self, position_in_block: usize) -> Option<(BlockFragment, usize)> {
+    /// Find element inside the blocking using the cursor position in block
+    /// Returns the element
+    fn find_element(&self, position_in_block: usize) -> Option<Element> {
         let mut position = 0;
 
-        for fragment in self.ordered_fragments() {
-
-            let fragment_end_position = match &fragment {
-                BlockFragment::TextFragment( text_rc) => text_rc.len(),
-                BlockFragment::ImageFragment(image_rc) => image_rc.len(),
-            };
-
-            if (position..fragment_end_position).contains(&position_in_block) {
-                return Some((fragment, position_in_block - position));
+        for child in self.list_all_children() {
+            // returns first element if cursor is at first postion
+            if position_in_block == 0 {
+                return Some(child);
             }
 
-            position += fragment_end_position;
+            let child_end_position = match &child {
+                TextElement(text_rc) => text_rc.len(),
+                ImageElement(image_rc) => image_rc.len(),
+                _ => unreachable!(),
+            };
+
+            if (position..=child_end_position).contains(&position_in_block) {
+                return Some(child);
+            }
+
+            position += child_end_position;
         }
 
         None
     }
 
-    pub(crate) fn insert_plain_text(&self, plain_text: &str, position_in_block: usize, char_format: &CharFormat) {
-        match self.find_fragment(position_in_block) {
-            Some((fragment, position_in_fragment)) => match fragment {
-                BlockFragment::TextFragment(text_rc) => {
-                    text_rc.text.borrow_mut().insert_str(position_in_fragment, plain_text);
-                    text_rc.set_char_format(char_format);
-                },
-                BlockFragment::ImageFragment(_) => todo!(),
+    pub(crate) fn insert_plain_text(&self, plain_text: &str, position_in_block: usize) {
+        match self.find_element(position_in_block) {
+            Some(element) => match element {
+                TextElement(text_rc) => text_rc.insert_plain_text(
+                    self.convert_position_from_block_to_child(position_in_block),
+                    &plain_text.to_string(),
+                ),
+                ImageElement(_) => {
+                    let new_text_element = self.insert_text_element(position_in_block);
+                }
+                _ => unreachable!(),
             },
             None => return,
         }
+    }
 
+    fn insert_text_element(&self, position_in_block: usize) -> Element {
+        match self.find_element(position_in_block) {
+            Some(element) => match element {
+                TextElement(text_rc) => {
+                    // split
+                    let second_text_element =
+                        text_rc.split(self.convert_position_from_block_to_child(position_in_block));
+                    // insert new text between splits
+                    let element_manager = self.element_manager.upgrade().unwrap();
+                    let new_text_rc = element_manager
+                        .insert_new_text(text_rc.uuid(), crate::text_document::InsertMode::After);
+                    element_manager.get(new_text_rc.unwrap().uuid()).unwrap()
+                }
+                ImageElement(_) => {
+                    // add text after
+                    let element_manager = self.element_manager.upgrade().unwrap();
+                    let new_text_rc = element_manager
+                        .insert_new_text(element.uuid(), crate::text_document::InsertMode::After);
+                    element_manager.get(new_text_rc.unwrap().uuid()).unwrap()
+                }
+                _ => unreachable!(),
+            },
+            None => unreachable!(),
+        }
     }
 
     pub(crate) fn set_plain_text(&self, plain_text: &str, char_format: &CharFormat) {
         self.clear();
-        self.insert_plain_text(plain_text, 0, char_format);
+        self.insert_plain_text(plain_text, 0);
     }
 
-    fn clear(&self) {
-        self.id_with_fragment_hash.replace(HashMap::new());
-        self.order_with_id_map.replace(BTreeMap::new());
+    /// helper function to clear all children of this block
+    pub(crate) fn clear(&self) {
+        let element_manager = self.element_manager.upgrade().unwrap();
+        let children = self
+            .list_all_children()
+            .iter()
+            .map(|element| element.uuid())
+            .collect();
+
+        element_manager.remove(children);
     }
 
-    fn ordered_fragments(&self) -> Vec<BlockFragment> {
-        let map = self.order_with_id_map.borrow_mut();
-        let hash = self.id_with_fragment_hash.borrow();
-        map.values()
-            .filter_map(|uuid| hash.get(uuid)).map(| fragment| fragment.clone())
-            .collect()
+    pub(crate) fn list_all_children(&self) -> Vec<Element> {
+        let element_manager = self.element_manager.upgrade().unwrap();
+        element_manager.list_all_children(self.uuid())
     }
 
     /// Describes the block's character format. The block's character format is the char format of the first block.
     pub fn char_format(&self) -> CharFormat {
-        match self.first_fragment().unwrap() {
-            BlockFragment::TextFragment(text_fragment) => text_fragment.char_format().clone(),
-            BlockFragment::ImageFragment(_) => CharFormat::new(),
+        match self.first_child().unwrap() {
+            TextElement(text_fragment) => text_fragment.char_format().clone(),
+            ImageElement(_) => CharFormat::new(),
+            _ => unreachable!(),
         }
     }
 
-    /// Apply a new vhar format on all text fragments of this block
+    /// Apply a new char format on all text fragments of this block
     pub(crate) fn set_char_format(&self, char_format: &CharFormat) {
-        self.ordered_fragments()
+        self.list_all_children()
             .iter()
-            .filter_map(|fragment| match fragment {
-                BlockFragment::TextFragment(text) => Some(text.clone()),
-                BlockFragment::ImageFragment(_) => None,
+            .filter_map(|element| match element {
+                TextElement(text) => Some(text),
+                ImageElement(_) => None,
+                _ => unreachable!(),
             })
-            .for_each(|text_fragment: Rc<Text>| {
+            .for_each(|text_fragment: &Rc<Text>| {
                 text_fragment.set_char_format(&char_format);
             });
+    }
+
+    pub(crate) fn split(&self, position_in_block: usize) -> Result<Rc<Block>, ModelError> {
+        
+        let element_manager = self
+            .element_manager
+            .upgrade()
+            .unwrap();
+        
+        // create block
+        let new_block = element_manager
+            .insert_new_block(self.uuid(), crate::text_document::InsertMode::After)?;
+
+        // split child element at position 
+
+        let sub_element = match self.find_element(position_in_block) {
+            Some(element) => element,
+            None => todo!(),
+        };
+
+
+
+        let new_text_after_text_split = match sub_element {
+            TextElement(text) => text.split(self.convert_position_from_block_to_child(position_in_block)),
+            ImageElement(image) => TextElement(element_manager.insert_new_text(image.uuid(), crate::text_document::InsertMode::After)?),
+            _ => unreachable!()
+        };
+
+        // move fragments from one block to another
+        let all_children_list = self.list_all_children();
+        let mut child_list: Vec<&Element> = all_children_list.iter()
+        .skip_while(|element| element.uuid() != new_text_after_text_split.uuid()).collect();
+        child_list.reverse();
+
+        for child in child_list {
+             element_manager.move_while_changing_parent(child.uuid(), new_block.uuid())?;
+       
+        }
+
+        Ok(new_block)
+
     }
 
     fn analyse_for_merges(&self) {
         todo!()
     }
 
-    fn merge_text_fragments(
+    fn merge_text_elements(
         &self,
         first_text_fragment: Rc<Text>,
         second_text_fragment: Rc<Text>,
@@ -227,126 +314,42 @@ impl Block {
     }
 
     /// returns the plain text of this block
-    pub fn plain_text(&self) ->String {
-        let texts: Vec<String> = self.ordered_fragments()
+    pub fn plain_text(&self) -> String {
+        let texts: Vec<String> = self
+            .list_all_children()
             .iter()
-            .map(|fragment|  { match fragment {
-                BlockFragment::TextFragment(text_rc) => text_rc.text(),
-                BlockFragment::ImageFragment(image_rc) => image_rc.text(),
-            }}).collect();
-            texts.join("")
-
+            .map(|fragment| match fragment {
+                TextElement(text_rc) => text_rc.plain_text().to_string(),
+                ImageElement(image_rc) => image_rc.text().to_string(),
+                _ => unreachable!(),
+            })
+            .collect();
+        texts.join("")
     }
 
-    pub(crate) fn remove_between_positions(&self, position_in_block: usize, anchor_position_in_block: usize){
+    pub(crate) fn remove_between_positions(
+        &self,
+        position_in_block: usize,
+        anchor_position_in_block: usize,
+    ) {
+    }
+}
 
+impl ElementTrait for Block {
+    fn uuid(&self) -> usize {
+        self.uuid.get()
     }
 
-}
+    fn set_uuid(&self, uuid: usize) {
+        self.uuid.set(uuid);
+    }
 
-trait Fragment {
-    fn create_fragment(uuid: usize) -> BlockFragment;
-    fn len(&self) -> usize;
-    fn uuid(&self) -> usize;
-}
-
-#[derive(Default, Clone, PartialEq)]
-pub struct Text {
-    uuid: usize,
-    pub(self) text: RefCell<String>,
-    char_format: RefCell<CharFormat>,
-}
-
-impl Text {
-    pub(crate) fn new(uuid: usize) -> Self {
-        Text {
-            uuid,
-            ..Default::default()
+    fn verify_rule_with_parent(&self, parent_element: &Element) -> Result<(), ModelError> {
+        match parent_element {
+            Element::FrameElement(_) => Ok(()),
+            Element::BlockElement(_) => Err(ModelError::WrongParent),
+            Element::TextElement(_) => Err(ModelError::WrongParent),
+            Element::ImageElement(_) => Err(ModelError::WrongParent),
         }
     }
-
-    pub(crate) fn char_format(&self) -> CharFormat {
-        self.char_format.borrow().clone()
-    }
-
-    pub(crate) fn set_char_format(&self, char_format: &CharFormat) {
-        self.char_format.replace(char_format.clone());
-    }
-
-    pub fn text(&self) -> String {
-        self.text.borrow().clone()
-    }
-
-    pub(crate) fn set_text(&self, text: String) {
-        self.text.replace(text);
-    }
-}
-
-impl Fragment for Text {
-    fn create_fragment(uuid: usize) -> BlockFragment {
-        BlockFragment::TextFragment(Rc::new(Text::new(uuid)))
-    }
-
-    fn len(&self) -> usize {
-        self.text.borrow().len()
-    }
-
-    fn uuid(&self) -> usize{
-            self.uuid
-    }
-}
-
-#[derive(Default, Clone, PartialEq)]
-pub struct Image {
-    uuid: usize,
-    text: RefCell<String>,
-    image_format: RefCell<ImageFormat>,
-}
-
-impl Image {
-    pub(crate) fn new(uuid: usize) -> Self {
-        Self {
-            uuid,
-            text: RefCell::new(char::from_u32(0xfffc).unwrap().to_string()),
-            ..Default::default()
-        }
-    }
-
-
-    pub(crate) fn image_format(&self) -> ImageFormat {
-        self.image_format.borrow().clone()
-    }
-
-    pub(crate) fn set_image_format(&self, image_format: &ImageFormat) {
-        self.image_format.replace(image_format.clone());
-    }
-
-    pub fn text(&self) -> String {
-        self.text.borrow().clone()
-    }
-
-}
-
-impl Fragment for Image {
-    fn create_fragment(uuid: usize) -> BlockFragment {
-        BlockFragment::ImageFragment(Rc::new(Image::new(uuid)))
-    }
-
-
-    fn len(&self) -> usize {
-        1
-    }
-
-    fn uuid(&self) -> usize{
-            self.uuid
-    }
-
-    
-
-}
-
-#[derive(Clone, PartialEq)]
-pub enum BlockFragment {
-    TextFragment(Rc<Text>),
-    ImageFragment(Rc<Image>),
 }

@@ -15,6 +15,7 @@ Text document structure and management.
 
 [dependencies]
 anyhow = "1.0.57"
+thiserror = "1.0.31"
 
 [dependencies.uuid]
 version = "1.1.1"
