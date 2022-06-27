@@ -9,14 +9,18 @@ use std::borrow::BorrowMut;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::mem;
-use std::ops::Add;
+use std::ops::{Add, Index};
 use std::rc::{Rc, Weak};
 use uuid::Uuid;
+use array_tool::vec::Intersect;
 
 #[cfg(test)]
 use std::{println as info, println as warn};
 
 use thiserror::Error;
+
+
+type ElementUuid = usize;
 
 #[derive(Error, Debug)]
 pub enum ModelError {
@@ -24,6 +28,8 @@ pub enum ModelError {
     ElementNotFound(String),
     #[error("forbidden operation: `{0}`")]
     ForbiddenOperation(String),
+    #[error("Outside text limits in an element")]
+    OutsideElementBounds,
     #[error("wrong parent")]
     WrongParent,
     #[error("unknown error")]
@@ -367,11 +373,22 @@ impl ElementManager {
         new_uuid
     }
 
+    // remove a list of element's uuids. Ignore errors.
     pub(crate) fn remove(&self, uuid_list: Vec<usize>) {
+
+            if uuid_list.contains(&0) {
+                self.clear();
+            }
+            else {
+
         let mut tree_model = self.tree_model.borrow_mut();
         uuid_list
             .iter()
-            .map(|uuid| tree_model.remove_recursively(*uuid));
+            .for_each(|uuid| -> () {tree_model.remove_recursively(*uuid).unwrap_or_default();} );
+
+            }
+
+
     }
 
     /// Give a count of the blocks
@@ -397,6 +414,21 @@ impl ElementManager {
                 _ => None,
             })
             .collect()
+    }
+
+    /// get the common ancestor, typacally a frame. At worst, ancestor is 0, meaning the root frame
+    pub(crate) fn find_common_ancestor(&self, first_element_uuid: usize, second_element_uuid: usize) -> ElementUuid {
+        let tree_model = self.tree_model.borrow();
+        
+        tree_model.find_common_ancestor( first_element_uuid, second_element_uuid) 
+ 
+    }
+    
+    /// get the common ancestor, typacally a frame. At worst, ancestor is 0, meaning the root frame
+    pub(crate) fn find_ancestor_of_first_which_is_sibling_of_second(&self, first_element_uuid: ElementUuid, second_element_uuid: ElementUuid) -> Option<ElementUuid>{
+        let tree_model = self.tree_model.borrow();
+        
+        tree_model.find_ancestor_of_first_which_is_sibling_of_second( first_element_uuid, second_element_uuid) 
     }
 
     pub(crate) fn root_frame(&self) -> Rc<Frame> {
@@ -457,6 +489,11 @@ impl ElementManager {
         }
     }
 
+    pub(crate) fn get_level(&self, uuid: usize) -> usize {
+        let tree_model = self.tree_model.borrow();
+        tree_model.get_level(uuid)
+    }
+
     pub(crate) fn next_element(&self, uuid: usize) -> Option<Element> {
         let tree_model = self.tree_model.borrow();
         match tree_model
@@ -505,15 +542,19 @@ impl ElementManager {
             None => None,
         }
     }
+
+    /// list recursively all elements having uuid as their common ancestor
     pub(crate) fn list_all_children(&self, uuid: usize) -> Vec<Element> {
-        self.tree_model
-            .borrow()
-            .list_all_children(uuid)
+        let tree_model = self.tree_model.borrow();
+        let children = tree_model.list_all_children(uuid);
+
+        children
             .iter()
             .filter_map(|element_uuid| self.get(*element_uuid))
             .collect()
     }
 
+    /// remove all elements and recreate a combo frame/block/text
     pub(crate) fn clear(&self) {
         {
             let mut tree_model = self.tree_model.borrow_mut();
@@ -524,7 +565,7 @@ impl ElementManager {
     }
 
     pub(self) fn debug_elements(&self) {
-        let mut indent_with_string = Vec::new();
+        let mut indent_with_string = vec![(0, "------------\n".to_string())];
 
         println!("debug_elements");
         let tree_model = self.tree_model.borrow();
@@ -580,13 +621,14 @@ impl ElementManager {
         self.element_change_callbacks.borrow_mut().push(callback);
     }
 
-    pub(crate) fn move_while_changing_parent(&self, uuid_to_move: usize, new_parent_uuid: usize) -> Result<(), ModelError>{
+    pub(crate) fn move_while_changing_parent(
+        &self,
+        uuid_to_move: usize,
+        new_parent_uuid: usize,
+    ) -> Result<(), ModelError> {
         let mut tree_model = self.tree_model.borrow_mut();
         tree_model.move_while_changing_parent(uuid_to_move, new_parent_uuid)
-
-  
     }
-
 }
 
 #[derive(Default, PartialEq, Clone)]
@@ -682,9 +724,28 @@ impl TreeModel {
             None => unreachable!(),
         };
 
-        let safe_sort_order = match self.get_sort_order(sibling_uuid) {
-            Some(sort_order) => sort_order + 1,
-            None => unreachable!(),
+        // determine safe sort order
+
+        let safe_sort_order = match self.get_next_sibling(sibling_uuid) {
+            Some(next_sibling_id) => match self.get_sort_order(next_sibling_id) {
+                Some(sort_order) => sort_order - 1,
+                None => unreachable!(),
+            },
+            // get next parent element or one of the grand parent
+            None => {
+                let parent_level = self.get_level(parent_uuid);
+                let next_items: Vec<(&usize, &usize)> = self
+                    .order_with_id_map
+                    .iter()
+                    .skip_while(|(_order, id)| parent_uuid != **id)
+                    .skip_while(|(_order, id)| self.get_level(**id) >= parent_level)
+                    .collect();
+                match next_items.first() {
+                    Some(item) => item.0 - 1,
+                    // extreme bottom of the tree
+                    None => usize::MAX - Self::STEP,
+                }
+            }
         };
 
         let new_uuid = self.get_new_uuid();
@@ -732,8 +793,8 @@ impl TreeModel {
         self.child_id_with_parent_id_hash
             .insert(new_uuid, parent_uuid);
 
-            self.recalculate_sort_order();
-            Ok(new_uuid)
+        self.recalculate_sort_order();
+        Ok(new_uuid)
     }
 
     /// insert add child of parent uuid, returns uuid of new element
@@ -774,8 +835,8 @@ impl TreeModel {
         self.child_id_with_parent_id_hash
             .insert(new_uuid, parent_uuid);
 
-            self.recalculate_sort_order();
-            Ok(new_uuid)
+        self.recalculate_sort_order();
+        Ok(new_uuid)
     }
 
     fn get_next_sibling(&self, uuid: usize) -> Option<usize> {
@@ -792,6 +853,10 @@ impl TreeModel {
                 }
             })
             .collect();
+
+        if siblings.is_empty() {
+            return None;
+        }
 
         let next_sibling = self
             .order_with_id_map
@@ -821,6 +886,11 @@ impl TreeModel {
     }
 
     fn get_parent_uuid(&self, uuid: usize) -> Option<usize> {
+        // exception for root
+        if uuid == 0 {
+            return None;
+        }
+
         self.child_id_with_parent_id_hash.get(&uuid).copied()
     }
 
@@ -840,31 +910,131 @@ impl TreeModel {
         level
     }
 
-    /// set a new parent and change order so the element is under the new parent
-    pub(self) fn move_while_changing_parent(&mut self, uuid_to_move: usize, new_parent_uuid: usize) -> Result<(), ModelError>{
+    /// get the common ancestor, typacally a frame. At worst, ancestor is 0, meaning the root frame
+    pub(self) fn find_ancestor_of_first_which_is_sibling_of_second(&self, first_element_uuid: ElementUuid, second_element_uuid: ElementUuid) -> Option<ElementUuid>{
 
-        // change parent
-        self.child_id_with_parent_id_hash.iter_mut().find_map(|(child_id, parent_id)| if *child_id == uuid_to_move {
-            *parent_id = new_parent_uuid;
-            Some(parent_id)
+        let mut ancestors_of_first_element: Vec<usize> = Vec::new();
+
+        let mut child_id = first_element_uuid;
+
+        // find ancestors for first
+        while let Some(&parent_id) = self.child_id_with_parent_id_hash.get(&child_id) {
+            if child_id == 0 {
+                break;
+            }
+            ancestors_of_first_element.push(parent_id);
+
+            child_id = parent_id;
         }
-    else 
-    {None}
-    );
 
-    // change order
 
-    let old_order = *self.order_with_id_map.iter()
-    .find(|(&_order, &iter_uuid)| iter_uuid == uuid_to_move).ok_or(ModelError::ElementNotFound("parent not found".to_string()))?.0;
-    
-    let new_order = self.order_with_id_map.iter()
-    .find(|(&_order, &iter_uuid)| iter_uuid == new_parent_uuid).ok_or(ModelError::ElementNotFound("parent not found".to_string()))?.0 + 1;
+        // compare and get the ancestor
+        
+        let second_element_all_siblings = self.get_all_siblings(second_element_uuid);
 
-    self.order_with_id_map.remove(&old_order);
+        let sibling = ancestors_of_first_element.intersect(second_element_all_siblings);
 
-    self.order_with_id_map.insert(new_order, uuid_to_move);
+        match sibling.first() {
+            Some(sib) => Some(sib.clone()),
+            None => None,
+        }
+    }
 
-    self.recalculate_sort_order();
+
+    pub(self) fn get_all_siblings(&self, uuid: ElementUuid) -> Vec<ElementUuid> {
+
+
+        let parent_uuid = match self.get_parent_uuid(uuid) {
+            Some(parent_uuid) => parent_uuid,
+            None => return Vec::new(),
+        };
+
+        self.child_id_with_parent_id_hash.iter().filter_map(| (child_id, parent_id) | match *parent_id == parent_uuid && *child_id != uuid {
+            true => Some(*child_id),
+            false => None,
+        }
+    ).collect()
+    }
+
+    /// get the common ancestor, typacally a frame. At worst, ancestor is 0, meaning the root frame
+    pub(self) fn find_common_ancestor(&self, first_element_uuid: ElementUuid, second_element_uuid: ElementUuid) -> ElementUuid{
+
+        let mut ancestors_of_first_element: Vec<usize> = Vec::new();
+
+        let mut child_id = first_element_uuid;
+
+        // find ancestors for first
+        while let Some(&parent_id) = self.child_id_with_parent_id_hash.get(&child_id) {
+            if child_id == 0 {
+                break;
+            }
+            ancestors_of_first_element.push(parent_id);
+
+            child_id = parent_id;
+        }
+
+             // find ancestors for second
+        let mut ancestors_of_second_element: Vec<usize> = Vec::new();
+        child_id = second_element_uuid;
+
+         while let Some(&parent_id) = self.child_id_with_parent_id_hash.get(&child_id) {
+            if child_id == 0 {
+                break;
+            }
+            ancestors_of_second_element.push(parent_id);
+
+            child_id = parent_id;
+        }
+
+        // compare and get the ancestor
+        
+        let common_ancestors = ancestors_of_first_element.intersect(ancestors_of_second_element);
+
+        common_ancestors.first().unwrap().clone()
+        
+    }
+
+
+    /// set a new parent and change order so the element is under the new parent
+    pub(self) fn move_while_changing_parent(
+        &mut self,
+        uuid_to_move: usize,
+        new_parent_uuid: usize,
+    ) -> Result<(), ModelError> {
+        // change parent
+        self.child_id_with_parent_id_hash
+            .iter_mut()
+            .find_map(|(child_id, parent_id)| {
+                if *child_id == uuid_to_move {
+                    *parent_id = new_parent_uuid;
+                    Some(parent_id)
+                } else {
+                    None
+                }
+            });
+
+        // change order
+
+        let old_order = *self
+            .order_with_id_map
+            .iter()
+            .find(|(&_order, &iter_uuid)| iter_uuid == uuid_to_move)
+            .ok_or(ModelError::ElementNotFound("parent not found".to_string()))?
+            .0;
+
+        let new_order = self
+            .order_with_id_map
+            .iter()
+            .find(|(&_order, &iter_uuid)| iter_uuid == new_parent_uuid)
+            .ok_or(ModelError::ElementNotFound("parent not found".to_string()))?
+            .0
+            + 1;
+
+        self.order_with_id_map.remove(&old_order);
+
+        self.order_with_id_map.insert(new_order, uuid_to_move);
+
+        self.recalculate_sort_order();
 
         Ok(())
     }
@@ -966,4 +1136,88 @@ pub(crate) trait ElementTrait {
     fn uuid(&self) -> usize;
     fn set_uuid(&self, uuid: usize);
     fn verify_rule_with_parent(&self, parent_element: &Element) -> Result<(), ModelError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_all_children() {
+        let document = TextDocument::new();
+        document.print_debug_elements();
+
+        let children = document.element_manager.list_all_children(0);
+
+        assert_eq!(children.len(), 2);
+
+        let children = document.element_manager.list_all_children(1);
+        assert_eq!(children.len(), 1);
+    }
+
+
+    #[test]
+    fn insert_new_block_as_child() {
+        let document = TextDocument::new();
+        document.print_debug_elements();
+
+        // insert at the end of the tree
+        document
+            .element_manager
+            .insert_new_block(0, InsertMode::AsChild)
+            .expect("Insertion failed");
+        document.print_debug_elements();
+        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 3);
+
+        let children = document.element_manager.list_all_children(0);
+        assert_eq!(children.len(), 3);
+
+    }
+
+    #[test]
+    fn insert_new_block_before() {
+        let document = TextDocument::new();
+        document.print_debug_elements();
+
+        // insert at the end of the tree
+        document
+            .element_manager
+            .insert_new_block(1, InsertMode::Before)
+            .expect("Insertion failed");
+        document.print_debug_elements();
+        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 1);
+
+        let children = document.element_manager.list_all_children(0);
+        assert_eq!(children.len(), 3);
+
+    }
+
+    #[test]
+    fn insert_new_block_after() {
+        let document = TextDocument::new();
+        document.print_debug_elements();
+
+        // insert at the end of the tree
+        document
+            .element_manager
+            .insert_new_block(1, InsertMode::After)
+            .expect("Insertion failed");
+        document.print_debug_elements();
+        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 3);
+
+        let children = document.element_manager.list_all_children(0);
+        assert_eq!(children.len(), 3);
+
+        
+         // insert when one next sibling already exists
+         document
+            .element_manager
+            .insert_new_block(1, InsertMode::After)
+            .expect("Insertion failed");
+        document.print_debug_elements();
+        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 3);
+
+        let children = document.element_manager.list_all_children(0);
+        assert_eq!(children.len(), 4);
+    }
 }

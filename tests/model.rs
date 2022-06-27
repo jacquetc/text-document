@@ -32,13 +32,15 @@ fn get_next_sibling() {
 #[test]
 fn cursor_insert_block() {
     let document = TextDocument::new();
+    document.print_debug_elements();
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::KeepAnchor);
 
 
-    cursor.insert_block(BlockFormat::new());
-    
+    cursor.insert_block(BlockFormat::new()).expect("Testing block insertion");
+    document.print_debug_elements();
+
     assert_eq!(document.block_count(), 2);
 }
 
@@ -50,7 +52,8 @@ fn cursor_insert_plain_text() {
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::KeepAnchor);
     cursor.insert_plain_text("\nplain_text\ntest");
-    
+    document.print_debug_elements();
+ 
     assert_eq!(document.block_count(), 3);
 }
 

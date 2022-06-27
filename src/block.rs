@@ -147,6 +147,8 @@ impl Block {
     fn find_element(&self, position_in_block: usize) -> Option<Element> {
         let mut position = 0;
 
+        let children = self.list_all_children();
+
         for child in self.list_all_children() {
             // returns first element if cursor is at first postion
             if position_in_block == 0 {
@@ -269,12 +271,7 @@ impl Block {
 
         // split child element at position 
 
-        let sub_element = match self.find_element(position_in_block) {
-            Some(element) => element,
-            None => todo!(),
-        };
-
-
+        let sub_element = self.find_element(position_in_block).ok_or(ModelError::ElementNotFound("sub element not found".to_string()))?;
 
         let new_text_after_text_split = match sub_element {
             TextElement(text) => text.split(self.convert_position_from_block_to_child(position_in_block)),
@@ -331,7 +328,73 @@ impl Block {
         &self,
         position_in_block: usize,
         anchor_position_in_block: usize,
-    ) {
+    ) -> Result<(), ModelError> {
+
+        let left_position = position_in_block.min(anchor_position_in_block);
+        let right_position = anchor_position_in_block.max(position_in_block);
+
+        let left_element = self.find_element(left_position).ok_or(ModelError::ElementNotFound("left_element not found".to_string()))?;
+        let right_element = self.find_element(right_position).ok_or(ModelError::ElementNotFound("right_element not found".to_string()))?;
+
+        // if same element targeted
+        if left_element == right_element {
+            match left_element {
+
+                TextElement(text) => {
+                    let left_position_in_child = self.convert_position_from_block_to_child(left_position);
+                    let right_position_in_child = self.convert_position_from_block_to_child(right_position);
+                    text.remove_text(left_position_in_child, right_position_in_child)?;
+                } ,
+                // nothing to remove since image length is 1 
+                ImageElement(_) => return Ok(()),
+                _ => unreachable!()
+            }
+        
+        }
+        // if different elements
+else {
+
+    let element_manager = self
+    .element_manager
+    .upgrade()
+    .unwrap();
+
+
+    // remove end part of first element
+    match &left_element {
+
+        TextElement(text) => {
+            let left_position_in_child = self.convert_position_from_block_to_child(left_position);
+            let right_position_in_child = text.len();
+            text.remove_text(left_position_in_child, right_position_in_child)?;
+        } ,
+        // nothing to remove since image length is 1 
+        ImageElement(_) => return Ok(()),
+        _ => unreachable!()
+    }
+
+        // remove first part of last element
+        match &right_element {
+
+            TextElement(text) => {
+                let left_position_in_child = 0;
+                let right_position_in_child = self.convert_position_from_block_to_child(right_position);
+                text.remove_text(left_position_in_child, right_position_in_child)?;
+            } ,
+            // remove completely  since image length is 1 
+            ImageElement(image) => element_manager.remove(vec![image.uuid()]),
+            _ => unreachable!()
+        }
+
+        // remove all elements in between
+
+        element_manager.remove(self.list_all_children().iter().skip_while(|element| element.uuid() != left_element.uuid()).skip(1).take_while(|element| element.uuid() != right_element.uuid()).map(|element | element.uuid()).collect())
+
+}
+        
+
+
+        Ok(())
     }
 }
 
@@ -353,3 +416,4 @@ impl ElementTrait for Block {
         }
     }
 }
+

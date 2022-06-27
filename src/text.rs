@@ -67,6 +67,19 @@ impl Text {
         new_element
     }
 
+    pub(crate) fn remove_text(&self, left_position_in_text: usize, right_position_in_text: usize) -> Result<(), ModelError> {
+        let mut text = self.plain_text();
+
+        if left_position_in_text > text.len() || right_position_in_text > text.len() {
+            return Err(ModelError::OutsideElementBounds);
+        }
+
+        text.replace_range((left_position_in_text .. right_position_in_text ), "");
+        self.set_text(&text);
+
+        Ok(())
+
+    }
 
     pub fn len(&self) -> usize {
         self.text.borrow().len()
