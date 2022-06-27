@@ -564,6 +564,30 @@ impl ElementManager {
         ElementManager::create_root_frame(self.self_weak.borrow().upgrade().unwrap());
     }
 
+    pub(crate) fn fill_empty_frames(&self) {
+
+        // find empy frames
+        let mut tree_model = self.tree_model.borrow();
+        let empty_frames: Vec<ElementUuid> = tree_model.iter()
+        .filter_map(| element | match element {
+            FrameElement(frame) => if !tree_model.has_children(frame.uuid()) {
+                Some(frame.uuid())
+            }
+            else{
+                None
+            } ,
+            _ => None,
+        } ).collect();
+
+        // fill these frames
+        for frame_uuid in empty_frames {
+
+            let block = self.insert_new_block(frame_uuid, InsertMode::AsChild).unwrap();
+            self.insert_new_text(block.uuid(), InsertMode::AsChild);
+        }
+
+    }
+
     pub(self) fn debug_elements(&self) {
         let mut indent_with_string = vec![(0, "------------\n".to_string())];
 
@@ -1063,6 +1087,19 @@ impl TreeModel {
         self.order_with_id_map.clear();
         self.id_with_element_hash.clear();
         self.id_counter = 0;
+    }
+
+    pub(crate) fn has_children(&self, uuid: ElementUuid) -> bool {
+
+        let level = self.get_level(uuid);
+
+      match self
+            .order_with_id_map
+            .iter()
+            .skip_while(|(&order, &iter_uuid)| iter_uuid != uuid).skip(1).next() {
+                Some((order, id)) => level < self.get_level(*id),
+                None => false,
+            }
     }
 }
 

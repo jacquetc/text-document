@@ -179,7 +179,8 @@ impl Block {
                     &plain_text.to_string(),
                 ),
                 ImageElement(_) => {
-                    let new_text_element = self.insert_text_element(position_in_block);
+                    let new_text_rc = self.insert_text_element(position_in_block);
+                    new_text_rc.set_text(&plain_text.to_string())
                 }
                 _ => unreachable!(),
             },
@@ -187,7 +188,7 @@ impl Block {
         }
     }
 
-    fn insert_text_element(&self, position_in_block: usize) -> Element {
+    fn insert_text_element(&self, position_in_block: usize) -> Rc<Text> {
         match self.find_element(position_in_block) {
             Some(element) => match element {
                 TextElement(text_rc) => {
@@ -198,14 +199,14 @@ impl Block {
                     let element_manager = self.element_manager.upgrade().unwrap();
                     let new_text_rc = element_manager
                         .insert_new_text(text_rc.uuid(), crate::text_document::InsertMode::After);
-                    element_manager.get(new_text_rc.unwrap().uuid()).unwrap()
+                    new_text_rc.unwrap()
                 }
                 ImageElement(_) => {
                     // add text after
                     let element_manager = self.element_manager.upgrade().unwrap();
                     let new_text_rc = element_manager
                         .insert_new_text(element.uuid(), crate::text_document::InsertMode::After);
-                    element_manager.get(new_text_rc.unwrap().uuid()).unwrap()
+                    new_text_rc.unwrap()
                 }
                 _ => unreachable!(),
             },
@@ -218,7 +219,7 @@ impl Block {
         self.insert_plain_text(plain_text, 0);
     }
 
-    /// helper function to clear all children of this block
+    /// helper function to clear all children of this block. Create a new empty text element.
     pub(crate) fn clear(&self) {
         let element_manager = self.element_manager.upgrade().unwrap();
         let children = self
@@ -228,6 +229,8 @@ impl Block {
             .collect();
 
         element_manager.remove(children);
+
+        element_manager.insert_new_text(self.uuid(), crate::text_document::InsertMode::AsChild);
     }
 
     pub(crate) fn list_all_children(&self) -> Vec<Element> {
@@ -259,55 +262,77 @@ impl Block {
     }
 
     pub(crate) fn split(&self, position_in_block: usize) -> Result<Rc<Block>, ModelError> {
-        
-        let element_manager = self
-            .element_manager
-            .upgrade()
-            .unwrap();
-        
+        let element_manager = self.element_manager.upgrade().unwrap();
+
         // create block
         let new_block = element_manager
             .insert_new_block(self.uuid(), crate::text_document::InsertMode::After)?;
 
-        // split child element at position 
+        // split child element at position
 
-        let sub_element = self.find_element(position_in_block).ok_or(ModelError::ElementNotFound("sub element not found".to_string()))?;
+        let sub_element =
+            self.find_element(position_in_block)
+                .ok_or(ModelError::ElementNotFound(
+                    "sub element not found".to_string(),
+                ))?;
 
         let new_text_after_text_split = match sub_element {
-            TextElement(text) => text.split(self.convert_position_from_block_to_child(position_in_block)),
-            ImageElement(image) => TextElement(element_manager.insert_new_text(image.uuid(), crate::text_document::InsertMode::After)?),
-            _ => unreachable!()
+            TextElement(text) => {
+                text.split(self.convert_position_from_block_to_child(position_in_block))
+            }
+            ImageElement(image) => TextElement(
+                element_manager
+                    .insert_new_text(image.uuid(), crate::text_document::InsertMode::After)?,
+            ),
+            _ => unreachable!(),
         };
 
         // move fragments from one block to another
         let all_children_list = self.list_all_children();
-        let mut child_list: Vec<&Element> = all_children_list.iter()
-        .skip_while(|element| element.uuid() != new_text_after_text_split.uuid()).collect();
+        let mut child_list: Vec<&Element> = all_children_list
+            .iter()
+            .skip_while(|element| element.uuid() != new_text_after_text_split.uuid())
+            .collect();
         child_list.reverse();
 
         for child in child_list {
-             element_manager.move_while_changing_parent(child.uuid(), new_block.uuid())?;
-       
+            element_manager.move_while_changing_parent(child.uuid(), new_block.uuid())?;
         }
 
         Ok(new_block)
-
     }
 
     fn analyse_for_merges(&self) {
-        todo!()
+        let children = self.list_all_children();
+
+        'first_loop: for _ in 0..children.len() {
+            for w in children.windows(2) {
+                let first_text = match &w[0] {
+                    TextElement(text) => text,
+                    _ => continue,
+                };
+                let second_text = match &w[1] {
+                    TextElement(text) => text,
+                    _ => continue,
+                };
+
+                if first_text.char_format() == second_text.char_format() {
+                    self.merge_text_elements(first_text, second_text);
+                    continue 'first_loop;
+                }
+            }
+        }
+
+        // remove empty text
     }
 
-    fn merge_text_elements(
-        &self,
-        first_text_fragment: Rc<Text>,
-        second_text_fragment: Rc<Text>,
-    ) -> Rc<Text> {
-        todo!()
-    }
+    fn merge_text_elements(&self, first_text_rc: &Rc<Text>, second_text_rc: &Rc<Text>) -> Rc<Text> {
+        first_text_rc
+            .set_text(&(first_text_rc.plain_text() + second_text_rc.plain_text().as_str()));
+        let element_manager = self.element_manager.upgrade().unwrap();
+        element_manager.remove(vec![second_text_rc.uuid()]);
 
-    fn split_text_fragment_at(&self, position_in_block: usize) -> (Rc<Text>, Rc<Text>) {
-        todo!()
+        first_text_rc.clone()
     }
 
     /// returns the plain text of this block
@@ -329,70 +354,79 @@ impl Block {
         position_in_block: usize,
         anchor_position_in_block: usize,
     ) -> Result<(), ModelError> {
-
         let left_position = position_in_block.min(anchor_position_in_block);
         let right_position = anchor_position_in_block.max(position_in_block);
 
-        let left_element = self.find_element(left_position).ok_or(ModelError::ElementNotFound("left_element not found".to_string()))?;
-        let right_element = self.find_element(right_position).ok_or(ModelError::ElementNotFound("right_element not found".to_string()))?;
+        let left_element = self
+            .find_element(left_position)
+            .ok_or(ModelError::ElementNotFound(
+                "left_element not found".to_string(),
+            ))?;
+        let right_element =
+            self.find_element(right_position)
+                .ok_or(ModelError::ElementNotFound(
+                    "right_element not found".to_string(),
+                ))?;
 
         // if same element targeted
         if left_element == right_element {
             match left_element {
-
                 TextElement(text) => {
-                    let left_position_in_child = self.convert_position_from_block_to_child(left_position);
-                    let right_position_in_child = self.convert_position_from_block_to_child(right_position);
+                    let left_position_in_child =
+                        self.convert_position_from_block_to_child(left_position);
+                    let right_position_in_child =
+                        self.convert_position_from_block_to_child(right_position);
                     text.remove_text(left_position_in_child, right_position_in_child)?;
-                } ,
-                // nothing to remove since image length is 1 
+                }
+                // nothing to remove since image length is 1
                 ImageElement(_) => return Ok(()),
-                _ => unreachable!()
+                _ => unreachable!(),
             }
-        
         }
         // if different elements
-else {
+        else {
+            let element_manager = self.element_manager.upgrade().unwrap();
 
-    let element_manager = self
-    .element_manager
-    .upgrade()
-    .unwrap();
+            // remove end part of first element
+            match &left_element {
+                TextElement(text) => {
+                    let left_position_in_child =
+                        self.convert_position_from_block_to_child(left_position);
+                    let right_position_in_child = text.len();
+                    text.remove_text(left_position_in_child, right_position_in_child)?;
+                }
+                // nothing to remove since image length is 1
+                ImageElement(_) => return Ok(()),
+                _ => unreachable!(),
+            }
 
+            // remove first part of last element
+            match &right_element {
+                TextElement(text) => {
+                    let left_position_in_child = 0;
+                    let right_position_in_child =
+                        self.convert_position_from_block_to_child(right_position);
+                    text.remove_text(left_position_in_child, right_position_in_child)?;
+                }
+                // remove completely  since image length is 1
+                ImageElement(image) => element_manager.remove(vec![image.uuid()]),
+                _ => unreachable!(),
+            }
 
-    // remove end part of first element
-    match &left_element {
+            // remove all elements in between
 
-        TextElement(text) => {
-            let left_position_in_child = self.convert_position_from_block_to_child(left_position);
-            let right_position_in_child = text.len();
-            text.remove_text(left_position_in_child, right_position_in_child)?;
-        } ,
-        // nothing to remove since image length is 1 
-        ImageElement(_) => return Ok(()),
-        _ => unreachable!()
-    }
-
-        // remove first part of last element
-        match &right_element {
-
-            TextElement(text) => {
-                let left_position_in_child = 0;
-                let right_position_in_child = self.convert_position_from_block_to_child(right_position);
-                text.remove_text(left_position_in_child, right_position_in_child)?;
-            } ,
-            // remove completely  since image length is 1 
-            ImageElement(image) => element_manager.remove(vec![image.uuid()]),
-            _ => unreachable!()
+            element_manager.remove(
+                self.list_all_children()
+                    .iter()
+                    .skip_while(|element| element.uuid() != left_element.uuid())
+                    .skip(1)
+                    .take_while(|element| element.uuid() != right_element.uuid())
+                    .map(|element| element.uuid())
+                    .collect(),
+            )
         }
 
-        // remove all elements in between
-
-        element_manager.remove(self.list_all_children().iter().skip_while(|element| element.uuid() != left_element.uuid()).skip(1).take_while(|element| element.uuid() != right_element.uuid()).map(|element | element.uuid()).collect())
-
-}
-        
-
+        self.analyse_for_merges();
 
         Ok(())
     }
@@ -416,4 +450,3 @@ impl ElementTrait for Block {
         }
     }
 }
-

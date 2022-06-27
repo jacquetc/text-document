@@ -45,13 +45,15 @@ fn cursor_insert_block() {
 }
 
 
+
 #[test]
 fn cursor_insert_plain_text() {
     let document = TextDocument::new();
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::KeepAnchor);
-    cursor.insert_plain_text("\nplain_text\ntest");
+    cursor.insert_plain_text("\nplain_text");
+    //cursor.insert_plain_text("\nplain_text\ntest");
     document.print_debug_elements();
  
     assert_eq!(document.block_count(), 3);

@@ -102,6 +102,9 @@ impl TextCursor {
 
     /// Insert plain text and return position
     pub fn insert_plain_text<S: Into<String>>(&mut self, plain_text: S) -> usize {
+
+        let plain_text: String = plain_text.into();
+
         // get char format
         let char_format: CharFormat = match self.char_format() {
             Some(char_format) => char_format,
@@ -112,42 +115,44 @@ impl TextCursor {
         let left_position = self.position.min(self.anchor_position);
         let right_position = self.anchor_position.max(self.position);
 
-        if left_position != right_position {
-            self.remove(left_position, right_position, false);
-        }
         let mut new_position = left_position;
-        /*
+        if left_position != right_position {
+            // for now, new_position is wrong, to be implemented
+            new_position = self
+                .remove_with_signal(left_position, right_position, false)
+                .unwrap();
+        }
+
         let mut first_loop = true;
 
-
         let mut block = self
+            .element_manager
             .find_block(new_position)
-            .unwrap_or(self.last_block().unwrap());
-        for text in plain_text.into().split("\n") {
+            .unwrap_or(self.element_manager.last_block().unwrap());
+        for text in plain_text.lines() {
             if first_loop {
-                block.insert_plain_text(
-                    text,
-                    block.convert_position_from_document(new_position),
-                    &char_format,
-                );
+                block.insert_plain_text(text, block.convert_position_from_document(new_position));
 
                 first_loop = false;
             } else {
                 block = self
-                    .self_weak
-                    .upgrade()
-                    .unwrap()
-                    .insert_block_using_position(new_position);
+                    .element_manager
+                    .insert_new_block(block.uuid(), InsertMode::After)
+                    .unwrap();
                 block.set_plain_text(text, &char_format);
                 new_position += 1;
             }
 
             new_position += text.len();
-        } */
+        }
 
         // if send_change_signals {
         //     self.signal_for_cursor_change(position, 0, new_position);
         // }
+
+        // set new cursor position
+        self.position = new_position;
+        self.anchor_position = self.position;
 
         new_position
     }
@@ -160,7 +165,14 @@ impl TextCursor {
 
     /// Remove elements between two positions. Split blocks if needed. Frames in superior level (i.e. children)
     ///  are completely removed even if only a part of it is selected
-    pub(crate) fn remove(
+    ///
+    /// Return new position
+    pub fn remove(&self, position: usize, anchor_position: usize) -> Result<usize, ModelError> {
+        self.remove_with_signal(position, anchor_position, true)
+    }
+
+    /// same as 'remove()' but with signal argument
+    pub(crate) fn remove_with_signal(
         &self,
         position: usize,
         anchor_position: usize,
@@ -182,8 +194,8 @@ impl TextCursor {
                     "bottom block not found".to_string(),
                 ))?;
 
-            let left_position_in_block = top_block.convert_position_from_document(left_position);
-            let right_position_in_block = top_block.convert_position_from_document(right_position);
+        let left_position_in_block = top_block.convert_position_from_document(left_position);
+        let right_position_in_block = top_block.convert_position_from_document(right_position);
         // same block:
         if top_block == bottom_block {
             top_block.remove_between_positions(left_position_in_block, right_position_in_block)?;
@@ -195,7 +207,7 @@ impl TextCursor {
         // determine if any element between top and bottom block is inferior than both, in this case the common ancestor is deleted whole
 
         let min_level = top_block_level.min(bottom_block_level);
-        let has_ancestor_element = self
+        let has_common_ancestor_element = self
             .element_manager
             .list_all_children(0)
             .iter()
@@ -207,72 +219,91 @@ impl TextCursor {
                 level < min_level
             });
 
-        if has_ancestor_element {
+        if has_common_ancestor_element {
             // find this common ancestor
-            let common_ancestor = self.element_manager.find_common_ancestor(top_block.uuid(), bottom_block.uuid());
+            let common_ancestor = self
+                .element_manager
+                .find_common_ancestor(top_block.uuid(), bottom_block.uuid());
             self.element_manager.remove(vec![common_ancestor]);
-
-
         }
         // if top block's level is superior than (is a child of) bottom block
         else if top_block_level > bottom_block_level {
-
-
             bottom_block.remove_between_positions(0, right_position_in_block)?;
 
             //find ancestor which is direct child of bottom_block parent
-            let sibling_ancestor = self.element_manager.find_ancestor_of_first_which_is_sibling_of_second(top_block.uuid(), bottom_block.uuid()).ok_or(ModelError::ElementNotFound(
-                "sibling ancestor not found".to_string(),
-            ))?;
+            let sibling_ancestor = self
+                .element_manager
+                .find_ancestor_of_first_which_is_sibling_of_second(
+                    top_block.uuid(),
+                    bottom_block.uuid(),
+                )
+                .ok_or(ModelError::ElementNotFound(
+                    "sibling ancestor not found".to_string(),
+                ))?;
 
             self.element_manager.remove(vec![sibling_ancestor]);
 
-            
-            self.element_manager.remove(self
-                .element_manager
-                .list_all_children(0)
-                .iter()
-                .skip_while(|element| element.uuid() != top_block.uuid())
-                .skip(1)
-                .take_while(|element| element.uuid() != bottom_block.uuid()).map(|element|  element.uuid()).collect());
-    
-
+            self.element_manager.remove(
+                self.element_manager
+                    .list_all_children(0)
+                    .iter()
+                    .skip_while(|element| element.uuid() != top_block.uuid())
+                    .skip(1)
+                    .take_while(|element| element.uuid() != bottom_block.uuid())
+                    .map(|element| element.uuid())
+                    .collect(),
+            );
         }
         // if bottom block's level is superior than (is a child of) top block
         else if top_block_level < bottom_block_level {
-
             top_block.remove_between_positions(left_position_in_block, top_block.length())?;
 
-            self.element_manager.remove(self
-            .element_manager
-            .list_all_children(0)
-            .iter()
-            .skip_while(|element| element.uuid() != top_block.uuid())
-            .skip(1)
-            .take_while(|element| element.uuid() != bottom_block.uuid()).map(|element|  element.uuid()).collect());
-
-
+            self.element_manager.remove(
+                self.element_manager
+                    .list_all_children(0)
+                    .iter()
+                    .skip_while(|element| element.uuid() != top_block.uuid())
+                    .skip(1)
+                    .take_while(|element| element.uuid() != bottom_block.uuid())
+                    .map(|element| element.uuid())
+                    .collect(),
+            );
         }
         // if bottom block's level is strictly at the same level than top block
         else {
             top_block.remove_between_positions(left_position_in_block, top_block.length())?;
 
-            self.element_manager.remove(self
-                .element_manager
-                .list_all_children(0)
-                .iter()
-                .skip_while(|element| element.uuid() != top_block.uuid())
-                .skip(1)
-                .take_while(|element| element.uuid() != bottom_block.uuid()).map(|element|  element.uuid()).collect());
-    
-    
-            bottom_block.remove_between_positions(0, right_position_in_block)?;
+            self.element_manager.remove(
+                self.element_manager
+                    .list_all_children(0)
+                    .iter()
+                    .skip_while(|element| element.uuid() != top_block.uuid())
+                    .skip(1)
+                    .take_while(|element| element.uuid() != bottom_block.uuid())
+                    .map(|element| element.uuid())
+                    .collect(),
+            );
 
+            bottom_block.remove_between_positions(0, right_position_in_block)?;
         }
 
+        self.element_manager.fill_empty_frames();
 
-        todo!( adapt it to removed )
-        Ok(left_position) 
+        //todo: calculate new position after removal
+        Ok(0)
+    }
+}
+
+/// If the anchor() is kept where it is and the position() is moved, the text in between will be selected.
+#[derive(Clone, Copy, PartialEq)]
+pub enum MoveMode {
+    /// Moves the anchor to the same position as the cursor itself.
+    MoveAnchor,
+    /// Keeps the anchor where it is.
+    KeepAnchor,
+}
+impl Default for MoveMode {
+    fn default() -> Self {
         MoveMode::MoveAnchor
     }
 }
