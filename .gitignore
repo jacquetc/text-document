@@ -17,6 +17,9 @@ Cargo.lock
 /target
 #Cargo.lock
 
+# code coverage
+default.profraw
+
 .vscode
 .idea
 .DS_Store

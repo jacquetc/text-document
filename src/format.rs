@@ -1,7 +1,7 @@
 use crate::font::Font;
 use crate::text_document::Tab;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Format {
     FrameFormat(FrameFormat),
     CharFormat(CharFormat),
@@ -9,7 +9,7 @@ pub enum Format {
     ImageFormat(ImageFormat),
 }
 
-#[derive(Default, Clone, PartialEq)]
+#[derive(Default, Clone, PartialEq, Debug)]
 pub struct FrameFormat {
     pub height: Option<usize>,
     pub width: Option<usize>,
@@ -24,14 +24,14 @@ pub struct FrameFormat {
 
 impl FrameFormat {}
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Position {
     InFlow,
     FloatLeft,
     FloatRight,
 }
 
-#[derive(Default, Clone, PartialEq)]
+#[derive(Default, Clone, PartialEq, Debug)]
 pub struct CharFormat {
     pub anchor_href: Option<String>,
     pub anchor_names: Option<Vec<String>>,
@@ -59,7 +59,7 @@ impl std::ops::Deref for CharFormat {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CharVerticalAlignment {
     AlignNormal,
     AlignSuperScript,
@@ -70,7 +70,7 @@ pub enum CharVerticalAlignment {
     AlignBaseline,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum UnderlineStyle {
     NoUnderline,
     SingleUnderline,
@@ -82,7 +82,7 @@ pub enum UnderlineStyle {
     SpellCheckUnderline,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct BlockFormat {
     pub alignment: Option<Alignment>,
     pub top_margin: Option<usize>,
@@ -121,7 +121,7 @@ impl Default for BlockFormat {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Alignment {
     AlignLeft,
     AlignRight,
@@ -129,14 +129,14 @@ pub enum Alignment {
     AlignJustify,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MarkerType {
     NoMarker,
     Unchecked,
     Checked,
 }
 
-#[derive(Default, Clone, PartialEq)]
+#[derive(Default, Clone, PartialEq, Debug)]
 pub struct ImageFormat {
     char_format: CharFormat,
     pub height: Option<usize>,

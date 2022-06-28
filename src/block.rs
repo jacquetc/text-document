@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::{Rc, Weak};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Block {
     uuid: Cell<usize>,
     element_manager: Weak<ElementManager>,
@@ -230,7 +230,7 @@ impl Block {
 
         element_manager.remove(children);
 
-        element_manager.insert_new_text(self.uuid(), crate::text_document::InsertMode::AsChild);
+        element_manager.insert_new_text(self.uuid(), crate::text_document::InsertMode::AsChild).unwrap();
     }
 
     pub(crate) fn list_all_children(&self) -> Vec<Element> {
@@ -349,6 +349,28 @@ impl Block {
         texts.join("")
     }
 
+    pub(crate) fn plain_text_between_positions(
+        &self,
+        position_in_block: usize,
+        anchor_position_in_block: usize,
+    ) -> String {
+
+        let mut position_in_block = position_in_block;
+        let mut anchor_position_in_block = anchor_position_in_block;
+
+        if position_in_block > self.length(){
+            position_in_block = self.length();
+        }
+        if anchor_position_in_block > self.length(){
+            anchor_position_in_block = self.length();
+        }
+
+        self.plain_text()[position_in_block..anchor_position_in_block].to_string()
+
+    }
+
+
+
     pub(crate) fn remove_between_positions(
         &self,
         position_in_block: usize,
@@ -448,5 +470,69 @@ impl ElementTrait for Block {
             Element::TextElement(_) => Err(ModelError::WrongParent),
             Element::ImageElement(_) => Err(ModelError::WrongParent),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::text_document::InsertMode;
+
+    use super::*;
+
+    #[test]
+    fn list_all_children() {
+        
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let block = element_manager_rc.insert_new_block(0, InsertMode::AsChild).unwrap();
+        let text = element_manager_rc.insert_new_text(block.uuid(), InsertMode::AsChild).unwrap();
+        element_manager_rc.debug_elements();
+        assert_eq!(block.list_all_children(), vec![TextElement(text)]);
+
+    }
+
+    #[test]
+    fn set_plain_text() {
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let block = element_manager_rc.insert_new_block(0, InsertMode::AsChild).unwrap();
+        block.set_plain_text("plain_text", &CharFormat::new());
+        element_manager_rc.debug_elements();
+        assert_eq!(block.plain_text(), "plain_text");
+
+
+    }
+
+    #[test]
+    fn plain_text_between_positions() {
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let block = element_manager_rc.insert_new_block(0, InsertMode::AsChild).unwrap();
+        block.set_plain_text("plain_text", &CharFormat::new());
+
+        assert_eq!(block.plain_text_between_positions(0,1), "p");
+        assert_eq!(block.plain_text_between_positions(2,4), "ai");
+        assert_eq!(block.plain_text_between_positions(0,10), "plain_text");
+    }
+
+    #[test]
+    fn split() {
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let block = element_manager_rc.insert_new_block(0, InsertMode::AsChild).unwrap();
+        block.set_plain_text("plain_text", &CharFormat::new());
+        
+
+        let new_block = block.split(2).unwrap();
+        element_manager_rc.debug_elements();
+        assert_eq!(block.plain_text(), "pl");
+        assert_eq!(new_block.plain_text(), "ain_text");
+
+
     }
 }

@@ -1,4 +1,4 @@
-#[derive(Default, PartialEq, Clone)]
+#[derive(Default, PartialEq, Clone, Debug)]
 pub struct Font {
     pub weight: Option<Weight>,
     pub style: Option<Style>,
@@ -49,7 +49,7 @@ impl Font {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub struct FontSize {
     size_type: SizeType,
     size: usize,
@@ -65,14 +65,14 @@ impl PartialOrd for FontSize {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum SizeType {
     Point,
     Pixel,
 }
 
 pub enum UnderlineStyle {}
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum Capitalisation {
     MixedCase,
     AllUppercase,
@@ -87,7 +87,7 @@ impl Default for Capitalisation {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
 pub enum Style {
     /// Normal glyphs used in unstyled text.
     Normal,
@@ -104,7 +104,7 @@ impl Default for Style {
 }
 
 /// Spacing between letters
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
 pub enum SpacingType {
     /// A value of 100 will keep the spacing unchanged; a value of 200 will enlarge the spacing after a character by the width of the character itself.
     PercentageSpacing,
@@ -119,7 +119,7 @@ impl Default for SpacingType {
 }
 
 /// Predefined font weights. Compatible with OpenType. A weight of 1 will be thin, whilst 1000 will be extremely black.
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
 pub enum Weight {
     Thin = 100,
     ExtraLight = 200,

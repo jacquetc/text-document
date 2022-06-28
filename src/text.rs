@@ -3,7 +3,7 @@ use std::{cell::{RefCell, Cell}, rc::Weak};
 use crate::{format::CharFormat, text_document::{ElementTrait, ElementManager, Element, ModelError}};
 
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Text {
     uuid: Cell<usize>,
     element_manager: Weak<ElementManager>,

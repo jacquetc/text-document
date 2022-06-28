@@ -53,7 +53,7 @@ impl TextCursor {
         let new_block =
             old_block_rc.split(old_block_rc.convert_position_from_document(self.position))?;
 
-        // if new block empty, create empty child text element
+        // if new block empty, create empty child text_line element
 
         if &new_block.list_all_children().len() == &0 {
             self.element_manager
@@ -100,9 +100,8 @@ impl TextCursor {
         }
     }
 
-    /// Insert plain text and return position
+    /// Insert plain text_line and return position
     pub fn insert_plain_text<S: Into<String>>(&mut self, plain_text: S) -> usize {
-
         let plain_text: String = plain_text.into();
 
         // get char format
@@ -129,21 +128,49 @@ impl TextCursor {
             .element_manager
             .find_block(new_position)
             .unwrap_or(self.element_manager.last_block().unwrap());
-        for text in plain_text.lines() {
+
+        let mut other_block_from_split = None;
+
+        let lines = plain_text.split("\n");
+        let mut index = 0;
+
+        let count = lines.clone().count();
+
+        for text_line in lines {
+            // insert on existing targeted block
             if first_loop {
-                block.insert_plain_text(text, block.convert_position_from_document(new_position));
+                let position_in_block = block.convert_position_from_document(new_position);
+
+                // split targeted block
+                if count > 1 {
+                    other_block_from_split = block.split(position_in_block).ok();
+                    new_position += 1;
+                }
+                
+                block.insert_plain_text(text_line, position_in_block);
 
                 first_loop = false;
+            }
+            // insertion of last line at the begining of the second half of the splitted block
+            else if count - 1 == index {
+                match &other_block_from_split {
+                    Some(block) => {
+                        block.insert_plain_text(text_line, 0);
+                    }
+                    None => continue,
+                }
             } else {
+                // new blocks for the rest of the text_line
                 block = self
                     .element_manager
                     .insert_new_block(block.uuid(), InsertMode::After)
                     .unwrap();
-                block.set_plain_text(text, &char_format);
+                block.set_plain_text(text_line, &char_format);
                 new_position += 1;
             }
 
-            new_position += text.len();
+            index += 1;
+            new_position += text_line.len();
         }
 
         // if send_change_signals {
@@ -155,6 +182,44 @@ impl TextCursor {
         self.anchor_position = self.position;
 
         new_position
+    }
+
+    pub fn selected_text(&self) -> String {
+        // fix positions
+        let left_position = self.position.min(self.anchor_position);
+        let right_position = self.anchor_position.max(self.position);
+        if left_position == right_position {
+            return String::new();
+        }
+
+        let top_block = match self.element_manager.find_block(left_position) {
+            Some(block) => block,
+            None => return String::new(),
+        };
+        let bottom_block = match self.element_manager.find_block(right_position) {
+            Some(block) => block,
+            None => return String::new(),
+        };
+
+        let left_position_in_block = top_block.convert_position_from_document(left_position);
+        let right_position_in_block = bottom_block.convert_position_from_document(right_position);
+
+        // same block:
+        if top_block == bottom_block {
+            return top_block
+                .plain_text_between_positions(left_position_in_block, right_position_in_block);
+        }
+        else {
+
+            top_block.plain_text_between_positions(left_position_in_block, top_block.length());
+
+            self.element_manager.list_all_children(0).iter().skip_while(|| )
+        }
+
+
+
+
+        String::new()
     }
 
     pub fn char_format(&self) -> Option<CharFormat> {
@@ -294,7 +359,7 @@ impl TextCursor {
     }
 }
 
-/// If the anchor() is kept where it is and the position() is moved, the text in between will be selected.
+/// If the anchor() is kept where it is and the position() is moved, the text_line in between will be selected.
 #[derive(Clone, Copy, PartialEq)]
 pub enum MoveMode {
     /// Moves the anchor to the same position as the cursor itself.

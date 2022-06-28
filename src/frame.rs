@@ -6,7 +6,7 @@ use crate::text_document::{ElementManager, ElementTrait, Element, ModelError};
 
 use crate::{block::Block, format::FrameFormat};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Frame {
       uuid: Cell<usize>,
   element_manager: Weak<ElementManager>,

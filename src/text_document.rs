@@ -135,21 +135,21 @@ impl TextDocument {
     }
 }
 
-#[derive(Default, PartialEq, Clone)]
+#[derive(Default, PartialEq, Clone, Debug)]
 pub struct TextDocumentOption {
     pub tabs: Vec<Tab>,
     pub text_direction: TextDirection,
     pub wrap_mode: WrapMode,
 }
 
-#[derive(Default, PartialEq, Clone)]
+#[derive(Default, PartialEq, Clone, Debug)]
 pub struct Tab {
     pub position: usize,
     pub tab_type: TabType,
     pub delimiter: char,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum TabType {
     LeftTab,
     RightTab,
@@ -163,7 +163,7 @@ impl Default for TabType {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum TextDirection {
     LeftToRight,
     RightToLeft,
@@ -175,7 +175,7 @@ impl Default for TextDirection {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum WrapMode {
     NoWrap,
     WordWrap,
@@ -195,7 +195,7 @@ pub(crate) enum InsertMode {
     AsChild,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ElementManager {
     self_weak: RefCell<Weak<ElementManager>>,
     cursor_change_callbacks: RefCell<Vec<fn(usize, usize, usize)>>,
@@ -253,7 +253,7 @@ impl ElementManager {
     }
 
     // only used while creating a new document
-    fn create_root_frame(element_manager: Rc<ElementManager>) -> Rc<Frame> {
+    pub(crate) fn create_root_frame(element_manager: Rc<ElementManager>) -> Rc<Frame> {
         let new_frame = Rc::new(Frame::new(Rc::downgrade(&element_manager)));
 
         let new_element = Element::FrameElement(new_frame.clone());
@@ -423,7 +423,7 @@ impl ElementManager {
         tree_model.find_common_ancestor( first_element_uuid, second_element_uuid) 
  
     }
-    
+
     /// get the common ancestor, typacally a frame. At worst, ancestor is 0, meaning the root frame
     pub(crate) fn find_ancestor_of_first_which_is_sibling_of_second(&self, first_element_uuid: ElementUuid, second_element_uuid: ElementUuid) -> Option<ElementUuid>{
         let tree_model = self.tree_model.borrow();
@@ -444,7 +444,7 @@ impl ElementManager {
 
     pub(crate) fn find_block(&self, position: usize) -> Option<Rc<Block>> {
         for rc_block in self.block_list() {
-            if (rc_block.position()..rc_block.end_position()).contains(&position) {
+            if (rc_block.position()..=rc_block.end_position()).contains(&position) {
                 return Some(rc_block);
             }
         }
@@ -588,8 +588,8 @@ impl ElementManager {
 
     }
 
-    pub(self) fn debug_elements(&self) {
-        let mut indent_with_string = vec![(0, "------------\n".to_string())];
+    pub(crate) fn debug_elements(&self) {
+        let mut indent_with_string = vec![(0, 0, 0, "------------\n".to_string())];
 
         println!("debug_elements");
         let tree_model = self.tree_model.borrow();
@@ -597,23 +597,23 @@ impl ElementManager {
         tree_model.iter().for_each(|element| {
             match element {
                 FrameElement(frame) => indent_with_string
-                    .push((tree_model.get_level(frame.uuid()), "frame".to_string())),
+                    .push((tree_model.get_level(frame.uuid()), frame.uuid(), tree_model.get_sort_order(frame.uuid()).unwrap(), "frame".to_string())),
                 BlockElement(block) => indent_with_string.push((
-                    tree_model.get_level(block.uuid()),
+                    tree_model.get_level(block.uuid()), block.uuid(), tree_model.get_sort_order(block.uuid()).unwrap(),
                     "block ".to_string() + &block.plain_text(),
                 )),
                 Element::TextElement(text) => indent_with_string.push((
-                    tree_model.get_level(text.uuid()),
+                    tree_model.get_level(text.uuid()), text.uuid(), tree_model.get_sort_order(text.uuid()).unwrap(),
                     "text ".to_string() + &text.plain_text().to_string(),
                 )),
                 Element::ImageElement(image) => indent_with_string
-                    .push((tree_model.get_level(image.uuid()), "[image]".to_string())),
+                    .push((tree_model.get_level(image.uuid()), image.uuid(), tree_model.get_sort_order(image.uuid()).unwrap(),"[image]".to_string())),
             };
         });
 
         indent_with_string
             .iter()
-            .for_each(|(indent, string)| println!("{}{}", " ".repeat(*indent), string.as_str()));
+            .for_each(|(indent, uuid, sort_order, string)| println!("{}{} {} \'{}\'", " ".repeat(*indent), *uuid, *sort_order, string.as_str()));
     }
 
     pub(self) fn signal_for_cursor_change(
@@ -655,7 +655,7 @@ impl ElementManager {
     }
 }
 
-#[derive(Default, PartialEq, Clone)]
+#[derive(Default, PartialEq, Clone, Debug)]
 struct TreeModel {
     id_with_element_hash: HashMap<usize, Element>,
     order_with_id_map: BTreeMap<usize, usize>,
@@ -885,15 +885,40 @@ impl TreeModel {
         let next_sibling = self
             .order_with_id_map
             .iter()
+            .skip_while(|(_order, id)| *id != &uuid)
+            .skip(1)
             .find(|(_order, id)| siblings.contains(&id))?;
 
         Some(next_sibling.1.to_owned())
     }
 
-    pub(self) fn swap(&mut self, uuid: usize, mut element: Element) {}
+    pub(self) fn swap(&mut self, uuid: ElementUuid, mut element: Element) {}
 
-    pub(self) fn remove_recursively(&mut self, uuid: usize) -> Result<Vec<usize>, ModelError> {
-        todo!()
+    pub(self) fn remove_recursively(&mut self, uuid: ElementUuid) -> Result<Vec<ElementUuid>, ModelError> {
+
+        let mut uuids_to_remove = self.list_all_children(uuid);
+        uuids_to_remove.push(uuid);
+
+        for element_uuid in &uuids_to_remove {
+            self.remove(*element_uuid)?;
+        }
+
+
+
+        Ok(uuids_to_remove)
+        
+    }
+
+    fn remove(&mut self, uuid: ElementUuid) -> Result<ElementUuid, ModelError> {
+        let id = self.order_with_id_map.remove_entry(&self.get_sort_order(uuid).ok_or(ModelError::ElementNotFound(uuid.to_string()))?).ok_or(ModelError::ElementNotFound(uuid.to_string()))?.1;
+
+
+        self.child_id_with_parent_id_hash.remove_entry(&uuid).ok_or(ModelError::ElementNotFound(uuid.to_string()))?;
+
+        self.id_with_element_hash.remove_entry(&uuid).ok_or(ModelError::ElementNotFound(uuid.to_string()))?;
+
+        Ok(id)
+        
     }
 
     pub(self) fn list_all_children(&self, uuid: usize) -> Vec<usize> {
@@ -1132,7 +1157,7 @@ impl<'a> Iterator for TreeIter<'a> {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Element {
     FrameElement(Rc<Frame>),
     BlockElement(Rc<Block>),
@@ -1175,8 +1200,19 @@ pub(crate) trait ElementTrait {
     fn verify_rule_with_parent(&self, parent_element: &Element) -> Result<(), ModelError>;
 }
 
+
 #[cfg(test)]
-mod tests {
+mod tree_model_tests {
+    use super::*;
+
+    
+    #[test]
+    fn add() {
+    }
+}
+
+#[cfg(test)]
+mod document_tests {
     use super::*;
 
     #[test]
