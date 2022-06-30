@@ -44,9 +44,14 @@ impl Font {
         }
     }
 
-    pub fn to_string(&self) -> String {
-        "".to_string()
-    }
+    // pub fn to_string(&self) -> String {
+    //     "".to_string()
+    // }
+
+    // pub fn from_string(&self, string: &String) -> Result<(), FontError>{
+
+    // }
+
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
