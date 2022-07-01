@@ -183,15 +183,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@master
-    - name: Install Rust nightly components
-      uses: actions-rs/toolchain@v1
+    - uses: actions-rs/toolchain@v1
       with:
-        profile: minimal
         toolchain: nightly
-        components: llvm-tools-preview
         override: true
+        components: llvm-tools-preview
+    - uses: taiki-e/install-action@cargo-llvm-cov
+    - uses: taiki-e/install-action@nextest
+    - name: Collect coverage data
+      run: cargo llvm-cov nextest --json --output-path=./coverage.json
     - uses: codecov/codecov-action@v3
       with:
         token: ${{secrets.CODECOV_TOKEN}}
+        files: ./coverage.json
         fail_ci_if_error: true # optional (default = false)
         verbose: true # optional (default = false)
