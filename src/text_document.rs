@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
 use uuid::Uuid;
 
-#[cfg(test)]
-use std::{println as info, println as warn};
+//#[cfg(test)]
+//use std::{println as info, println as warn};
 
 use thiserror::Error;
 
@@ -22,6 +22,12 @@ pub struct TextDocument {
     //formats: Vec<Format>,
     element_manager: Rc<ElementManager>,
     uuid: Uuid,
+}
+
+impl Default for TextDocument {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TextDocument {
@@ -66,10 +72,9 @@ impl TextDocument {
     }
 
     pub fn find_block(&self, position: usize) -> Option<Weak<Block>> {
-        match self.element_manager.find_block(position) {
-            Some(block) => Some(Rc::downgrade(&block)),
-            None => None,
-        }
+        self.element_manager
+            .find_block(position)
+            .map(|block| Rc::downgrade(&block))
     }
 
     pub fn first_block(&self) -> Weak<Block> {
@@ -95,7 +100,7 @@ impl TextDocument {
 
         let frame = self.element_manager.create_empty_root_frame();
 
-        for text in plain_text.split("\n") {
+        for text in plain_text.split('\n') {
             let block = self
                 .element_manager
                 .insert_new_block(frame.uuid(), InsertMode::AsChild)?;
@@ -123,14 +128,12 @@ impl TextDocument {
             .list_all_children(0)
             .iter()
             .filter_map(|element| match element {
-                BlockElement(block) => Some(block.plain_text().to_string()),
+                BlockElement(block) => Some(block.plain_text()),
                 _ => None,
             })
             .for_each(|string| string_list.push(string));
 
-        let final_string = string_list.join("\n");
-
-        final_string
+        string_list.join("\n")
     }
 
     /// Remove all elements and build a minimal set of element: a Frame, a Block and its empty Text
@@ -221,11 +224,14 @@ pub(crate) enum InsertMode {
     AsChild,
 }
 
+type ElementChangeCallbacks = RefCell<Vec<fn(Element, ChangeReason)>>;
+type TextChangeCallbacks = RefCell<Vec<fn(usize, usize, usize)>>;
+
 #[derive(Clone, Debug)]
 pub(crate) struct ElementManager {
     self_weak: RefCell<Weak<ElementManager>>,
-    text_change_callbacks: RefCell<Vec<fn(usize, usize, usize)>>,
-    element_change_callbacks: RefCell<Vec<fn(Element, ChangeReason)>>,
+    text_change_callbacks: TextChangeCallbacks,
+    element_change_callbacks: ElementChangeCallbacks,
     tree_model: RefCell<TreeModel>,
 }
 
@@ -246,36 +252,6 @@ impl ElementManager {
         let new_self_weak = RefCell::new(Rc::downgrade(&rc));
         rc.self_weak.swap(&new_self_weak);
         rc
-    }
-
-    /// Create and insert a new frame after a block of a frame, as a child of this frame.
-    pub(crate) fn insert_frame_using_position(
-        &self,
-        position: usize,
-    ) -> Result<Rc<Frame>, ModelError> {
-        // find reference block
-        let block_rc = self
-            .find_block(position)
-            .unwrap_or(self.last_block().unwrap());
-
-        let block_uuid = block_rc.uuid();
-
-        // determine new order
-        let new_order = self
-            .get_element_order(BlockElement(block_rc.clone()))
-            .unwrap_or(1);
-
-        // find reference block's parent id
-        let parent_frame = self
-            .get_parent_frame(&BlockElement(block_rc))
-            .unwrap_or(self.root_frame());
-        let parent_uuid = parent_frame.uuid();
-
-        // create frame
-        let new_frame = self.insert_new_frame(block_uuid, InsertMode::After);
-
-        todo!("wrong");
-        new_frame
     }
 
     // only used while creating a new document
@@ -301,7 +277,9 @@ impl ElementManager {
 
         let new_text_element = Element::TextElement(new_text);
 
-        tree_model.insert_as_child(block_uuid, new_text_element);
+        tree_model
+            .insert_as_child(block_uuid, new_text_element)
+            .unwrap();
 
         tree_model.recalculate_sort_order();
 
@@ -340,6 +318,7 @@ impl ElementManager {
 
         Ok(new_frame)
     }
+
     pub(crate) fn insert_new_block(
         &self,
         target_uuid: usize,
@@ -361,6 +340,7 @@ impl ElementManager {
 
         Ok(new_block)
     }
+
     pub(crate) fn insert_new_text(
         &self,
         target_uuid: usize,
@@ -382,6 +362,27 @@ impl ElementManager {
         Ok(new_text)
     }
 
+    pub(crate) fn insert_new_image(
+        &self,
+        target_uuid: usize,
+        insert_mode: InsertMode,
+    ) -> Result<Rc<Image>, ModelError> {
+        let new_image = Rc::new(Image::new(self.self_weak.borrow().clone()));
+
+        let new_element = Element::ImageElement(new_image.clone());
+
+        self.insert(new_element.clone(), target_uuid, insert_mode)?;
+        // verify:
+        let parent_element = match self.get_parent_element(&new_element) {
+            Some(element) => element,
+            None => return Err(ModelError::ElementNotFound("No parent found".to_string())),
+        };
+        new_image.verify_rule_with_parent(&parent_element)?;
+        self.tree_model.borrow_mut().recalculate_sort_order();
+
+        Ok(new_image)
+    }
+
     pub(crate) fn insert(
         &self,
         element: Element,
@@ -390,13 +391,11 @@ impl ElementManager {
     ) -> Result<usize, ModelError> {
         let mut tree_model = self.tree_model.borrow_mut();
 
-        let new_uuid = match insert_mode {
+        match insert_mode {
             InsertMode::Before => tree_model.insert_before(target_uuid, element),
             InsertMode::After => tree_model.insert_after(target_uuid, element),
             InsertMode::AsChild => tree_model.insert_as_child(target_uuid, element),
-        };
-
-        new_uuid
+        }
     }
 
     // remove a list of element's uuids. Ignore errors.
@@ -405,7 +404,7 @@ impl ElementManager {
             self.clear();
         } else {
             let mut tree_model = self.tree_model.borrow_mut();
-            uuid_list.iter().for_each(|uuid| -> () {
+            uuid_list.iter().for_each(|uuid| {
                 tree_model.remove_recursively(*uuid).unwrap_or_default();
             });
         }
@@ -483,7 +482,7 @@ impl ElementManager {
     }
 
     pub(crate) fn get_parent_frame(&self, element: &Element) -> Option<Rc<Frame>> {
-        let child_uuid = self.get_element_uuid(&element);
+        let child_uuid = self.get_element_uuid(element);
 
         let tree_model = self.tree_model.borrow();
         let parent_uuid = tree_model.get_parent_uuid(child_uuid)?;
@@ -499,7 +498,7 @@ impl ElementManager {
     }
 
     pub(crate) fn get_parent_element(&self, element: &Element) -> Option<Element> {
-        let child_uuid = self.get_element_uuid(&element);
+        let child_uuid = self.get_element_uuid(element);
 
         self.get_parent_element_using_uuid(child_uuid)
     }
@@ -508,10 +507,7 @@ impl ElementManager {
         let tree_model = self.tree_model.borrow();
         let parent_uuid = tree_model.get_parent_uuid(uuid)?;
 
-        match tree_model.get(parent_uuid) {
-            Some(element) => Some(element.clone()),
-            None => None,
-        }
+        tree_model.get(parent_uuid).cloned()
     }
 
     /// Get uuid of the element
@@ -535,27 +531,20 @@ impl ElementManager {
 
     pub(crate) fn previous_element(&self, uuid: usize) -> Option<Element> {
         let tree_model = self.tree_model.borrow();
-        match tree_model
+        tree_model
             .iter()
             .take_while(|element| element.uuid() != uuid)
             .last()
-        {
-            Some(element) => Some(element.clone()),
-            None => None,
-        }
+            .cloned()
     }
 
     pub(crate) fn next_element(&self, uuid: usize) -> Option<Element> {
         let tree_model = self.tree_model.borrow();
-        match tree_model
+        tree_model
             .iter()
             .skip_while(|element| element.uuid() != uuid)
-            .skip(1)
-            .next()
-        {
-            Some(element) => Some(element.clone()),
-            None => None,
-        }
+            .nth(1)
+            .cloned()
     }
 
     /// Get element sort order
@@ -569,10 +558,7 @@ impl ElementManager {
     // Give element using uuid
     pub(crate) fn get(&self, uuid: usize) -> Option<Element> {
         let tree_model = self.tree_model.borrow();
-        match tree_model.get(uuid) {
-            Some(element) => Some(element.clone()),
-            None => None,
-        }
+        tree_model.get(uuid).cloned()
     }
 
     pub(crate) fn find_frame(&self, position: usize) -> Option<Rc<Frame>> {
@@ -588,17 +574,11 @@ impl ElementManager {
     }
 
     pub(crate) fn last_block(&self) -> Option<Rc<Block>> {
-        match self.block_list().last() {
-            Some(last) => Some(last.clone()),
-            None => None,
-        }
+        self.block_list().last().cloned()
     }
 
     pub(crate) fn first_block(&self) -> Option<Rc<Block>> {
-        match self.block_list().first() {
-            Some(last) => Some(last.clone()),
-            None => None,
-        }
+        self.block_list().first().cloned()
     }
 
     /// list recursively all elements having uuid as their common ancestor
@@ -726,13 +706,13 @@ impl ElementManager {
                     tree_model.get_level(text.uuid()),
                     text.uuid(),
                     tree_model.get_sort_order(text.uuid()).unwrap(),
-                    "text ".to_string() + &text.plain_text().to_string(),
+                    "text ".to_string() + &text.plain_text(),
                 )),
                 ImageElement(image) => indent_with_string.push((
                     tree_model.get_level(image.uuid()),
                     image.uuid(),
                     tree_model.get_sort_order(image.uuid()).unwrap(),
-                    "[image] ".to_string() + &image.text().to_string(),
+                    "[image] ".to_string() + &image.plain_text(),
                 )),
             };
         });
@@ -1036,7 +1016,9 @@ impl TreeModel {
         Some(next_sibling.1.to_owned())
     }
 
-    pub(self) fn swap(&mut self, uuid: ElementUuid, mut element: Element) {}
+    // pub(self) fn swap(&mut self, uuid: ElementUuid, mut element: Element) {
+    //     unimplemented!()
+    // }
 
     pub(self) fn remove_recursively(
         &mut self,
@@ -1058,18 +1040,18 @@ impl TreeModel {
             .remove_entry(
                 &self
                     .get_sort_order(uuid)
-                    .ok_or(ModelError::ElementNotFound(uuid.to_string()))?,
+                    .ok_or_else(|| ModelError::ElementNotFound(uuid.to_string()))?,
             )
-            .ok_or(ModelError::ElementNotFound(uuid.to_string()))?
+            .ok_or_else(|| ModelError::ElementNotFound(uuid.to_string()))?
             .1;
 
         self.child_id_with_parent_id_hash
             .remove_entry(&uuid)
-            .ok_or(ModelError::ElementNotFound(uuid.to_string()))?;
+            .ok_or_else(|| ModelError::ElementNotFound(uuid.to_string()))?;
 
         self.id_with_element_hash
             .remove_entry(&uuid)
-            .ok_or(ModelError::ElementNotFound(uuid.to_string()))?;
+            .ok_or_else(|| ModelError::ElementNotFound(uuid.to_string()))?;
 
         Ok(id)
     }
@@ -1166,10 +1148,7 @@ impl TreeModel {
 
         let sibling = ancestors_of_first_element.intersect(second_element_all_siblings);
 
-        match sibling.first() {
-            Some(sib) => Some(sib.clone()),
-            None => None,
-        }
+        sibling.first().copied()
     }
 
     pub(self) fn get_all_siblings(&self, uuid: ElementUuid) -> Vec<ElementUuid> {
@@ -1226,7 +1205,7 @@ impl TreeModel {
 
         let common_ancestors = ancestors_of_first_element.intersect(ancestors_of_second_element);
 
-        common_ancestors.first().unwrap().clone()
+        *common_ancestors.first().unwrap()
     }
 
     /// set a new parent and change order so the element is directly under the new parent. Careful, the new child isn't moved at the end of the list of children !
@@ -1253,14 +1232,14 @@ impl TreeModel {
             .order_with_id_map
             .iter()
             .find(|(&_order, &iter_uuid)| iter_uuid == uuid_to_move)
-            .ok_or(ModelError::ElementNotFound("parent not found".to_string()))?
+            .ok_or_else(|| ModelError::ElementNotFound("parent not found".to_string()))?
             .0;
 
         let new_order = self
             .order_with_id_map
             .iter()
             .find(|(&_order, &iter_uuid)| iter_uuid == new_parent_uuid)
-            .ok_or(ModelError::ElementNotFound("parent not found".to_string()))?
+            .ok_or_else(|| ModelError::ElementNotFound("parent not found".to_string()))?
             .0
             + 1;
 
@@ -1282,14 +1261,10 @@ impl TreeModel {
     }
 
     fn get_sort_order(&self, uuid: usize) -> Option<usize> {
-        match self
-            .order_with_id_map
+        self.order_with_id_map
             .iter()
-            .find(|(&order, &iter_uuid)| iter_uuid == uuid)
-        {
-            Some(pair) => Some(*pair.0),
-            None => None,
-        }
+            .find(|(&_order, &iter_uuid)| iter_uuid == uuid)
+            .map(|pair| *pair.0)
     }
 
     pub(crate) fn clear(&mut self) {
@@ -1305,11 +1280,10 @@ impl TreeModel {
         match self
             .order_with_id_map
             .iter()
-            .skip_while(|(&order, &iter_uuid)| iter_uuid != uuid)
-            .skip(1)
-            .next()
+            .skip_while(|(&_order, &iter_uuid)| iter_uuid != uuid)
+            .nth(1)
         {
-            Some((order, id)) => level < self.get_level(*id),
+            Some((_order, id)) => level < self.get_level(*id),
             None => false,
         }
     }
@@ -1325,7 +1299,7 @@ impl<'a> TreeIter<'a> {
             .order_with_id_map
             .iter()
             .rev()
-            .map(|(order, id)| -> &Element { tree.id_with_element_hash.get(id).unwrap() })
+            .map(|(_order, id)| -> &Element { tree.id_with_element_hash.get(id).unwrap() })
             .collect();
 
         TreeIter {
@@ -1340,7 +1314,7 @@ impl<'a> Iterator for TreeIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let element = self.unvisited.pop()?;
 
-        Some(&element)
+        Some(element)
     }
 }
 
@@ -1396,10 +1370,7 @@ impl Element {
     }
 
     pub fn is_block(&self) -> bool {
-        match self {
-            Element::BlockElement(_) => true,
-            _ => false,
-        }
+        matches!(self, Element::BlockElement(_))
     }
     pub fn get_block(&self) -> Option<Rc<Block>> {
         match self {
@@ -1409,10 +1380,7 @@ impl Element {
     }
 
     pub fn is_frame(&self) -> bool {
-        match self {
-            Element::FrameElement(_) => true,
-            _ => false,
-        }
+        matches!(self, Element::FrameElement(_))
     }
     pub fn get_frame(&self) -> Option<Rc<Frame>> {
         match self {
@@ -1422,10 +1390,7 @@ impl Element {
     }
 
     pub fn is_text(&self) -> bool {
-        match self {
-            Element::TextElement(_) => true,
-            _ => false,
-        }
+        matches!(self, Element::TextElement(_))
     }
     pub fn get_text(&self) -> Option<Rc<Text>> {
         match self {
@@ -1435,10 +1400,7 @@ impl Element {
     }
 
     pub fn is_image(&self) -> bool {
-        match self {
-            Element::ImageElement(_) => true,
-            _ => false,
-        }
+        matches!(self, Element::ImageElement(_))
     }
     pub fn get_image(&self) -> Option<Rc<Image>> {
         match self {
@@ -1452,8 +1414,8 @@ impl Element {
 mod tests_element {
     use std::rc::{Rc, Weak};
 
+    use crate::Block;
     use crate::Element::BlockElement;
-    use crate::{Block, Element};
 
     #[test]
     fn get() {
@@ -1501,7 +1463,18 @@ mod tree_model_tests {
     use super::*;
 
     #[test]
-    fn add() {}
+    fn ancestors() {
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let block = element_manager_rc
+            .insert_new_block(0, InsertMode::AsChild)
+            .unwrap();
+
+        let tree_model = element_manager_rc.tree_model.borrow();
+
+        assert_eq!(tree_model.number_of_ancestors(&block.uuid()), 1);
+    }
 }
 
 #[cfg(test)]

@@ -38,7 +38,7 @@ fn cursor_insert_plain_text_at_position() {
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);
-    cursor.insert_plain_text("AB");
+    cursor.insert_plain_text("AB").unwrap();
     cursor.set_position(1, MoveMode::MoveAnchor);
     cursor.insert_plain_text("\nplain_text\ntest").unwrap();
     document.print_debug_elements();
@@ -60,9 +60,9 @@ fn cursor_insert_single_line_plain_text_at_position() {
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);
-    cursor.insert_plain_text("AB");
+    cursor.insert_plain_text("AB").unwrap();
     cursor.set_position(1, MoveMode::MoveAnchor);
-    cursor.insert_plain_text("plain_text");
+    cursor.insert_plain_text("plain_text").unwrap();
     document.print_debug_elements();
 
     assert_eq!(document.block_count(), 1);
@@ -77,7 +77,7 @@ fn cursor_select_text() {
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);
-    cursor.insert_plain_text("a\nplain_text\ntest");
+    cursor.insert_plain_text("a\nplain_text\ntest").unwrap();
 
     document.print_debug_elements();
 
@@ -107,7 +107,7 @@ fn cursor_insert_plain_text_into_filled_block() {
 
     let mut cursor = document.create_cursor();
     cursor.set_position(9, MoveMode::MoveAnchor);
-    cursor.insert_plain_text("new\nplain_text\ntest");
+    cursor.insert_plain_text("new\nplain_text\ntest").unwrap();
     document.print_debug_elements();
 
     assert_eq!(document.block_count(), 3);
@@ -180,10 +180,10 @@ fn remove_in_blocks_where_top_is_child_of_bottom_block() {
         // assert_eq!(removed_characters, 19);
     });
 
-    document.add_element_change_callback(|element, reason| {
-        // assert_eq!(element.uuid(), 0);
-        // assert_eq!(reason, ChangeReason::ChildrenChanged );
-    });
+    //document.add_element_change_callback(|element, reason| {
+    // assert_eq!(element.uuid(), 0);
+    // assert_eq!(reason, ChangeReason::ChildrenChanged );
+    //});
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);
@@ -226,10 +226,10 @@ fn remove_in_blocks_where_bottom_is_child_of_top_block() {
         // assert_eq!(removed_characters, 19);
     });
 
-    document.add_element_change_callback(|element, reason| {
-        // assert_eq!(element.uuid(), 0);
-        // assert_eq!(reason, ChangeReason::ChildrenChanged );
-    });
+    //document.add_element_change_callback(|element, reason| {
+    // assert_eq!(element.uuid(), 0);
+    // assert_eq!(reason, ChangeReason::ChildrenChanged );
+    //});
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);
@@ -268,10 +268,10 @@ fn remove_in_blocks_where_bottom_child_and_top_block_are_on_their_own_frame() {
         // assert_eq!(removed_characters, 19);
     });
 
-    document.add_element_change_callback(|element, reason| {
-        // assert_eq!(element.uuid(), 0);
-        // assert_eq!(reason, ChangeReason::ChildrenChanged );
-    });
+    //document.add_element_change_callback(|element, reason| {
+    // assert_eq!(element.uuid(), 0);
+    // assert_eq!(reason, ChangeReason::ChildrenChanged );
+    //});
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);
@@ -312,10 +312,10 @@ fn remove_in_blocks_where_bottom_child_and_top_block_are_the_same() {
         // assert_eq!(removed_characters, 19);
     });
 
-    document.add_element_change_callback(|element, reason| {
-        // assert_eq!(element.uuid(), 0);
-        // assert_eq!(reason, ChangeReason::ChildrenChanged );
-    });
+    //document.add_element_change_callback(|element, reason| {
+    // assert_eq!(element.uuid(), 0);
+    // assert_eq!(reason, ChangeReason::ChildrenChanged );
+    //});
 
     let mut cursor = document.create_cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);

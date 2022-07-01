@@ -3,7 +3,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::format::IsFormat;
+use crate::{format::IsFormat, ElementUuid};
 use crate::{
     format::{FormattedElement, ImageFormat},
     text_document::{Element, ElementManager, ElementTrait, ModelError},
@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Default, Clone, Debug)]
 pub struct Image {
-    uuid: Cell<usize>,
+    uuid: Cell<ElementUuid>,
     element_manager: Weak<ElementManager>,
     text: RefCell<String>,
     image_format: RefCell<ImageFormat>,
@@ -29,12 +29,12 @@ impl Image {
         Image {
             element_manager,
             uuid: Default::default(),
-            text: RefCell::new(char::from_u32(0xfffc).unwrap().to_string()),
+            text: RefCell::new("\u{FFFC}".to_string()),
             ..Default::default()
         }
     }
 
-    pub fn uuid(&self) -> usize {
+    pub fn uuid(&self) -> ElementUuid {
         self.uuid.get()
     }
 
@@ -42,12 +42,12 @@ impl Image {
         self.format()
     }
 
-    pub fn text(&self) -> String {
-        self.text.borrow().clone()
+    pub fn plain_text(&self) -> String {
+        " ".to_string()
     }
 
     pub fn text_length(&self) -> usize {
-        self.text.borrow().len()
+        1
     }
 
     fn parent_bloc_rc(&self) -> Rc<Block> {
@@ -104,5 +104,41 @@ impl FormattedElement<ImageFormat> for Image {
 
     fn merge_format(&self, format: &ImageFormat) -> Result<ImageFormat, ModelError> {
         self.image_format.borrow_mut().merge(format)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::InsertMode;
+
+    use super::*;
+
+    #[test]
+    fn basics() {
+        let image = Image::new(Weak::new());
+
+        assert_eq!(image.uuid(), 0);
+        assert_eq!(image.plain_text(), " ");
+        assert_eq!(image.text_length(), 1);
+        assert_eq!(image.image_format(), ImageFormat::new());
+
+        let image_bis = Image::new(Weak::new());
+
+        assert_eq!(image, image_bis);
+    }
+
+    #[test]
+    fn position() {
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let image = element_manager_rc
+            .insert_new_image(1, InsertMode::AsChild)
+            .unwrap();
+
+        assert_eq!(image.parent_bloc_rc().uuid(), 1);
+        assert_eq!(image.start(), 0);
+        assert_eq!(image.end(), 1);
     }
 }

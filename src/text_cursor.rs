@@ -1,10 +1,10 @@
 use std::rc::{Rc, Weak};
 
 use crate::block::Block;
-use crate::format::{BlockFormat, CharFormat, FormattedElement, FrameFormat};
+use crate::format::{CharFormat, FormattedElement, FrameFormat};
 use crate::frame::Frame;
 use crate::text_document::Element::BlockElement;
-use crate::text_document::{ElementManager, ElementTrait, InsertMode, ModelError};
+use crate::text_document::{ElementManager, InsertMode, ModelError};
 use crate::{ChangeReason, Element};
 
 #[derive(Clone)]
@@ -71,7 +71,7 @@ impl TextCursor {
     fn current_block_rc(&self) -> Rc<Block> {
         self.element_manager
             .find_block(self.position)
-            .unwrap_or(self.element_manager.last_block().unwrap())
+            .unwrap_or_else(|| self.element_manager.last_block().unwrap())
     }
 
     // split block at position, like if a new line is inserted
@@ -84,20 +84,18 @@ impl TextCursor {
         let mut removed_characters_count = 0;
         if left_position != right_position {
             // for now, new_position is wrong, to be implemented
-            todo!();
             (new_position, removed_characters_count) = self
                 .remove_with_signal(left_position, right_position, false)
                 .unwrap();
         }
 
         // find reference block
-        let old_block_rc =
-            self.element_manager
-                .find_block(new_position)
-                .ok_or(ModelError::ElementNotFound(format!(
-                    "block not found at {}",
-                    new_position
-                )))?;
+        let old_block_rc = self
+            .element_manager
+            .find_block(new_position)
+            .ok_or_else(|| {
+                ModelError::ElementNotFound(format!("block not found at {}", new_position))
+            })?;
 
         let _u = old_block_rc.uuid();
 
@@ -111,7 +109,7 @@ impl TextCursor {
 
         // if new block empty, create empty child text element
 
-        if &new_block.list_all_children().len() == &0 {
+        if new_block.list_all_children().is_empty() {
             self.element_manager
                 .insert_new_text(new_block.uuid(), InsertMode::AsChild)?;
         }
@@ -143,14 +141,14 @@ impl TextCursor {
     fn current_frame_rc(&self) -> Rc<Frame> {
         self.element_manager
             .find_frame(self.position)
-            .unwrap_or(self.element_manager.root_frame())
+            .unwrap_or_else(|| self.element_manager.root_frame())
     }
 
     pub fn set_frame_format(&mut self, frame_format: FrameFormat) -> Result<(), ModelError> {
         let current_frame = self
             .current_frame()
             .upgrade()
-            .ok_or(ModelError::ElementNotFound("()".to_string()))?;
+            .ok_or_else(|| ModelError::ElementNotFound("()".to_string()))?;
 
         current_frame.set_format(&frame_format)
     }
@@ -174,14 +172,14 @@ impl TextCursor {
         let old_block_rc = self
             .element_manager
             .find_block(new_position)
-            .unwrap_or(self.element_manager.last_block().unwrap());
+            .unwrap_or_else(|| self.element_manager.last_block().unwrap());
 
         let new_block =
             old_block_rc.split(old_block_rc.convert_position_from_document(new_position))?;
 
         // if new block empty, create text
 
-        if &new_block.list_all_children().len() == &0 {
+        if new_block.list_all_children().is_empty() {
             self.element_manager
                 .insert_new_text(new_block.uuid(), InsertMode::AsChild)?;
         }
@@ -247,11 +245,11 @@ impl TextCursor {
         let mut block = self
             .element_manager
             .find_block(new_position)
-            .unwrap_or(self.element_manager.last_block().unwrap());
+            .unwrap_or_else(|| self.element_manager.last_block().unwrap());
 
         let mut other_block_from_split = None;
 
-        let lines = plain_text.split("\n");
+        let lines = plain_text.split('\n');
         let mut index = 0;
 
         let count = lines.clone().count();
@@ -347,18 +345,11 @@ impl TextCursor {
 
         // same block:
         if top_block == bottom_block {
-            return top_block
-                .plain_text_between_positions(left_position_in_block, right_position_in_block);
+            top_block.plain_text_between_positions(left_position_in_block, right_position_in_block)
         } else {
-            // several blocks
-
-            let mut string_list = Vec::new();
-
             // first block
-            string_list.push(
-                top_block
-                    .plain_text_between_positions(left_position_in_block, top_block.text_length()),
-            );
+            let mut string_list = vec![top_block
+                .plain_text_between_positions(left_position_in_block, top_block.text_length())];
 
             self.element_manager
                 .list_all_children(0)
@@ -367,7 +358,7 @@ impl TextCursor {
                 .skip(1)
                 .take_while(|element| element.uuid() != bottom_block.uuid())
                 .filter_map(|element| match element {
-                    BlockElement(block) => Some(block.plain_text().to_string()),
+                    BlockElement(block) => Some(block.plain_text()),
                     _ => None,
                 })
                 .for_each(|string| string_list.push(string));
@@ -380,7 +371,7 @@ impl TextCursor {
             // take into account \n
             let length_of_selection = right_position - left_position;
 
-            return final_string[0..length_of_selection].to_string();
+            final_string[0..length_of_selection].to_string()
         }
     }
 
@@ -412,18 +403,14 @@ impl TextCursor {
         let left_position = position.min(anchor_position);
         let right_position = anchor_position.max(position);
 
-        let top_block =
-            self.element_manager
-                .find_block(left_position)
-                .ok_or(ModelError::ElementNotFound(
-                    "tob block not found".to_string(),
-                ))?;
-        let bottom_block =
-            self.element_manager
-                .find_block(right_position)
-                .ok_or(ModelError::ElementNotFound(
-                    "bottom block not found".to_string(),
-                ))?;
+        let top_block = self
+            .element_manager
+            .find_block(left_position)
+            .ok_or_else(|| ModelError::ElementNotFound("tob block not found".to_string()))?;
+        let bottom_block = self
+            .element_manager
+            .find_block(right_position)
+            .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
 
         let left_position_in_block = top_block.convert_position_from_document(left_position);
         let right_position_in_block = bottom_block.convert_position_from_document(right_position);
@@ -501,7 +488,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(common_ancestor)
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame().clone()),
+                None => Element::FrameElement(self.element_manager.root_frame()),
             };
 
             self.element_manager.remove(vec![common_ancestor]);
@@ -511,7 +498,7 @@ impl TextCursor {
                 self.element_manager.clear();
 
                 parent_element_for_signal =
-                    Element::FrameElement(self.element_manager.root_frame().clone());
+                    Element::FrameElement(self.element_manager.root_frame());
             }
         }
         // if top block's level is superior than (is a child of) bottom block
@@ -530,9 +517,9 @@ impl TextCursor {
                     top_block.uuid(),
                     bottom_block.uuid(),
                 )
-                .ok_or(ModelError::ElementNotFound(
-                    "sibling ancestor not found".to_string(),
-                ))?;
+                .ok_or_else(|| {
+                    ModelError::ElementNotFound("sibling ancestor not found".to_string())
+                })?;
 
             removed_characters_count = self
                 .element_manager
@@ -551,7 +538,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(bottom_block.uuid())
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame().clone()),
+                None => Element::FrameElement(self.element_manager.root_frame()),
             };
 
             self.element_manager.remove(vec![sibling_ancestor]);
@@ -595,7 +582,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(top_block.uuid())
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame().clone()),
+                None => Element::FrameElement(self.element_manager.root_frame()),
             };
 
             (new_position, removed_characters_count) = top_block
@@ -637,7 +624,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(top_block.uuid())
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame().clone()),
+                None => Element::FrameElement(self.element_manager.root_frame()),
             };
 
             (new_position, removed_characters_count) = top_block

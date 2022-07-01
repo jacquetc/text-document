@@ -42,15 +42,13 @@ impl Text {
         self.format()
     }
 
-    pub(crate) fn set_char_format(&self, char_format: &CharFormat) {}
-
     pub fn plain_text(&self) -> String {
         self.text.borrow().clone()
     }
 
     pub(crate) fn set_text<S: Into<String>>(&self, text: S) {
         let plain_text: String = text.into();
-        self.text.replace(plain_text.clone());
+        self.text.replace(plain_text);
     }
 
     pub(crate) fn insert_plain_text<S: Into<String>>(&self, position_in_text: usize, text: S) {
@@ -74,7 +72,7 @@ impl Text {
         let split = original_text.split_at(position_in_text);
         self.set_text(&split.0.to_string());
         new_text_rc.set_text(&split.1.to_string());
-        new_text_rc.set_char_format(&self.char_format());
+        new_text_rc.set_format(&self.char_format());
 
         new_element
     }
@@ -162,7 +160,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_all_children() {
+    fn remove_text() {
         let text = Text::new(Weak::new());
         text.set_text("plain_text");
         text.remove_text(0, 10).unwrap();

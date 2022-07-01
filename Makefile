@@ -33,7 +33,8 @@ test-%:
 	cargo test ${_FEATURES_${@:test-%=%}} ${ARGS}
 
 clippy-%:
-	cargo clippy ${_FEATURES_${@:clippy-%=%}} ${ARGS} --all-targets -- -D warnings -A deprecated
+	cargo clippy ${_FEATURES_${@:clippy-%=%}} ${ARGS} --all-targets -- -A deprecated
+#	cargo clippy ${_FEATURES_${@:clippy-%=%}} ${ARGS} --all-targets -- -D warnings -A deprecated
 
 doc:
 	cargo doc --workspace --all-features --no-deps --document-private-items
