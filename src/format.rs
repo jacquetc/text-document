@@ -2,7 +2,9 @@ use crate::font::Font;
 use crate::text_document::Tab;
 use crate::ModelError;
 
-#[derive(Clone, PartialEq, Debug)]
+pub(crate) type FormatChangeResult = Result<Option<()>, ModelError>;
+
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Format {
     FrameFormat(FrameFormat),
     CharFormat(CharFormat),
@@ -11,12 +13,12 @@ pub enum Format {
 }
 
 pub(crate) trait IsFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    fn merge_with(&mut self, other_format: &Self) -> FormatChangeResult
     where
         Self: Sized;
 }
 
-#[derive(Default, Clone, PartialEq, Debug)]
+#[derive(Default, Clone, Eq, PartialEq, Debug)]
 pub struct FrameFormat {
     pub height: Option<usize>,
     pub width: Option<usize>,
@@ -38,22 +40,50 @@ impl FrameFormat {
 }
 
 impl IsFormat for FrameFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    fn merge_with(&mut self, other_format: &Self) -> FormatChangeResult
     where
         Self: Sized,
     {
-        todo!()
+        if let Some(value) = other_format.height {
+            self.height = Some(value);
+        }
+        if let Some(value) = other_format.width {
+            self.width = Some(value);
+        }
+        if let Some(value) = other_format.top_margin {
+            self.top_margin = Some(value);
+        }
+        if let Some(value) = other_format.bottom_margin {
+            self.bottom_margin = Some(value);
+        }
+        if let Some(value) = other_format.left_margin {
+            self.left_margin = Some(value);
+        }
+        if let Some(value) = other_format.right_margin {
+            self.right_margin = Some(value);
+        }
+        if let Some(value) = other_format.padding {
+            self.padding = Some(value);
+        }
+        if let Some(value) = other_format.border {
+            self.border = Some(value);
+        }
+        if let Some(value) = other_format.position {
+            self.position = Some(value);
+        }
+
+        Ok(Some(()))
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Position {
     InFlow,
     FloatLeft,
     FloatRight,
 }
 
-#[derive(Default, Clone, PartialEq, Debug)]
+#[derive(Default, Clone, Eq, PartialEq, Debug)]
 pub struct CharFormat {
     pub anchor_href: Option<String>,
     pub anchor_names: Option<Vec<String>>,
@@ -75,11 +105,37 @@ impl CharFormat {
 }
 
 impl IsFormat for CharFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    fn merge_with(&mut self, other_format: &Self) -> FormatChangeResult
     where
         Self: Sized,
     {
-        todo!()
+        if let Some(value) = &other_format.anchor_href {
+            self.anchor_href = Some(value.clone());
+        }
+
+        if let Some(value) = &other_format.anchor_names {
+            self.anchor_names = Some(value.clone());
+        }
+
+        if let Some(value) = other_format.is_anchor {
+            self.is_anchor = Some(value);
+        }
+
+        self.font.merge_with(&other_format.font)?;
+
+        if let Some(value) = &other_format.tool_tip {
+            self.tool_tip = Some(value.clone());
+        }
+
+        if let Some(value) = other_format.underline_style {
+            self.underline_style = Some(value);
+        }
+
+        if let Some(value) = other_format.vertical_alignment {
+            self.vertical_alignment = Some(value);
+        }
+
+        Ok(Some(()))
     }
 }
 
@@ -90,7 +146,13 @@ impl std::ops::Deref for CharFormat {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+impl std::ops::DerefMut for CharFormat {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.font
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum CharVerticalAlignment {
     AlignNormal,
     AlignSuperScript,
@@ -101,7 +163,7 @@ pub enum CharVerticalAlignment {
     AlignBaseline,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum UnderlineStyle {
     NoUnderline,
     SingleUnderline,
@@ -113,7 +175,7 @@ pub enum UnderlineStyle {
     SpellCheckUnderline,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
 pub struct BlockFormat {
     pub alignment: Option<Alignment>,
     pub top_margin: Option<usize>,
@@ -136,32 +198,50 @@ impl BlockFormat {
 }
 
 impl IsFormat for BlockFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    fn merge_with(&mut self, other_format: &Self) -> FormatChangeResult
     where
         Self: Sized,
     {
-        todo!()
-    }
-}
-
-impl Default for BlockFormat {
-    fn default() -> Self {
-        Self {
-            alignment: Some(Alignment::AlignLeft),
-            top_margin: Default::default(),
-            bottom_margin: Default::default(),
-            left_margin: Default::default(),
-            right_margin: Default::default(),
-            heading_level: Default::default(),
-            indent: Default::default(),
-            text_indent: Default::default(),
-            tab_positions: Default::default(),
-            marker: Some(MarkerType::NoMarker),
+        if let Some(value) = other_format.alignment {
+            self.alignment = Some(value);
         }
+        if let Some(value) = other_format.top_margin {
+            self.top_margin = Some(value);
+        }
+        if let Some(value) = other_format.bottom_margin {
+            self.bottom_margin = Some(value);
+        }
+        if let Some(value) = other_format.left_margin {
+            self.left_margin = Some(value);
+        }
+        if let Some(value) = other_format.right_margin {
+            self.right_margin = Some(value);
+        }
+        if let Some(value) = other_format.heading_level {
+            self.heading_level = Some(value);
+        }
+
+        if let Some(value) = other_format.indent {
+            self.indent = Some(value);
+        }
+
+        if let Some(value) = other_format.text_indent {
+            self.text_indent = Some(value);
+        }
+
+        if let Some(value) = &other_format.tab_positions {
+            self.tab_positions = Some(value.clone());
+        }
+
+        if let Some(value) = other_format.marker {
+            self.marker = Some(value);
+        }
+
+        Ok(Some(()))
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Alignment {
     AlignLeft,
     AlignRight,
@@ -169,16 +249,16 @@ pub enum Alignment {
     AlignJustify,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum MarkerType {
     NoMarker,
     Unchecked,
     Checked,
 }
 
-#[derive(Default, Clone, PartialEq, Debug)]
+#[derive(Default, Clone, Eq, PartialEq, Debug)]
 pub struct ImageFormat {
-    char_format: CharFormat,
+    pub(crate) char_format: CharFormat,
     pub height: Option<usize>,
     pub width: Option<usize>,
     pub quality: Option<u8>,
@@ -194,11 +274,30 @@ impl ImageFormat {
 }
 
 impl IsFormat for ImageFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    /// Merge with the other format. The other format fields, if filled, overwrite the fields of the first format
+    fn merge_with(&mut self, other_format: &Self) -> FormatChangeResult
     where
         Self: Sized,
     {
-        todo!()
+        self.char_format.merge_with(&other_format.char_format)?;
+
+        if let Some(value) = other_format.height {
+            self.height = Some(value)
+        }
+
+        if let Some(value) = other_format.width {
+            self.width = Some(value)
+        }
+
+        if let Some(value) = other_format.quality {
+            self.quality = Some(value)
+        }
+
+        if let Some(value) = other_format.name.clone() {
+            self.name = Some(value)
+        }
+
+        Ok(Some(()))
     }
 }
 
@@ -212,7 +311,65 @@ impl std::ops::Deref for ImageFormat {
 pub(crate) trait FormattedElement<F: IsFormat> {
     fn format(&self) -> F;
 
-    fn set_format(&self, format: &F) -> Result<(), ModelError>;
+    fn set_format(&self, format: &F) -> FormatChangeResult;
 
-    fn merge_format(&self, format: &F) -> Result<F, ModelError>;
+    fn merge_format(&self, format: &F) -> FormatChangeResult;
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn merge_image_formats() {
+        let mut first = ImageFormat::new();
+        first.width = Some(40);
+        let mut second = ImageFormat::new();
+        second.height = Some(10);
+
+        first.merge_with(&second).unwrap();
+
+        assert_eq!(first.width, Some(40));
+        assert_eq!(first.height, Some(10));
+    }
+
+    #[test]
+    fn merge_block_formats() {
+        let mut first = BlockFormat::new();
+        first.alignment = Some(Alignment::AlignRight);
+        let mut second = BlockFormat::new();
+        second.left_margin = Some(10);
+
+        first.merge_with(&second).unwrap();
+
+        assert_eq!(first.alignment, Some(Alignment::AlignRight));
+        assert_eq!(first.left_margin, Some(10));
+    }
+
+    #[test]
+    fn merge_frame_formats() {
+        let mut first = FrameFormat::new();
+        first.position = Some(Position::FloatLeft);
+        let mut second = FrameFormat::new();
+        second.height = Some(10);
+
+        first.merge_with(&second).unwrap();
+
+        assert_eq!(first.position, Some(Position::FloatLeft));
+        assert_eq!(first.height, Some(10));
+    }
+
+    #[test]
+    fn merge_char_foramts() {
+        let mut first = CharFormat::new();
+        first.letter_spacing = Some(40);
+        let mut second = CharFormat::new();
+        second.underline = Some(true);
+
+        first.merge_with(&second).unwrap();
+
+        assert_eq!(first.letter_spacing, Some(40));
+        assert_eq!(first.underline, Some(true));
+    }
 }

@@ -1,7 +1,7 @@
 use std::rc::{Rc, Weak};
 
 use crate::block::Block;
-use crate::format::{CharFormat, FormattedElement, FrameFormat};
+use crate::format::{BlockFormat, CharFormat, FormattedElement, FrameFormat};
 use crate::frame::Frame;
 use crate::text_document::Element::BlockElement;
 use crate::text_document::{ElementManager, InsertMode, ModelError};
@@ -74,6 +74,136 @@ impl TextCursor {
             .unwrap_or_else(|| self.element_manager.last_block().unwrap())
     }
 
+    pub fn set_block_format(&mut self, block_format: &BlockFormat) -> Result<(), ModelError> {
+        if self.position == self.anchor_position {
+            let current_block = self.current_block().upgrade().ok_or_else(|| {
+                ModelError::ElementNotFound("current block not found".to_string())
+            })?;
+
+            match current_block.set_format(block_format) {
+                Ok(option) => match option {
+                    Some(_) => {
+                        self.element_manager.signal_for_element_change(
+                            Element::BlockElement(current_block.clone()),
+                            ChangeReason::FormatChanged,
+                        );
+                        Ok(())
+                    }
+                    None => Ok(()),
+                },
+                Err(_) => Err(ModelError::Unknown),
+            }
+        } else {
+            let left_position = self.position.min(self.anchor_position);
+            let right_position = self.anchor_position.max(self.position);
+
+            let top_block = self
+                .element_manager
+                .find_block(left_position)
+                .ok_or_else(|| ModelError::ElementNotFound("tob block not found".to_string()))?;
+            let bottom_block = self
+                .element_manager
+                .find_block(right_position)
+                .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
+
+            let mut target_list: Vec<Rc<Block>> = self
+                .element_manager
+                .list_all_children(0)
+                .iter()
+                .skip_while(|element| element.uuid() != top_block.uuid())
+                .take_while(|element| element.uuid() != bottom_block.uuid())
+                .filter_map(|element| element.get_block())
+                .collect();
+
+            target_list.push(bottom_block);
+
+            // merge, keeping changed elements
+            let list_to_signal: Vec<Rc<Block>> = target_list
+                .iter()
+                .filter_map(|block| {
+                    block
+                        .set_format(block_format)
+                        .unwrap()
+                        .map(|()| block.clone())
+                })
+                .collect();
+
+            list_to_signal.iter().for_each(|block| {
+                self.element_manager.signal_for_element_change(
+                    Element::BlockElement(block.clone()),
+                    ChangeReason::FormatChanged,
+                )
+            });
+
+            Ok(())
+        }
+    }
+
+    pub fn merge_block_format(&mut self, block_format: &BlockFormat) -> Result<(), ModelError> {
+        if self.position == self.anchor_position {
+            let current_block = self.current_block().upgrade().ok_or_else(|| {
+                ModelError::ElementNotFound("current block not found".to_string())
+            })?;
+
+            match current_block.merge_format(block_format) {
+                Ok(option) => match option {
+                    Some(_) => {
+                        self.element_manager.signal_for_element_change(
+                            Element::BlockElement(current_block.clone()),
+                            ChangeReason::FormatChanged,
+                        );
+                        Ok(())
+                    }
+                    None => Ok(()),
+                },
+                Err(_) => Err(ModelError::Unknown),
+            }
+        } else {
+            let left_position = self.position.min(self.anchor_position);
+            let right_position = self.anchor_position.max(self.position);
+
+            let top_block = self
+                .element_manager
+                .find_block(left_position)
+                .ok_or_else(|| ModelError::ElementNotFound("tob block not found".to_string()))?;
+            let bottom_block = self
+                .element_manager
+                .find_block(right_position)
+                .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
+
+            let mut target_list: Vec<Rc<Block>> = self
+                .element_manager
+                .list_all_children(0)
+                .iter()
+                .skip_while(|element| element.uuid() != top_block.uuid())
+                .take_while(|element| element.uuid() != bottom_block.uuid())
+                .filter_map(|element| element.get_block())
+                .collect();
+
+            target_list.push(bottom_block);
+
+            // merge, keeping changed elements
+            let list_to_signal: Vec<Rc<Block>> = target_list
+                .iter()
+                .filter_map(|block| {
+                    block
+                        .merge_format(block_format)
+                        .unwrap()
+                        .map(|()| block.clone())
+                })
+                .collect();
+
+            list_to_signal.iter().for_each(|block| {
+                self.element_manager.signal_for_element_change(
+                    Element::BlockElement(block.clone()),
+                    ChangeReason::FormatChanged,
+                )
+            });
+
+            Ok(())
+        }
+    }
+
     // split block at position, like if a new line is inserted
     pub fn insert_block(&mut self) -> Result<Weak<Block>, ModelError> {
         // fix positions
@@ -144,13 +274,164 @@ impl TextCursor {
             .unwrap_or_else(|| self.element_manager.root_frame())
     }
 
-    pub fn set_frame_format(&mut self, frame_format: FrameFormat) -> Result<(), ModelError> {
-        let current_frame = self
-            .current_frame()
-            .upgrade()
-            .ok_or_else(|| ModelError::ElementNotFound("()".to_string()))?;
+    pub fn set_frame_format(&mut self, frame_format: &FrameFormat) -> Result<(), ModelError> {
+        if self.position == self.anchor_position {
+            let current_frame = self.current_frame().upgrade().ok_or_else(|| {
+                ModelError::ElementNotFound("current frame not found".to_string())
+            })?;
 
-        current_frame.set_format(&frame_format)
+            match current_frame.set_format(frame_format) {
+                Ok(option) => match option {
+                    Some(_) => {
+                        self.element_manager.signal_for_element_change(
+                            Element::FrameElement(current_frame.clone()),
+                            ChangeReason::FormatChanged,
+                        );
+                        Ok(())
+                    }
+                    None => Ok(()),
+                },
+                Err(_) => Err(ModelError::Unknown),
+            }
+        } else {
+            let left_position = self.position.min(self.anchor_position);
+            let right_position = self.anchor_position.max(self.position);
+
+            let top_block = self
+                .element_manager
+                .find_block(left_position)
+                .ok_or_else(|| ModelError::ElementNotFound("tob block not found".to_string()))?;
+            let top_frame = self
+                .element_manager
+                .get_parent_element_using_uuid(top_block.uuid())
+                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?
+                .get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
+            let bottom_block = self
+                .element_manager
+                .find_block(right_position)
+                .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
+            let bottom_frame = self
+                .element_manager
+                .get_parent_element_using_uuid(bottom_block.uuid())
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?
+                .get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
+
+            let mut target_list: Vec<Rc<Frame>> = Vec::new();
+            if top_frame == bottom_frame {
+                target_list.push(top_frame);
+            } else {
+                target_list = self
+                    .element_manager
+                    .list_all_children(0)
+                    .iter()
+                    .skip_while(|element| element.uuid() != top_frame.uuid())
+                    .take_while(|element| element.uuid() != bottom_frame.uuid())
+                    .filter_map(|element| element.get_frame())
+                    .collect();
+            }
+
+            // merge, keeping changed elements
+            let list_to_signal: Vec<Rc<Frame>> = target_list
+                .iter()
+                .filter_map(|frame| {
+                    frame
+                        .set_format(frame_format)
+                        .unwrap()
+                        .map(|()| frame.clone())
+                })
+                .collect();
+
+            list_to_signal.iter().for_each(|frame| {
+                self.element_manager.signal_for_element_change(
+                    Element::FrameElement(frame.clone()),
+                    ChangeReason::FormatChanged,
+                )
+            });
+
+            Ok(())
+        }
+    }
+
+    pub fn merge_frame_format(&mut self, frame_format: &FrameFormat) -> Result<(), ModelError> {
+        if self.position == self.anchor_position {
+            let current_frame = self.current_frame().upgrade().ok_or_else(|| {
+                ModelError::ElementNotFound("current frame not found".to_string())
+            })?;
+
+            match current_frame.merge_format(frame_format) {
+                Ok(option) => match option {
+                    Some(_) => {
+                        self.element_manager.signal_for_element_change(
+                            Element::FrameElement(current_frame.clone()),
+                            ChangeReason::FormatChanged,
+                        );
+                        Ok(())
+                    }
+                    None => Ok(()),
+                },
+                Err(_) => Err(ModelError::Unknown),
+            }
+        } else {
+            let left_position = self.position.min(self.anchor_position);
+            let right_position = self.anchor_position.max(self.position);
+
+            let top_block = self
+                .element_manager
+                .find_block(left_position)
+                .ok_or_else(|| ModelError::ElementNotFound("tob block not found".to_string()))?;
+            let top_frame = self
+                .element_manager
+                .get_parent_element_using_uuid(top_block.uuid())
+                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?
+                .get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
+            let bottom_block = self
+                .element_manager
+                .find_block(right_position)
+                .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
+            let bottom_frame = self
+                .element_manager
+                .get_parent_element_using_uuid(bottom_block.uuid())
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?
+                .get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
+
+            let mut target_list: Vec<Rc<Frame>> = Vec::new();
+            if top_frame == bottom_frame {
+                target_list.push(top_frame);
+            } else {
+                target_list = self
+                    .element_manager
+                    .list_all_children(0)
+                    .iter()
+                    .skip_while(|element| element.uuid() != top_frame.uuid())
+                    .take_while(|element| element.uuid() != bottom_frame.uuid())
+                    .filter_map(|element| element.get_frame())
+                    .collect();
+            }
+
+            // merge, keeping changed elements
+            let list_to_signal: Vec<Rc<Frame>> = target_list
+                .iter()
+                .filter_map(|frame| {
+                    frame
+                        .merge_format(frame_format)
+                        .unwrap()
+                        .map(|()| frame.clone())
+                })
+                .collect();
+
+            list_to_signal.iter().for_each(|frame| {
+                self.element_manager.signal_for_element_change(
+                    Element::FrameElement(frame.clone()),
+                    ChangeReason::FormatChanged,
+                )
+            });
+
+            Ok(())
+        }
     }
 
     /// insert a frame at the cursor position
@@ -220,10 +501,10 @@ impl TextCursor {
         let plain_text: String = plain_text.into();
 
         // get char format
-        let char_format: CharFormat = match self.char_format() {
-            Some(char_format) => char_format,
-            None => self.current_block_rc().char_format(),
-        };
+        // let char_format: CharFormat = match self.char_format() {
+        //     Some(char_format) => char_format,
+        //     None => self.current_block_rc().char_format(),
+        // };
 
         // fix positions
         let left_position = self.position.min(self.anchor_position);
@@ -375,11 +656,25 @@ impl TextCursor {
         }
     }
 
-    // fetch the char format at the cursor position
+    // fetch the char format at the cursor position. Anchor position is ignored
     pub fn char_format(&self) -> Option<CharFormat> {
         let block_rc = self.current_block_rc();
 
         block_rc.char_format_at(block_rc.convert_position_from_document(self.position))
+    }
+
+    // fetch the block format at the cursor position. Anchor position is ignored
+    pub fn block_format(&self) -> Option<BlockFormat> {
+        let block_rc = self.current_block_rc();
+
+        Some(block_rc.block_format())
+    }
+
+    // fetch the frame format at the cursor position. Anchor position is ignored
+    pub fn frame_format(&self) -> Option<FrameFormat> {
+        let frame_rc = self.current_frame_rc();
+
+        Some(frame_rc.frame_format())
     }
 
     /// Remove elements between two positions. Split blocks if needed. Frames in superior level (i.e. children)

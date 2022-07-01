@@ -3,7 +3,10 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::{format::IsFormat, ElementUuid};
+use crate::{
+    format::{FormatChangeResult, IsFormat},
+    ElementUuid,
+};
 use crate::{
     format::{FormattedElement, ImageFormat},
     text_document::{Element, ElementManager, ElementTrait, ModelError},
@@ -97,13 +100,17 @@ impl FormattedElement<ImageFormat> for Image {
         self.image_format.borrow().clone()
     }
 
-    fn set_format(&self, format: &ImageFormat) -> Result<(), ModelError> {
-        self.image_format.replace(format.clone());
-        Ok(())
+    fn set_format(&self, format: &ImageFormat) -> FormatChangeResult {
+        if &*self.image_format.borrow() == format {
+            Ok(None)
+        } else {
+            self.image_format.replace(format.clone());
+            Ok(Some(()))
+        }
     }
 
-    fn merge_format(&self, format: &ImageFormat) -> Result<ImageFormat, ModelError> {
-        self.image_format.borrow_mut().merge(format)
+    fn merge_format(&self, format: &ImageFormat) -> FormatChangeResult {
+        self.image_format.borrow_mut().merge_with(format)
     }
 }
 

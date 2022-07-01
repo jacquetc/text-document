@@ -3,6 +3,7 @@
 [![license](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue?style=flat-square)](#license)
 [![build status](https://img.shields.io/github/workflow/status/jacquetc/text-document/CI/main?style=flat-square&logo=github)](https://github.com/jacquetc/text-document/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jacquetc/text-document/branch/main/graph/badge.svg?token=S4M513A2XR)](https://codecov.io/gh/jacquetc/text-document)
+![Lines of code](https://img.shields.io/tokei/lines/github.com/jacquetc/text-document)
 
 # text-document
 A text document structure and management for Rust

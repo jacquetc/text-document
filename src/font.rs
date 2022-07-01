@@ -1,4 +1,6 @@
-#[derive(Default, PartialEq, Clone, Debug)]
+use crate::ModelError;
+
+#[derive(Default, Eq, PartialEq, Clone, Debug)]
 pub struct Font {
     pub weight: Option<Weight>,
     pub style: Option<Style>,
@@ -59,9 +61,52 @@ impl Font {
     // pub fn from_string(&self, string: &String) -> Result<(), FontError>{
 
     // }
-}
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+    pub(crate) fn merge_with(&mut self, other_font: &Self) -> Result<(), ModelError>
+    where
+        Self: Sized,
+    {
+        if let Some(value) = other_font.weight {
+            self.weight = Some(value);
+        }
+
+        if let Some(value) = other_font.style {
+            self.style = Some(value);
+        }
+
+        if let Some(value) = other_font.underline {
+            self.underline = Some(value);
+        }
+
+        if let Some(value) = other_font.strike_out {
+            self.strike_out = Some(value);
+        }
+
+        if let Some(value) = other_font.size {
+            self.size = Some(value);
+        }
+
+        if let Some(value) = other_font.capitalisation {
+            self.capitalisation = Some(value);
+        }
+
+        if let Some(value) = other_font.families.clone() {
+            self.families = Some(value);
+        }
+        if let Some(value) = other_font.letter_spacing {
+            self.letter_spacing = Some(value);
+        }
+        if let Some(value) = other_font.letter_spacing_type {
+            self.letter_spacing_type = Some(value);
+        }
+        if let Some(value) = other_font.word_spacing {
+            self.word_spacing = Some(value);
+        }
+
+        Ok(())
+    }
+}
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct FontSize {
     size_type: SizeType,
     size: usize,
@@ -77,14 +122,14 @@ impl PartialOrd for FontSize {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum SizeType {
     Point,
     Pixel,
 }
 
 pub enum UnderlineStyle {}
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum Capitalisation {
     MixedCase,
     AllUppercase,
@@ -99,7 +144,7 @@ impl Default for Capitalisation {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, PartialOrd, Clone, Copy, Debug)]
 pub enum Style {
     /// Normal glyphs used in unstyled text.
     Normal,
@@ -116,7 +161,7 @@ impl Default for Style {
 }
 
 /// Spacing between letters
-#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, PartialOrd, Clone, Copy, Debug)]
 pub enum SpacingType {
     /// A value of 100 will keep the spacing unchanged; a value of 200 will enlarge the spacing after a character by the width of the character itself.
     PercentageSpacing,
@@ -131,7 +176,7 @@ impl Default for SpacingType {
 }
 
 /// Predefined font weights. Compatible with OpenType. A weight of 1 will be thin, whilst 1000 will be extremely black.
-#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, PartialOrd, Clone, Copy, Debug)]
 pub enum Weight {
     Thin = 100,
     ExtraLight = 200,

@@ -1,4 +1,4 @@
-use crate::format::{BlockFormat, CharFormat, FormattedElement, IsFormat};
+use crate::format::{BlockFormat, CharFormat, FormatChangeResult, FormattedElement, IsFormat};
 use crate::text::Text;
 use crate::text_document::Element::{ImageElement, TextElement};
 use crate::text_document::{Element, ElementManager, ElementTrait, ModelError};
@@ -522,13 +522,17 @@ impl FormattedElement<BlockFormat> for Block {
         self.block_format.borrow().clone()
     }
 
-    fn set_format(&self, format: &BlockFormat) -> Result<(), ModelError> {
-        self.block_format.replace(format.clone());
-        Ok(())
+    fn set_format(&self, format: &BlockFormat) -> FormatChangeResult {
+        if &*self.block_format.borrow() == format {
+            Ok(None)
+        } else {
+            self.block_format.replace(format.clone());
+            Ok(Some(()))
+        }
     }
 
-    fn merge_format(&self, format: &BlockFormat) -> Result<BlockFormat, ModelError> {
-        self.block_format.borrow_mut().merge(format)
+    fn merge_format(&self, format: &BlockFormat) -> Result<Option<()>, ModelError> {
+        self.block_format.borrow_mut().merge_with(format)
     }
 }
 
