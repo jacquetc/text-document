@@ -25,7 +25,7 @@ jobs:
     permissions:
       contents: none
     name: CI
-    needs: [test, check, docs, rustfmt, clippy]
+    needs: [test, check, docs, rustfmt, clippy, codecov]
     runs-on: ubuntu-latest
     steps:
       - name: Done
@@ -178,3 +178,11 @@ jobs:
       run: make clippy-full
     - name: Lint (release)
       run: make clippy-release
+  codecov:
+    name: codecov
+      steps:
+      - uses: actions/checkout@master
+      - uses: codecov/codecov-action@v3
+        with:
+          fail_ci_if_error: true # optional (default = false)
+          verbose: true # optional (default = false)
