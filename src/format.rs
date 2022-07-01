@@ -274,7 +274,7 @@ impl ImageFormat {
 }
 
 impl IsFormat for ImageFormat {
-    /// Merge with the other format. The other format fields, if filled, overwrite the fileds of the first format
+    /// Merge with the other format. The other format fields, if filled, overwrite the fields of the first format
     fn merge_with(&mut self, other_format: &Self) -> FormatChangeResult
     where
         Self: Sized,
