@@ -19,7 +19,7 @@ Cargo.lock
 
 # code coverage
 default.profraw
-coverage.json
+coverage.lcov
 
 .vscode
 .idea
