@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    format::{CharFormat, FormattedElement, IsFormat},
+    format::{CharFormat, FormatChangeResult, FormattedElement, IsFormat},
     text_document::{Element, ElementManager, ElementTrait, ModelError},
     Block,
 };
@@ -72,7 +72,7 @@ impl Text {
         let split = original_text.split_at(position_in_text);
         self.set_text(&split.0.to_string());
         new_text_rc.set_text(&split.1.to_string());
-        new_text_rc.set_format(&self.char_format());
+        new_text_rc.set_format(&self.char_format()).unwrap();
 
         new_element
     }
@@ -144,13 +144,17 @@ impl FormattedElement<CharFormat> for Text {
         self.char_format.borrow().clone()
     }
 
-    fn set_format(&self, format: &CharFormat) -> Result<(), ModelError> {
+    fn set_format(&self, format: &CharFormat) -> FormatChangeResult {
+        if &*self.char_format.borrow() == format {
+            Ok(None)
+        } else {
         self.char_format.replace(format.clone());
-        Ok(())
+        Ok(Some(()))
+    }
     }
 
-    fn merge_format(&self, format: &CharFormat) -> Result<CharFormat, ModelError> {
-        self.char_format.borrow_mut().merge(format)
+    fn merge_format(&self, format: &CharFormat) -> FormatChangeResult {
+        self.char_format.borrow_mut().merge_with(format)
     }
 }
 

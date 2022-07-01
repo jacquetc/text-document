@@ -1,3 +1,4 @@
+use crate::format::FormatChangeResult;
 use crate::text_document::{Element, ElementManager, ElementTrait, ModelError};
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -102,12 +103,16 @@ impl FormattedElement<FrameFormat> for Frame {
     fn format(&self) -> FrameFormat {
         self.frame_format.borrow().clone()
     }
-    fn set_format(&self, format: &FrameFormat) -> Result<(), ModelError> {
+    fn set_format(&self, format: &FrameFormat) -> FormatChangeResult {
+        if &*self.frame_format.borrow() == format {
+            Ok(None)
+        } else {
         self.frame_format.replace(format.clone());
-        Ok(())
+        Ok(Some(()))
+    }
     }
 
-    fn merge_format(&self, format: &FrameFormat) -> Result<FrameFormat, ModelError> {
-        self.frame_format.borrow_mut().merge(format)
+    fn merge_format(&self, format: &FrameFormat) -> Result<Option<()>, ModelError> {
+        self.frame_format.borrow_mut().merge_with(format)
     }
 }

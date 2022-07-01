@@ -171,14 +171,14 @@ pub struct TextDocumentOption {
     pub wrap_mode: WrapMode,
 }
 
-#[derive(Default, PartialEq, Clone, Debug)]
+#[derive(Default, Eq, PartialEq, Clone, Debug)]
 pub struct Tab {
     pub position: usize,
     pub tab_type: TabType,
     pub delimiter: char,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum TabType {
     LeftTab,
     RightTab,
@@ -192,7 +192,7 @@ impl Default for TabType {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum TextDirection {
     LeftToRight,
     RightToLeft,
@@ -204,7 +204,7 @@ impl Default for TextDirection {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum WrapMode {
     NoWrap,
     WordWrap,
