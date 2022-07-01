@@ -1,6 +1,6 @@
-use crate::{ModelError};
 use crate::font::Font;
 use crate::text_document::Tab;
+use crate::ModelError;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Format {
@@ -11,8 +11,9 @@ pub enum Format {
 }
 
 pub(crate) trait IsFormat {
-
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError> where Self: Sized;
+    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    where
+        Self: Sized;
 }
 
 #[derive(Default, Clone, PartialEq, Debug)]
@@ -29,17 +30,18 @@ pub struct FrameFormat {
 }
 
 impl FrameFormat {
-
     pub fn new() -> Self {
         FrameFormat {
             ..Default::default()
         }
     }
-
 }
 
 impl IsFormat for FrameFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError> where Self: Sized {
+    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    where
+        Self: Sized,
+    {
         todo!()
     }
 }
@@ -73,11 +75,13 @@ impl CharFormat {
 }
 
 impl IsFormat for CharFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError> where Self: Sized {
+    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    where
+        Self: Sized,
+    {
         todo!()
     }
 }
-
 
 impl std::ops::Deref for CharFormat {
     type Target = Font;
@@ -132,11 +136,13 @@ impl BlockFormat {
 }
 
 impl IsFormat for BlockFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError> where Self: Sized {
+    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    where
+        Self: Sized,
+    {
         todo!()
     }
 }
-
 
 impl Default for BlockFormat {
     fn default() -> Self {
@@ -179,21 +185,22 @@ pub struct ImageFormat {
     pub name: Option<String>,
 }
 
-impl ImageFormat  {
+impl ImageFormat {
     pub fn new() -> Self {
         ImageFormat {
             ..Default::default()
         }
     }
-
 }
 
 impl IsFormat for ImageFormat {
-    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError> where Self: Sized {
+    fn merge(&mut self, other_format: &Self) -> Result<Self, ModelError>
+    where
+        Self: Sized,
+    {
         todo!()
     }
 }
-
 
 impl std::ops::Deref for ImageFormat {
     type Target = CharFormat;
@@ -203,10 +210,9 @@ impl std::ops::Deref for ImageFormat {
 }
 
 pub(crate) trait FormattedElement<F: IsFormat> {
-    fn format(&self)-> F;
+    fn format(&self) -> F;
 
     fn set_format(&self, format: &F) -> Result<(), ModelError>;
 
     fn merge_format(&self, format: &F) -> Result<F, ModelError>;
-
 }

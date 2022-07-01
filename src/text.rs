@@ -1,11 +1,12 @@
 use std::{
     cell::{Cell, RefCell},
-    rc::{Weak, Rc},
+    rc::{Rc, Weak},
 };
 
 use crate::{
     format::{CharFormat, FormattedElement, IsFormat},
-    text_document::{Element, ElementManager, ElementTrait, ModelError}, Block,
+    text_document::{Element, ElementManager, ElementTrait, ModelError},
+    Block,
 };
 
 #[derive(Default, Clone, Debug)]
@@ -41,8 +42,7 @@ impl Text {
         self.format()
     }
 
-    pub(crate) fn set_char_format(&self, char_format: &CharFormat) {
-    }
+    pub(crate) fn set_char_format(&self, char_format: &CharFormat) {}
 
     pub fn plain_text(&self) -> String {
         self.text.borrow().clone()
@@ -100,7 +100,6 @@ impl Text {
         self.text.borrow().len()
     }
 
-
     fn parent_bloc_rc(&self) -> Rc<Block> {
         let element_manager = self.element_manager.upgrade().unwrap();
 
@@ -126,7 +125,6 @@ impl Text {
     pub fn end(&self) -> usize {
         self.start() + self.text_length()
     }
-
 }
 
 impl ElementTrait for Text {
@@ -144,12 +142,11 @@ impl ElementTrait for Text {
     }
 }
 impl FormattedElement<CharFormat> for Text {
-
-    fn format(&self)-> CharFormat {
+    fn format(&self) -> CharFormat {
         self.char_format.borrow().clone()
     }
 
-    fn set_format(&self, format: &CharFormat) -> Result<(), ModelError> {       
+    fn set_format(&self, format: &CharFormat) -> Result<(), ModelError> {
         self.char_format.replace(format.clone());
         Ok(())
     }
@@ -166,7 +163,6 @@ mod tests {
 
     #[test]
     fn list_all_children() {
-
         let text = Text::new(Weak::new());
         text.set_text("plain_text");
         text.remove_text(0, 10).unwrap();
@@ -176,7 +172,5 @@ mod tests {
         text.set_text("plain_text");
         text.remove_text(1, 9).unwrap();
         assert_eq!(text.plain_text(), "pt");
-
     }
-
 }

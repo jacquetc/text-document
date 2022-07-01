@@ -366,8 +366,7 @@ impl Block {
         let texts: Vec<String> = self
             .list_all_children()
             .iter()
-            .map(|fragment| 
-                match fragment {
+            .map(|fragment| match fragment {
                 TextElement(text_rc) => text_rc.plain_text().to_string(),
                 ImageElement(image_rc) => image_rc.text().to_string(),
                 _ => unreachable!(),
@@ -689,17 +688,14 @@ mod tests {
 
         element_manager_rc.clear();
         let block = element_manager_rc
-        .insert_new_block(0, InsertMode::AsChild)
-        .unwrap();
+            .insert_new_block(0, InsertMode::AsChild)
+            .unwrap();
         block.set_plain_text("plain_text");
 
         let new_block = block.split(10).unwrap();
         element_manager_rc.debug_elements();
         assert_eq!(block.plain_text(), "plain_text");
         assert_eq!(new_block.plain_text(), "");
-
-        
-        
     }
 
     #[test]

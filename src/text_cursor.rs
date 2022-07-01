@@ -24,19 +24,18 @@ impl TextCursor {
     }
 
     pub fn position(&self) -> usize {
-        let mut position =  self.position;
+        let mut position = self.position;
 
         let end_of_document = self.element_manager.root_frame().end();
         if position > end_of_document {
             position = end_of_document;
         }
 
-
-       position
+        position
     }
 
     pub fn anchor_position(&self) -> usize {
-        let mut anchor_position =  self.anchor_position;
+        let mut anchor_position = self.anchor_position;
 
         let end_of_document = self.element_manager.root_frame().end();
         if anchor_position > end_of_document {
@@ -54,8 +53,6 @@ impl TextCursor {
         if position > end_of_document {
             position = end_of_document;
         }
-
-
 
         match move_mode {
             MoveMode::MoveAnchor => {
@@ -94,16 +91,23 @@ impl TextCursor {
         }
 
         // find reference block
-        let old_block_rc = self
-            .element_manager
-            .find_block(new_position).ok_or(ModelError::ElementNotFound(format!("block not found at {}", new_position)))?;
+        let old_block_rc =
+            self.element_manager
+                .find_block(new_position)
+                .ok_or(ModelError::ElementNotFound(format!(
+                    "block not found at {}",
+                    new_position
+                )))?;
 
         let _u = old_block_rc.uuid();
 
         let new_block =
             old_block_rc.split(old_block_rc.convert_position_from_document(new_position))?;
-            let _w = new_block.uuid();
-            let _order = self.element_manager.get_element_order(self.element_manager.get(new_block.uuid()).unwrap()).unwrap() ;
+        let _w = new_block.uuid();
+        let _order = self
+            .element_manager
+            .get_element_order(self.element_manager.get(new_block.uuid()).unwrap())
+            .unwrap();
 
         // if new block empty, create empty child text element
 
@@ -568,7 +572,7 @@ impl TextCursor {
                             removed_characters_count += element.text_length() + 1;
                             return Some(element.uuid());
                         }
-                        
+
                         if element.is_frame() {
                             return Some(element.uuid());
                         }
@@ -596,7 +600,7 @@ impl TextCursor {
 
             (new_position, removed_characters_count) = top_block
                 .remove_between_positions(left_position_in_block, top_block.text_length())?;
-                self.element_manager.debug_elements();
+            self.element_manager.debug_elements();
 
             self.element_manager.remove(
                 self.element_manager
@@ -609,7 +613,7 @@ impl TextCursor {
                         if element.is_block() {
                             removed_characters_count += element.text_length() + 1;
                             return Some(element.uuid());
-                        }                        
+                        }
                         if element.is_frame() {
                             return Some(element.uuid());
                         }
@@ -618,7 +622,6 @@ impl TextCursor {
                     })
                     .collect(),
             );
-         
         }
         // if bottom block's level is strictly at the same level than top block
 
@@ -685,11 +688,7 @@ impl TextCursor {
         Ok((new_position, removed_characters_count))
     }
 
-    pub fn move_position(
-        &mut self,
-        move_operation: MoveOperation,
-        move_mode: MoveMode,
-    ) {
+    pub fn move_position(&mut self, move_operation: MoveOperation, move_mode: MoveMode) {
         match move_operation {
             MoveOperation::NoMove => (),
             MoveOperation::Start => self.set_position(0, move_mode),
@@ -723,7 +722,6 @@ impl TextCursor {
             MoveOperation::NextRow => todo!(),
             MoveOperation::PreviousRow => todo!(),
         };
-
     }
 }
 

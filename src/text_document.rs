@@ -1675,6 +1675,5 @@ mod document_tests {
 
         let children = document.element_manager.list_all_children(0);
         assert_eq!(children.len(), 7);
-
     }
 }

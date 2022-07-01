@@ -71,14 +71,12 @@ impl Frame {
             })
             .sum();
 
-        
-           char_count - 1
+        char_count - 1
     }
 
     pub fn start(&self) -> usize {
         self.first_cursor_position()
     }
-
 
     pub fn end(&self) -> usize {
         self.start() + self.text_length()

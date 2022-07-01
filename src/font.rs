@@ -51,7 +51,6 @@ impl Font {
     // pub fn from_string(&self, string: &String) -> Result<(), FontError>{
 
     // }
-
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]

@@ -3,12 +3,12 @@ use std::{
     rc::{Rc, Weak},
 };
 
+use crate::format::IsFormat;
 use crate::{
-    format::{ImageFormat, FormattedElement},
+    format::{FormattedElement, ImageFormat},
     text_document::{Element, ElementManager, ElementTrait, ModelError},
     Block,
 };
-use crate::format::IsFormat;
 
 #[derive(Default, Clone, Debug)]
 pub struct Image {
@@ -41,7 +41,6 @@ impl Image {
     pub(crate) fn image_format(&self) -> ImageFormat {
         self.format()
     }
-
 
     pub fn text(&self) -> String {
         self.text.borrow().clone()
@@ -93,19 +92,17 @@ impl ElementTrait for Image {
     }
 }
 
-
 impl FormattedElement<ImageFormat> for Image {
-    fn format(&self)-> ImageFormat {
-           self.image_format.borrow().clone()
+    fn format(&self) -> ImageFormat {
+        self.image_format.borrow().clone()
     }
 
     fn set_format(&self, format: &ImageFormat) -> Result<(), ModelError> {
         self.image_format.replace(format.clone());
         Ok(())
- }
+    }
 
     fn merge_format(&self, format: &ImageFormat) -> Result<ImageFormat, ModelError> {
         self.image_format.borrow_mut().merge(format)
     }
-
 }

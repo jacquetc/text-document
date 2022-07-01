@@ -361,7 +361,6 @@ fn move_cursor() {
     assert_eq!(cursor.position(), 19);
     assert_eq!(cursor.anchor_position(), 19);
 
-
     cursor.set_position(10, MoveMode::KeepAnchor);
 
     assert_eq!(cursor.position(), 10);

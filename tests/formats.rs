@@ -1,4 +1,3 @@
-
 use text_document::format::{CharFormat, ImageFormat};
 
 #[test]
@@ -11,6 +10,6 @@ fn char_format() {
 fn image_format() {
     let mut format = ImageFormat::new();
     format.height = Some(40);
-    
+
     assert_eq!(format.height, Some(40));
 }
