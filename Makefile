@@ -14,13 +14,13 @@ endif
 
 MSRV?=1.61
 
-_FEATURES = minimal default wasm full debug release
-_FEATURES_minimal = --no-default-features --features "std"
+_FEATURES =
+_FEATURES_minimal = --no-default-features
 _FEATURES_default =
-_FEATURES_wasm = --features "deprecated derive cargo env unicode yaml regex unstable-replace unstable-grouped"
-_FEATURES_full = --features "deprecated derive cargo env unicode yaml regex unstable-replace unstable-grouped wrap_help"
-_FEATURES_next = ${_FEATURES_full} --features unstable-v4
-_FEATURES_debug = ${_FEATURES_full} --features debug
+_FEATURES_wasm = 
+_FEATURES_full =
+_FEATURES_next = ${_FEATURES_full}
+_FEATURES_debug = ${_FEATURES_full}
 _FEATURES_release = ${_FEATURES_full} --release
 
 check-%:
@@ -34,9 +34,6 @@ test-%:
 
 clippy-%:
 	cargo clippy ${_FEATURES_${@:clippy-%=%}} ${ARGS} --all-targets -- -D warnings -A deprecated
-
-test-ui-%:
-	cargo +${MSRV} test --test derive_ui --features derive ${_FEATURES_${@:test-ui-%=%}}
 
 doc:
 	cargo doc --workspace --all-features --no-deps --document-private-items

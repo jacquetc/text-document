@@ -121,25 +121,6 @@ jobs:
       - uses: Swatinem/rust-cache@v1
       - name: Check
         run: make check-${{ matrix.features }}
-  ui:
-    name: UI Tests
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        features: [default, next]
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: 1.60.0  # MSRV
-        profile: minimal
-        override: true
-    - uses: Swatinem/rust-cache@v1
-    - name: UI Tests
-      run: make test-ui-${{ matrix.features }}
   docs:
     name: Docs
     runs-on: ubuntu-latest
