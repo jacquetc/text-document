@@ -20,16 +20,24 @@ impl Font {
         }
     }
 
-    pub fn set_bold(&mut self) {
-        self.weight = Some(Weight::Bold)
+    pub fn set_bold(&mut self, is_bold: bool) {
+        if is_bold {
+            self.weight = Some(Weight::Bold)
+        } else {
+            self.weight = Some(Weight::Normal)
+        }
     }
 
     pub fn bold(&self) -> bool {
         self.weight >= Some(Weight::Bold)
     }
 
-    pub fn set_italic(&mut self) {
-        self.style = Some(Style::Italic)
+    pub fn set_italic(&mut self, is_italic: bool) {
+        if is_italic {
+            self.style = Some(Style::Italic)
+        } else {
+            self.style = Some(Style::Normal)
+        }
     }
 
     pub fn italic(&self) -> bool {
@@ -38,7 +46,7 @@ impl Font {
 
     pub fn family(&self) -> Option<&String> {
         if let Some(families) = &self.families {
-            return families.first();
+            families.first()
         } else {
             None
         }
@@ -51,7 +59,6 @@ impl Font {
     // pub fn from_string(&self, string: &String) -> Result<(), FontError>{
 
     // }
-
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]

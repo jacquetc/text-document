@@ -1,11 +1,12 @@
 use std::{
     cell::{Cell, RefCell},
-    rc::{Weak, Rc},
+    rc::{Rc, Weak},
 };
 
 use crate::{
     format::{CharFormat, FormattedElement, IsFormat},
-    text_document::{Element, ElementManager, ElementTrait, ModelError}, Block,
+    text_document::{Element, ElementManager, ElementTrait, ModelError},
+    Block,
 };
 
 #[derive(Default, Clone, Debug)]
@@ -41,16 +42,13 @@ impl Text {
         self.format()
     }
 
-    pub(crate) fn set_char_format(&self, char_format: &CharFormat) {
-    }
-
     pub fn plain_text(&self) -> String {
         self.text.borrow().clone()
     }
 
     pub(crate) fn set_text<S: Into<String>>(&self, text: S) {
         let plain_text: String = text.into();
-        self.text.replace(plain_text.clone());
+        self.text.replace(plain_text);
     }
 
     pub(crate) fn insert_plain_text<S: Into<String>>(&self, position_in_text: usize, text: S) {
@@ -74,7 +72,7 @@ impl Text {
         let split = original_text.split_at(position_in_text);
         self.set_text(&split.0.to_string());
         new_text_rc.set_text(&split.1.to_string());
-        new_text_rc.set_char_format(&self.char_format());
+        new_text_rc.set_format(&self.char_format());
 
         new_element
     }
@@ -99,7 +97,6 @@ impl Text {
     pub fn text_length(&self) -> usize {
         self.text.borrow().len()
     }
-
 
     fn parent_bloc_rc(&self) -> Rc<Block> {
         let element_manager = self.element_manager.upgrade().unwrap();
@@ -126,7 +123,6 @@ impl Text {
     pub fn end(&self) -> usize {
         self.start() + self.text_length()
     }
-
 }
 
 impl ElementTrait for Text {
@@ -144,12 +140,11 @@ impl ElementTrait for Text {
     }
 }
 impl FormattedElement<CharFormat> for Text {
-
-    fn format(&self)-> CharFormat {
+    fn format(&self) -> CharFormat {
         self.char_format.borrow().clone()
     }
 
-    fn set_format(&self, format: &CharFormat) -> Result<(), ModelError> {       
+    fn set_format(&self, format: &CharFormat) -> Result<(), ModelError> {
         self.char_format.replace(format.clone());
         Ok(())
     }
@@ -165,8 +160,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_all_children() {
-
+    fn remove_text() {
         let text = Text::new(Weak::new());
         text.set_text("plain_text");
         text.remove_text(0, 10).unwrap();
@@ -176,7 +170,5 @@ mod tests {
         text.set_text("plain_text");
         text.remove_text(1, 9).unwrap();
         assert_eq!(text.plain_text(), "pt");
-
     }
-
 }

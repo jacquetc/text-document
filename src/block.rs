@@ -123,11 +123,11 @@ impl Block {
         if position_in_block == 0 {
             match self.first_child() {
                 Some(element) => match element {
-                    TextElement(text) => Some(text.char_format().clone()),
+                    TextElement(text) => Some(text.char_format()),
                     ImageElement(_) => None,
                     _ => None,
                 },
-                None => return None,
+                None => None,
             }
         } else {
             None
@@ -151,7 +151,7 @@ impl Block {
         let mut position = 0;
 
         for child in self.list_all_children() {
-            // returns first element if cursor is at first postion
+            // returns first element if cursor is at first position
             if position_in_block == 0 {
                 return Some(child);
             }
@@ -186,7 +186,7 @@ impl Block {
                 }
                 _ => unreachable!(),
             },
-            None => return,
+            None => (),
         }
     }
 
@@ -246,7 +246,7 @@ impl Block {
     /// Describes the block's character format. The block's character format is the char format of the first block.
     pub fn char_format(&self) -> CharFormat {
         match self.first_child().unwrap() {
-            TextElement(text_fragment) => text_fragment.char_format().clone(),
+            TextElement(text_fragment) => text_fragment.char_format(),
             ImageElement(_) => CharFormat::new(),
             _ => unreachable!(),
         }
@@ -262,7 +262,7 @@ impl Block {
                 _ => unreachable!(),
             })
             .for_each(|text_fragment: &Rc<Text>| {
-                text_fragment.set_char_format(&char_format);
+                text_fragment.set_format(char_format).unwrap();
             });
     }
 
@@ -275,11 +275,9 @@ impl Block {
 
         // split child element at position
 
-        let sub_element =
-            self.find_element(position_in_block)
-                .ok_or(ModelError::ElementNotFound(
-                    "sub element not found".to_string(),
-                ))?;
+        let sub_element = self
+            .find_element(position_in_block)
+            .ok_or_else(|| ModelError::ElementNotFound("sub element not found".to_string()))?;
 
         let new_text_after_text_split = match sub_element {
             TextElement(text) => {
@@ -366,10 +364,9 @@ impl Block {
         let texts: Vec<String> = self
             .list_all_children()
             .iter()
-            .map(|fragment| 
-                match fragment {
-                TextElement(text_rc) => text_rc.plain_text().to_string(),
-                ImageElement(image_rc) => image_rc.text().to_string(),
+            .map(|fragment| match fragment {
+                TextElement(text_rc) => text_rc.plain_text(),
+                ImageElement(image_rc) => image_rc.plain_text(),
                 _ => unreachable!(),
             })
             .collect();
@@ -407,14 +404,10 @@ impl Block {
 
         let left_element = self
             .find_element(left_position)
-            .ok_or(ModelError::ElementNotFound(
-                "left_element not found".to_string(),
-            ))?;
-        let right_element =
-            self.find_element(right_position)
-                .ok_or(ModelError::ElementNotFound(
-                    "right_element not found".to_string(),
-                ))?;
+            .ok_or_else(|| ModelError::ElementNotFound("left_element not found".to_string()))?;
+        let right_element = self
+            .find_element(right_position)
+            .ok_or_else(|| ModelError::ElementNotFound("right_element not found".to_string()))?;
 
         // if same element targeted
         if left_element == right_element {
@@ -689,17 +682,14 @@ mod tests {
 
         element_manager_rc.clear();
         let block = element_manager_rc
-        .insert_new_block(0, InsertMode::AsChild)
-        .unwrap();
+            .insert_new_block(0, InsertMode::AsChild)
+            .unwrap();
         block.set_plain_text("plain_text");
 
         let new_block = block.split(10).unwrap();
         element_manager_rc.debug_elements();
         assert_eq!(block.plain_text(), "plain_text");
         assert_eq!(new_block.plain_text(), "");
-
-        
-        
     }
 
     #[test]
