@@ -269,7 +269,7 @@ impl TextCursor {
 
                 first_loop = false;
             }
-            // insertion of last line at the begining of the second half of the splitted block
+            // insertion of last line at the beginning of the second half of the split block
             else if count - 1 == index {
                 match &other_block_from_split {
                     Some(block) => {

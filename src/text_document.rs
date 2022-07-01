@@ -614,7 +614,7 @@ impl ElementManager {
     }
 
     pub(crate) fn fill_empty_frames(&self) {
-        // find empy frames
+        // find empty frames
         let tree_model = self.tree_model.borrow();
         let empty_frames: Vec<ElementUuid> = tree_model
             .iter()

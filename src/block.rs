@@ -151,7 +151,7 @@ impl Block {
         let mut position = 0;
 
         for child in self.list_all_children() {
-            // returns first element if cursor is at first postion
+            // returns first element if cursor is at first position
             if position_in_block == 0 {
                 return Some(child);
             }
