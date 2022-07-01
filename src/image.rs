@@ -104,9 +104,9 @@ impl FormattedElement<ImageFormat> for Image {
         if &*self.image_format.borrow() == format {
             Ok(None)
         } else {
-        self.image_format.replace(format.clone());
-        Ok(Some(()))
-    }
+            self.image_format.replace(format.clone());
+            Ok(Some(()))
+        }
     }
 
     fn merge_format(&self, format: &ImageFormat) -> FormatChangeResult {

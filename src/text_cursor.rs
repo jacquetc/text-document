@@ -80,7 +80,6 @@ impl TextCursor {
                 ModelError::ElementNotFound("current block not found".to_string())
             })?;
 
-
             match current_block.set_format(block_format) {
                 Ok(option) => match option {
                     Some(_) => {
@@ -92,9 +91,9 @@ impl TextCursor {
                     }
                     None => Ok(()),
                 },
-                Err(_) => Err(ModelError::Unknown),}
-            
-            } else {
+                Err(_) => Err(ModelError::Unknown),
+            }
+        } else {
             let left_position = self.position.min(self.anchor_position);
             let right_position = self.anchor_position.max(self.position);
 
@@ -116,12 +115,17 @@ impl TextCursor {
                 .filter_map(|element| element.get_block())
                 .collect();
 
-                target_list.push(bottom_block);
+            target_list.push(bottom_block);
 
-                // merge, keeping changed elements
+            // merge, keeping changed elements
             let list_to_signal: Vec<Rc<Block>> = target_list
                 .iter()
-                .filter_map(|block| block.set_format(block_format).unwrap().map(|()| block.clone()))
+                .filter_map(|block| {
+                    block
+                        .set_format(block_format)
+                        .unwrap()
+                        .map(|()| block.clone())
+                })
                 .collect();
 
             list_to_signal.iter().for_each(|block| {
@@ -176,12 +180,17 @@ impl TextCursor {
                 .filter_map(|element| element.get_block())
                 .collect();
 
-                target_list.push(bottom_block);
+            target_list.push(bottom_block);
 
-                // merge, keeping changed elements
+            // merge, keeping changed elements
             let list_to_signal: Vec<Rc<Block>> = target_list
                 .iter()
-                .filter_map(|block| block.merge_format(block_format).unwrap().map(|()| block.clone()))
+                .filter_map(|block| {
+                    block
+                        .merge_format(block_format)
+                        .unwrap()
+                        .map(|()| block.clone())
+                })
                 .collect();
 
             list_to_signal.iter().for_each(|block| {
@@ -274,15 +283,15 @@ impl TextCursor {
             match current_frame.set_format(frame_format) {
                 Ok(option) => match option {
                     Some(_) => {
-                self.element_manager.signal_for_element_change(
-                    Element::FrameElement(current_frame.clone()),
-                    ChangeReason::FormatChanged,
-                );
-                Ok(())
-            }
-            None => Ok(()),
-        },
-        Err(_) => Err(ModelError::Unknown),
+                        self.element_manager.signal_for_element_change(
+                            Element::FrameElement(current_frame.clone()),
+                            ChangeReason::FormatChanged,
+                        );
+                        Ok(())
+                    }
+                    None => Ok(()),
+                },
+                Err(_) => Err(ModelError::Unknown),
             }
         } else {
             let left_position = self.position.min(self.anchor_position);
@@ -295,7 +304,8 @@ impl TextCursor {
             let top_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(top_block.uuid())
-                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?.get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?
+                .get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
             let bottom_block = self
                 .element_manager
@@ -304,30 +314,33 @@ impl TextCursor {
             let bottom_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(bottom_block.uuid())
-                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?.get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?
+                .get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
 
-                let mut target_list: Vec<Rc<Frame>> = Vec::new();
-                if top_frame == bottom_frame {
-                    target_list.push(top_frame);
-                }
-                else {
-
+            let mut target_list: Vec<Rc<Frame>> = Vec::new();
+            if top_frame == bottom_frame {
+                target_list.push(top_frame);
+            } else {
                 target_list = self
-                .element_manager
-                .list_all_children(0)
-                .iter()
-                .skip_while(|element| element.uuid() != top_frame.uuid())
-                .take_while(|element| element.uuid() != bottom_frame.uuid())
-                .filter_map(|element| element.get_frame())
-                .collect();
+                    .element_manager
+                    .list_all_children(0)
+                    .iter()
+                    .skip_while(|element| element.uuid() != top_frame.uuid())
+                    .take_while(|element| element.uuid() != bottom_frame.uuid())
+                    .filter_map(|element| element.get_frame())
+                    .collect();
+            }
 
-                }
-
-                // merge, keeping changed elements
-                let list_to_signal: Vec<Rc<Frame>> = target_list
+            // merge, keeping changed elements
+            let list_to_signal: Vec<Rc<Frame>> = target_list
                 .iter()
-                .filter_map(|frame| frame.set_format(frame_format).unwrap().map(|()| frame.clone()))
+                .filter_map(|frame| {
+                    frame
+                        .set_format(frame_format)
+                        .unwrap()
+                        .map(|()| frame.clone())
+                })
                 .collect();
 
             list_to_signal.iter().for_each(|frame| {
@@ -338,8 +351,8 @@ impl TextCursor {
             });
 
             Ok(())
+        }
     }
-}
 
     pub fn merge_frame_format(&mut self, frame_format: &FrameFormat) -> Result<(), ModelError> {
         if self.position == self.anchor_position {
@@ -350,15 +363,15 @@ impl TextCursor {
             match current_frame.merge_format(frame_format) {
                 Ok(option) => match option {
                     Some(_) => {
-                self.element_manager.signal_for_element_change(
-                    Element::FrameElement(current_frame.clone()),
-                    ChangeReason::FormatChanged,
-                );
-                Ok(())
-            }
-            None => Ok(()),
-        },
-        Err(_) => Err(ModelError::Unknown),
+                        self.element_manager.signal_for_element_change(
+                            Element::FrameElement(current_frame.clone()),
+                            ChangeReason::FormatChanged,
+                        );
+                        Ok(())
+                    }
+                    None => Ok(()),
+                },
+                Err(_) => Err(ModelError::Unknown),
             }
         } else {
             let left_position = self.position.min(self.anchor_position);
@@ -371,7 +384,8 @@ impl TextCursor {
             let top_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(top_block.uuid())
-                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?.get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?
+                .get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
             let bottom_block = self
                 .element_manager
@@ -380,29 +394,33 @@ impl TextCursor {
             let bottom_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(bottom_block.uuid())
-                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?.get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?
+                .get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
 
-                let mut target_list: Vec<Rc<Frame>> = Vec::new();
-                if top_frame == bottom_frame {
-                    target_list.push(top_frame);
-                }
-                else {
-
+            let mut target_list: Vec<Rc<Frame>> = Vec::new();
+            if top_frame == bottom_frame {
+                target_list.push(top_frame);
+            } else {
                 target_list = self
-                .element_manager
-                .list_all_children(0)
-                .iter()
-                .skip_while(|element| element.uuid() != top_frame.uuid())
-                .take_while(|element| element.uuid() != bottom_frame.uuid())
-                .filter_map(|element| element.get_frame())
-                .collect();
-                }
+                    .element_manager
+                    .list_all_children(0)
+                    .iter()
+                    .skip_while(|element| element.uuid() != top_frame.uuid())
+                    .take_while(|element| element.uuid() != bottom_frame.uuid())
+                    .filter_map(|element| element.get_frame())
+                    .collect();
+            }
 
-                // merge, keeping changed elements
-                let list_to_signal: Vec<Rc<Frame>> = target_list
+            // merge, keeping changed elements
+            let list_to_signal: Vec<Rc<Frame>> = target_list
                 .iter()
-                .filter_map(|frame| frame.merge_format(frame_format).unwrap().map(|()| frame.clone()))
+                .filter_map(|frame| {
+                    frame
+                        .merge_format(frame_format)
+                        .unwrap()
+                        .map(|()| frame.clone())
+                })
                 .collect();
 
             list_to_signal.iter().for_each(|frame| {
@@ -413,7 +431,6 @@ impl TextCursor {
             });
 
             Ok(())
-
         }
     }
 

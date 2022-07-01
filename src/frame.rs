@@ -107,9 +107,9 @@ impl FormattedElement<FrameFormat> for Frame {
         if &*self.frame_format.borrow() == format {
             Ok(None)
         } else {
-        self.frame_format.replace(format.clone());
-        Ok(Some(()))
-    }
+            self.frame_format.replace(format.clone());
+            Ok(Some(()))
+        }
     }
 
     fn merge_format(&self, format: &FrameFormat) -> Result<Option<()>, ModelError> {

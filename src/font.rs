@@ -62,53 +62,49 @@ impl Font {
 
     // }
 
+    pub(crate) fn merge_with(&mut self, other_font: &Self) -> Result<(), ModelError>
+    where
+        Self: Sized,
+    {
+        if let Some(value) = other_font.weight {
+            self.weight = Some(value);
+        }
 
-pub(crate) fn merge_with(&mut self, other_font: &Self) -> Result<(), ModelError>
-where
-    Self: Sized,
-{
+        if let Some(value) = other_font.style {
+            self.style = Some(value);
+        }
 
-    if let Some(value) = other_font.weight {
-        self.weight = Some(value);
+        if let Some(value) = other_font.underline {
+            self.underline = Some(value);
+        }
+
+        if let Some(value) = other_font.strike_out {
+            self.strike_out = Some(value);
+        }
+
+        if let Some(value) = other_font.size {
+            self.size = Some(value);
+        }
+
+        if let Some(value) = other_font.capitalisation {
+            self.capitalisation = Some(value);
+        }
+
+        if let Some(value) = other_font.families.clone() {
+            self.families = Some(value);
+        }
+        if let Some(value) = other_font.letter_spacing {
+            self.letter_spacing = Some(value);
+        }
+        if let Some(value) = other_font.letter_spacing_type {
+            self.letter_spacing_type = Some(value);
+        }
+        if let Some(value) = other_font.word_spacing {
+            self.word_spacing = Some(value);
+        }
+
+        Ok(())
     }
-
-    if let Some(value) = other_font.style {
-        self.style = Some(value);
-    }
-
-    if let Some(value) = other_font.underline {
-        self.underline = Some(value);
-    }
-
-    if let Some(value) = other_font.strike_out {
-        self.strike_out = Some(value);
-    }
-
-    if let Some(value) = other_font.size {
-        self.size = Some(value);
-    }
-
-    if let Some(value) = other_font.capitalisation {
-        self.capitalisation = Some(value);
-    }
-
-    if let Some(value) = other_font.families.clone() {
-        self.families = Some(value);
-    }
-    if let Some(value) = other_font.letter_spacing {
-        self.letter_spacing = Some(value);
-    }
-    if let Some(value) = other_font.letter_spacing_type {
-        self.letter_spacing_type = Some(value);
-    }
-    if let Some(value) = other_font.word_spacing {
-        self.word_spacing = Some(value);
-    }
-
-    Ok(())
-
-}
-
 }
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct FontSize {

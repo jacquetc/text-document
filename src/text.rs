@@ -148,9 +148,9 @@ impl FormattedElement<CharFormat> for Text {
         if &*self.char_format.borrow() == format {
             Ok(None)
         } else {
-        self.char_format.replace(format.clone());
-        Ok(Some(()))
-    }
+            self.char_format.replace(format.clone());
+            Ok(Some(()))
+        }
     }
 
     fn merge_format(&self, format: &CharFormat) -> FormatChangeResult {
