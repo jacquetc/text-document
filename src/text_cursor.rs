@@ -107,7 +107,7 @@ impl TextCursor {
                 .find_block(right_position)
                 .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
 
-            let target_list: Vec<Rc<Block>> = self
+            let mut target_list: Vec<Rc<Block>> = self
                 .element_manager
                 .list_all_children(0)
                 .iter()
@@ -115,6 +115,8 @@ impl TextCursor {
                 .take_while(|element| element.uuid() != bottom_block.uuid())
                 .filter_map(|element| element.get_block())
                 .collect();
+
+                target_list.push(bottom_block);
 
                 // merge, keeping changed elements
             let list_to_signal: Vec<Rc<Block>> = target_list
@@ -165,7 +167,7 @@ impl TextCursor {
                 .find_block(right_position)
                 .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
 
-            let target_list: Vec<Rc<Block>> = self
+            let mut target_list: Vec<Rc<Block>> = self
                 .element_manager
                 .list_all_children(0)
                 .iter()
@@ -173,6 +175,8 @@ impl TextCursor {
                 .take_while(|element| element.uuid() != bottom_block.uuid())
                 .filter_map(|element| element.get_block())
                 .collect();
+
+                target_list.push(bottom_block);
 
                 // merge, keeping changed elements
             let list_to_signal: Vec<Rc<Block>> = target_list
@@ -291,7 +295,8 @@ impl TextCursor {
             let top_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(top_block.uuid())
-                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?;
+                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?.get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
             let bottom_block = self
                 .element_manager
                 .find_block(right_position)
@@ -299,9 +304,16 @@ impl TextCursor {
             let bottom_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(bottom_block.uuid())
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?.get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
 
-                let target_list: Vec<Rc<Frame>> = self
+                let mut target_list: Vec<Rc<Frame>> = Vec::new();
+                if top_frame == bottom_frame {
+                    target_list.push(top_frame);
+                }
+                else {
+
+                target_list = self
                 .element_manager
                 .list_all_children(0)
                 .iter()
@@ -309,6 +321,8 @@ impl TextCursor {
                 .take_while(|element| element.uuid() != bottom_frame.uuid())
                 .filter_map(|element| element.get_frame())
                 .collect();
+
+                }
 
                 // merge, keeping changed elements
                 let list_to_signal: Vec<Rc<Frame>> = target_list
@@ -357,7 +371,8 @@ impl TextCursor {
             let top_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(top_block.uuid())
-                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?;
+                .ok_or_else(|| ModelError::ElementNotFound("tob frame not found".to_string()))?.get_frame()
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
             let bottom_block = self
                 .element_manager
                 .find_block(right_position)
@@ -365,9 +380,16 @@ impl TextCursor {
             let bottom_frame = self
                 .element_manager
                 .get_parent_element_using_uuid(bottom_block.uuid())
+                .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?.get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
 
-                let target_list: Vec<Rc<Frame>> = self
+                let mut target_list: Vec<Rc<Frame>> = Vec::new();
+                if top_frame == bottom_frame {
+                    target_list.push(top_frame);
+                }
+                else {
+
+                target_list = self
                 .element_manager
                 .list_all_children(0)
                 .iter()
@@ -375,6 +397,7 @@ impl TextCursor {
                 .take_while(|element| element.uuid() != bottom_frame.uuid())
                 .filter_map(|element| element.get_frame())
                 .collect();
+                }
 
                 // merge, keeping changed elements
                 let list_to_signal: Vec<Rc<Frame>> = target_list
@@ -616,11 +639,25 @@ impl TextCursor {
         }
     }
 
-    // fetch the char format at the cursor position
+    // fetch the char format at the cursor position. Anchor position is ignored
     pub fn char_format(&self) -> Option<CharFormat> {
         let block_rc = self.current_block_rc();
 
         block_rc.char_format_at(block_rc.convert_position_from_document(self.position))
+    }
+
+    // fetch the block format at the cursor position. Anchor position is ignored
+    pub fn block_format(&self) -> Option<BlockFormat> {
+        let block_rc = self.current_block_rc();
+
+        Some(block_rc.block_format())
+    }
+
+    // fetch the frame format at the cursor position. Anchor position is ignored
+    pub fn frame_format(&self) -> Option<FrameFormat> {
+        let frame_rc = self.current_frame_rc();
+
+        Some(frame_rc.frame_format())
     }
 
     /// Remove elements between two positions. Split blocks if needed. Frames in superior level (i.e. children)

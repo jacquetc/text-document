@@ -1,5 +1,6 @@
 #![cfg(test)]
 use text_document::{
+    format::{BlockFormat, FrameFormat},
     text_cursor::MoveMode,
     text_document::{ChangeReason, TextDocument},
     MoveOperation,
@@ -367,5 +368,67 @@ fn move_cursor() {
     assert_eq!(cursor.anchor_position(), 19);
 }
 
+#[test]
+fn format_blocks() {
+    let mut document = TextDocument::new();
+    document.set_plain_text("beginning\nblock\nend").unwrap();
+
+    // set format
+    let mut format = BlockFormat::new();
+    format.left_margin = Some(10);
+
+    let mut cursor = document.create_cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    assert!(cursor.set_block_format(&format).is_ok());
+    assert_eq!(cursor.block_format().unwrap().left_margin, Some(10));
+
+    cursor.set_position(17, MoveMode::KeepAnchor);
+    assert!(cursor.set_block_format(&format).is_ok());
+    assert_eq!(cursor.block_format().unwrap().left_margin, Some(10));
+
+    cursor.set_position(11, MoveMode::MoveAnchor);
+    assert_eq!(cursor.block_format().unwrap().left_margin, Some(10));
+
+    // merge
+    let mut other_format = BlockFormat::new();
+    other_format.top_margin = Some(30);
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor.set_position(17, MoveMode::KeepAnchor);
+
+    assert!(cursor.merge_block_format(&other_format).is_ok());
+    assert_eq!(cursor.block_format().unwrap().left_margin, Some(10));
+    assert_eq!(cursor.block_format().unwrap().top_margin, Some(30));
+}
+#[test]
+fn format_frames() {
+    let mut document = TextDocument::new();
+    document.set_plain_text("beginning\nblock\nend").unwrap();
+
+    // set format
+    let mut format = FrameFormat::new();
+    format.left_margin = Some(10);
+
+    let mut cursor = document.create_cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    assert!(cursor.set_frame_format(&format).is_ok());
+    assert_eq!(cursor.frame_format().unwrap().left_margin, Some(10));
+
+    cursor.set_position(17, MoveMode::KeepAnchor);
+    assert!(cursor.set_frame_format(&format).is_ok());
+    assert_eq!(cursor.frame_format().unwrap().left_margin, Some(10));
+
+    cursor.set_position(11, MoveMode::MoveAnchor);
+    assert_eq!(cursor.frame_format().unwrap().left_margin, Some(10));
+
+    // merge
+    let mut other_format = FrameFormat::new();
+    other_format.top_margin = Some(30);
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor.set_position(17, MoveMode::KeepAnchor);
+
+    assert!(cursor.merge_frame_format(&other_format).is_ok());
+    assert_eq!(cursor.frame_format().unwrap().left_margin, Some(10));
+    assert_eq!(cursor.frame_format().unwrap().top_margin, Some(30));
+}
 // #[test]
 // fn insert_block_
