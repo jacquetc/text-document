@@ -189,12 +189,11 @@ jobs:
         override: true
         components: llvm-tools-preview
     - uses: taiki-e/install-action@cargo-llvm-cov
-    - uses: taiki-e/install-action@nextest
     - name: Collect coverage data
-      run: cargo llvm-cov nextest --json --output-path=./coverage.lcov
+      run: cargo llvm-cov --all-features --workspace --lcov --output-path=./coverage.lcov
     - uses: codecov/codecov-action@v3
       with:
         token: ${{secrets.CODECOV_TOKEN}}
-        files: ./coverage.lcov
+        files: coverage.lcov
         fail_ci_if_error: true # optional (default = false)
         verbose: true # optional (default = false)
