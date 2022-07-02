@@ -49,7 +49,7 @@
 //!
 //! # Signaling changes
 //!
-//! Each modififcation is signaled using callbacks. [`TextDocument`] offers different ways to make your code aware of any change:
+//! Each modification is signaled using callbacks. [`TextDocument`] offers different ways to make your code aware of any change:
 //!- [`TextDocument::add_text_change_callback()`]
 //!
 //!   Give the  number of removed characters and number of added characters with the reference of a cursor position.

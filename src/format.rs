@@ -7,7 +7,7 @@ pub(crate) type FormatChangeResult = Result<Option<()>, ModelError>;
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Format {
     FrameFormat(FrameFormat),
-    CharFormat(CharFormat),
+    TextFormat(TextFormat),
     BlockFormat(BlockFormat),
     ImageFormat(ImageFormat),
 }
@@ -84,7 +84,7 @@ pub enum Position {
 }
 
 #[derive(Default, Clone, Eq, PartialEq, Debug)]
-pub struct CharFormat {
+pub struct TextFormat {
     pub anchor_href: Option<String>,
     pub anchor_names: Option<Vec<String>>,
     pub is_anchor: Option<bool>,
@@ -96,15 +96,15 @@ pub struct CharFormat {
     pub vertical_alignment: Option<CharVerticalAlignment>,
 }
 
-impl CharFormat {
+impl TextFormat {
     pub fn new() -> Self {
-        CharFormat {
+        TextFormat {
             ..Default::default()
         }
     }
 }
 
-impl IsFormat for CharFormat {
+impl IsFormat for TextFormat {
     fn merge_with(&mut self, other_format: &Self) -> FormatChangeResult
     where
         Self: Sized,
@@ -139,14 +139,14 @@ impl IsFormat for CharFormat {
     }
 }
 
-impl std::ops::Deref for CharFormat {
+impl std::ops::Deref for TextFormat {
     type Target = Font;
     fn deref(&self) -> &Self::Target {
         &self.font
     }
 }
 
-impl std::ops::DerefMut for CharFormat {
+impl std::ops::DerefMut for TextFormat {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.font
     }
@@ -258,7 +258,7 @@ pub enum MarkerType {
 
 #[derive(Default, Clone, Eq, PartialEq, Debug)]
 pub struct ImageFormat {
-    pub(crate) char_format: CharFormat,
+    pub(crate) text_format: TextFormat,
     pub height: Option<usize>,
     pub width: Option<usize>,
     pub quality: Option<u8>,
@@ -279,7 +279,7 @@ impl IsFormat for ImageFormat {
     where
         Self: Sized,
     {
-        self.char_format.merge_with(&other_format.char_format)?;
+        self.text_format.merge_with(&other_format.text_format)?;
 
         if let Some(value) = other_format.height {
             self.height = Some(value)
@@ -302,9 +302,9 @@ impl IsFormat for ImageFormat {
 }
 
 impl std::ops::Deref for ImageFormat {
-    type Target = CharFormat;
+    type Target = TextFormat;
     fn deref(&self) -> &Self::Target {
-        &self.char_format
+        &self.text_format
     }
 }
 
@@ -362,9 +362,9 @@ mod tests {
 
     #[test]
     fn merge_char_foramts() {
-        let mut first = CharFormat::new();
+        let mut first = TextFormat::new();
         first.letter_spacing = Some(40);
-        let mut second = CharFormat::new();
+        let mut second = TextFormat::new();
         second.underline = Some(true);
 
         first.merge_with(&second).unwrap();

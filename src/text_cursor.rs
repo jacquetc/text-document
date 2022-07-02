@@ -1,7 +1,7 @@
 use std::rc::{Rc, Weak};
 
 use crate::block::Block;
-use crate::format::{BlockFormat, CharFormat, FormattedElement, FrameFormat};
+use crate::format::{BlockFormat, FormattedElement, FrameFormat, TextFormat};
 use crate::frame::Frame;
 use crate::text_document::Element::BlockElement;
 use crate::text_document::{ElementManager, InsertMode, ModelError};
@@ -501,9 +501,9 @@ impl TextCursor {
         let plain_text: String = plain_text.into();
 
         // get char format
-        // let char_format: CharFormat = match self.char_format() {
-        //     Some(char_format) => char_format,
-        //     None => self.current_block_rc().char_format(),
+        // let text_format: TextFormat = match self.text_format() {
+        //     Some(text_format) => text_format,
+        //     None => self.current_block_rc().text_format(),
         // };
 
         // fix positions
@@ -657,7 +657,7 @@ impl TextCursor {
     }
 
     // fetch the char format at the cursor position. Anchor position is ignored
-    pub fn char_format(&self) -> Option<CharFormat> {
+    pub fn text_format(&self) -> Option<TextFormat> {
         let block_rc = self.current_block_rc();
 
         block_rc.char_format_at(block_rc.convert_position_from_document(self.position))

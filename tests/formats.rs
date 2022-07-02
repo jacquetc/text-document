@@ -1,8 +1,8 @@
-use text_document::format::{CharFormat, ImageFormat};
+use text_document::format::{ImageFormat, TextFormat};
 
 #[test]
-fn char_format() {
-    let mut format = CharFormat::new();
+fn text_format() {
+    let mut format = TextFormat::new();
 
     assert!(!format.font.bold());
     format.font.set_bold(true);
