@@ -132,7 +132,13 @@ impl TextCursor {
                 self.element_manager.signal_for_element_change(
                     Element::BlockElement(block.clone()),
                     ChangeReason::FormatChanged,
-                )
+                );
+                let block_length = block.text_length();
+                self.element_manager.signal_for_text_change(
+                    block.position(),
+                    block_length,
+                    block_length,
+                );
             });
 
             Ok(())
@@ -197,7 +203,13 @@ impl TextCursor {
                 self.element_manager.signal_for_element_change(
                     Element::BlockElement(block.clone()),
                     ChangeReason::FormatChanged,
-                )
+                );
+                let block_length = block.text_length();
+                self.element_manager.signal_for_text_change(
+                    block.position(),
+                    block_length,
+                    block_length,
+                );
             });
 
             Ok(())
@@ -347,7 +359,13 @@ impl TextCursor {
                 self.element_manager.signal_for_element_change(
                     Element::FrameElement(frame.clone()),
                     ChangeReason::FormatChanged,
-                )
+                );
+                let frame_length = frame.text_length();
+                self.element_manager.signal_for_text_change(
+                    frame.first_cursor_position(),
+                    frame_length,
+                    frame_length,
+                );
             });
 
             Ok(())
@@ -423,11 +441,18 @@ impl TextCursor {
                 })
                 .collect();
 
+            // signal change for each frame
             list_to_signal.iter().for_each(|frame| {
                 self.element_manager.signal_for_element_change(
                     Element::FrameElement(frame.clone()),
                     ChangeReason::FormatChanged,
-                )
+                );
+                let frame_length = frame.text_length();
+                self.element_manager.signal_for_text_change(
+                    frame.first_cursor_position(),
+                    frame_length,
+                    frame_length,
+                );
             });
 
             Ok(())
@@ -660,7 +685,7 @@ impl TextCursor {
     pub fn text_format(&self) -> Option<TextFormat> {
         let block_rc = self.current_block_rc();
 
-        block_rc.char_format_at(block_rc.convert_position_from_document(self.position))
+        block_rc.text_format_at(block_rc.convert_position_from_document(self.position))
     }
 
     // fetch the block format at the cursor position. Anchor position is ignored

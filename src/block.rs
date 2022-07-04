@@ -119,7 +119,7 @@ impl Block {
         position
     }
 
-    pub(crate) fn char_format_at(&self, position_in_block: usize) -> Option<TextFormat> {
+    pub(crate) fn text_format_at(&self, position_in_block: usize) -> Option<TextFormat> {
         if position_in_block == 0 {
             match self.first_child() {
                 Some(element) => match element {
@@ -238,7 +238,7 @@ impl Block {
             .unwrap();
     }
 
-    pub(crate) fn list_all_children(&self) -> Vec<Element> {
+    pub fn list_all_children(&self) -> Vec<Element> {
         let element_manager = self.element_manager.upgrade().unwrap();
         element_manager.list_all_children(self.uuid())
     }
@@ -253,7 +253,7 @@ impl Block {
     }
 
     /// Apply a new char format onto all text fragments of this block
-    pub(crate) fn set_char_format(&self, text_format: &TextFormat) {
+    pub(crate) fn set_text_format(&self, text_format: &TextFormat) {
         self.list_all_children()
             .iter()
             .filter_map(|element| match element {
@@ -770,5 +770,38 @@ mod tests {
 
         assert_eq!(block.plain_text(), "plain_text is life");
         assert_eq!(block.iter().count(), 4);
+    }
+
+    #[test]
+    fn block_text_format() {
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let block = element_manager_rc.first_block().unwrap();
+        block.set_plain_text("bold plain_text");
+
+        block.insert_new_text_element(block.text_length());
+        element_manager_rc.debug_elements();
+
+        let new_text_rc = block.insert_new_text_element(block.text_length());
+        new_text_rc.set_text(" is life");
+        element_manager_rc.debug_elements();
+
+        block.insert_new_text_element(block.text_length());
+        element_manager_rc.debug_elements();
+
+        assert_eq!(block.plain_text(), "bold plain_text is life");
+        assert_eq!(block.iter().count(), 4);
+
+        // format all
+        let mut text_format = TextFormat::new();
+        text_format.set_bold(true);
+
+        block.set_text_format(&text_format);
+
+        block
+            .iter()
+            .filter_map(|element| element.get_text())
+            .for_each(|text: Rc<Text>| assert!(text.format().bold()));
     }
 }
