@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    format::{CharFormat, FormatChangeResult, FormattedElement, IsFormat},
+    format::{FormatChangeResult, FormattedElement, IsFormat, TextFormat},
     text_document::{Element, ElementManager, ElementTrait, ModelError},
     Block,
 };
@@ -14,12 +14,12 @@ pub struct Text {
     uuid: Cell<usize>,
     element_manager: Weak<ElementManager>,
     text: RefCell<String>,
-    char_format: RefCell<CharFormat>,
+    text_format: RefCell<TextFormat>,
 }
 
 impl PartialEq for Text {
     fn eq(&self, other: &Self) -> bool {
-        self.uuid == other.uuid && self.char_format == other.char_format
+        self.uuid == other.uuid && self.text_format == other.text_format
     }
 }
 
@@ -28,7 +28,7 @@ impl Text {
         Text {
             element_manager,
             uuid: Default::default(),
-            char_format: RefCell::new(CharFormat {
+            text_format: RefCell::new(TextFormat {
                 ..Default::default()
             }),
             text: RefCell::new(String::new()),
@@ -38,7 +38,7 @@ impl Text {
     pub fn uuid(&self) -> usize {
         self.uuid.get()
     }
-    pub(crate) fn char_format(&self) -> CharFormat {
+    pub(crate) fn text_format(&self) -> TextFormat {
         self.format()
     }
 
@@ -72,7 +72,7 @@ impl Text {
         let split = original_text.split_at(position_in_text);
         self.set_text(&split.0.to_string());
         new_text_rc.set_text(&split.1.to_string());
-        new_text_rc.set_format(&self.char_format()).unwrap();
+        new_text_rc.set_format(&self.text_format()).unwrap();
 
         new_element
     }
@@ -139,22 +139,22 @@ impl ElementTrait for Text {
         }
     }
 }
-impl FormattedElement<CharFormat> for Text {
-    fn format(&self) -> CharFormat {
-        self.char_format.borrow().clone()
+impl FormattedElement<TextFormat> for Text {
+    fn format(&self) -> TextFormat {
+        self.text_format.borrow().clone()
     }
 
-    fn set_format(&self, format: &CharFormat) -> FormatChangeResult {
-        if &*self.char_format.borrow() == format {
+    fn set_format(&self, format: &TextFormat) -> FormatChangeResult {
+        if &*self.text_format.borrow() == format {
             Ok(None)
         } else {
-            self.char_format.replace(format.clone());
+            self.text_format.replace(format.clone());
             Ok(Some(()))
         }
     }
 
-    fn merge_format(&self, format: &CharFormat) -> FormatChangeResult {
-        self.char_format.borrow_mut().merge_with(format)
+    fn merge_format(&self, format: &TextFormat) -> FormatChangeResult {
+        self.text_format.borrow_mut().merge_with(format)
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::format::{BlockFormat, CharFormat, FormatChangeResult, FormattedElement, IsFormat};
+use crate::format::{BlockFormat, FormatChangeResult, FormattedElement, IsFormat, TextFormat};
 use crate::text::Text;
 use crate::text_document::Element::{ImageElement, TextElement};
 use crate::text_document::{Element, ElementManager, ElementTrait, ModelError};
@@ -119,11 +119,11 @@ impl Block {
         position
     }
 
-    pub(crate) fn char_format_at(&self, position_in_block: usize) -> Option<CharFormat> {
+    pub(crate) fn text_format_at(&self, position_in_block: usize) -> Option<TextFormat> {
         if position_in_block == 0 {
             match self.first_child() {
                 Some(element) => match element {
-                    TextElement(text) => Some(text.char_format()),
+                    TextElement(text) => Some(text.text_format()),
                     ImageElement(_) => None,
                     _ => None,
                 },
@@ -182,7 +182,7 @@ impl Block {
                 ImageElement(_) => {
                     let new_text_rc = self.insert_new_text_element(position_in_block);
                     new_text_rc.set_text(&plain_text.to_string());
-                    new_text_rc.set_format(&self.char_format()).unwrap();
+                    new_text_rc.set_format(&self.text_format()).unwrap();
                 }
                 _ => unreachable!(),
             },
@@ -238,22 +238,22 @@ impl Block {
             .unwrap();
     }
 
-    pub(crate) fn list_all_children(&self) -> Vec<Element> {
+    pub fn list_all_children(&self) -> Vec<Element> {
         let element_manager = self.element_manager.upgrade().unwrap();
         element_manager.list_all_children(self.uuid())
     }
 
     /// Describes the block's character format. The block's character format is the char format of the first block.
-    pub fn char_format(&self) -> CharFormat {
+    pub fn text_format(&self) -> TextFormat {
         match self.first_child().unwrap() {
-            TextElement(text_fragment) => text_fragment.char_format(),
-            ImageElement(_) => CharFormat::new(),
+            TextElement(text_fragment) => text_fragment.text_format(),
+            ImageElement(_) => TextFormat::new(),
             _ => unreachable!(),
         }
     }
 
     /// Apply a new char format onto all text fragments of this block
-    pub(crate) fn set_char_format(&self, char_format: &CharFormat) {
+    pub(crate) fn set_text_format(&self, text_format: &TextFormat) {
         self.list_all_children()
             .iter()
             .filter_map(|element| match element {
@@ -262,7 +262,7 @@ impl Block {
                 _ => unreachable!(),
             })
             .for_each(|text_fragment: &Rc<Text>| {
-                text_fragment.set_format(char_format).unwrap();
+                text_fragment.set_format(text_format).unwrap();
             });
     }
 
@@ -320,7 +320,7 @@ impl Block {
                     _ => continue,
                 };
 
-                if first_text.char_format() == second_text.char_format() {
+                if first_text.text_format() == second_text.text_format() {
                     self.merge_text_elements(first_text, second_text);
                     continue 'first_loop;
                 }
@@ -770,5 +770,38 @@ mod tests {
 
         assert_eq!(block.plain_text(), "plain_text is life");
         assert_eq!(block.iter().count(), 4);
+    }
+
+    #[test]
+    fn block_text_format() {
+        let element_manager_rc = ElementManager::new_rc();
+        ElementManager::create_root_frame(element_manager_rc.clone());
+
+        let block = element_manager_rc.first_block().unwrap();
+        block.set_plain_text("bold plain_text");
+
+        block.insert_new_text_element(block.text_length());
+        element_manager_rc.debug_elements();
+
+        let new_text_rc = block.insert_new_text_element(block.text_length());
+        new_text_rc.set_text(" is life");
+        element_manager_rc.debug_elements();
+
+        block.insert_new_text_element(block.text_length());
+        element_manager_rc.debug_elements();
+
+        assert_eq!(block.plain_text(), "bold plain_text is life");
+        assert_eq!(block.iter().count(), 4);
+
+        // format all
+        let mut text_format = TextFormat::new();
+        text_format.set_bold(true);
+
+        block.set_text_format(&text_format);
+
+        block
+            .iter()
+            .filter_map(|element| element.get_text())
+            .for_each(|text: Rc<Text>| assert!(text.format().bold()));
     }
 }

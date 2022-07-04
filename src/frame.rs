@@ -49,12 +49,12 @@ impl Frame {
             .start_of_element()
     }
 
-    pub(crate) fn list_all_direct_children(&self) -> Vec<Element> {
+    pub fn list_all_direct_children(&self) -> Vec<Element> {
         let element_manager = self.element_manager.upgrade().unwrap();
         element_manager.list_all_direct_children(self.uuid())
     }
 
-    pub(crate) fn list_all_children(&self) -> Vec<Element> {
+    pub fn list_all_children(&self) -> Vec<Element> {
         let element_manager = self.element_manager.upgrade().unwrap();
         element_manager.list_all_children(self.uuid())
     }

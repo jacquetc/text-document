@@ -1,6 +1,6 @@
 [package]
 name = "text-document"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Cyril Jacquet <cyril.jacquet@skribisto.eu>"]
@@ -10,6 +10,8 @@ documentation = "https://docs.rs/text-document/"
 description = """
 Text document structure and management.
 """
+keywords = ["text", "document", "model","format"]
+categories = ["data-structures", "text-editors", "text-processing", "parsing"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
