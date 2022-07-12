@@ -42,7 +42,7 @@ impl Block {
         let mut counter = 0;
 
         for block in self.element_manager.upgrade().unwrap().block_list() {
-            if block.as_ref().eq(self) {
+            if block.eq(self) {
                 break;
             }
             counter += block.text_length();
@@ -57,7 +57,7 @@ impl Block {
         let mut counter = 0;
 
         for block in self.element_manager.upgrade().unwrap().block_list() {
-            if block.as_ref().eq(self) {
+            if block.eq(self) {
                 break;
             }
 
@@ -190,26 +190,26 @@ impl Block {
         }
     }
 
-    fn insert_new_text_element(&self, position_in_block: usize) -> Rc<Text> {
+    fn insert_new_text_element(&self, position_in_block: usize) -> &Text {
         match self.find_element(position_in_block) {
             Some(element) => match element {
-                TextElement(text_rc) => {
+                TextElement(text) => {
                     // split if not at the end of the text
-                    if position_in_block != text_rc.position_in_block() + text_rc.text_length() {
-                        text_rc.split(self.convert_position_from_block_to_child(position_in_block));
+                    if position_in_block != text.position_in_block() + text.text_length() {
+                        text.split(self.convert_position_from_block_to_child(position_in_block));
                     }
                     // insert new text between splits
                     let element_manager = self.element_manager.upgrade().unwrap();
-                    let new_text_rc = element_manager
-                        .insert_new_text(text_rc.uuid(), crate::text_document::InsertMode::After);
-                    new_text_rc.unwrap()
+                    let new_text = element_manager
+                        .insert_new_text(text.uuid(), crate::text_document::InsertMode::After);
+                    new_text.unwrap()
                 }
                 ImageElement(_) => {
                     // add text after
                     let element_manager = self.element_manager.upgrade().unwrap();
-                    let new_text_rc = element_manager
+                    let new_text = element_manager
                         .insert_new_text(element.uuid(), crate::text_document::InsertMode::After);
-                    new_text_rc.unwrap()
+                    new_text.unwrap()
                 }
                 _ => unreachable!(),
             },
@@ -261,12 +261,12 @@ impl Block {
                 ImageElement(_) => None,
                 _ => unreachable!(),
             })
-            .for_each(|text_fragment: &Rc<Text>| {
+            .for_each(|text_fragment: &Text| {
                 text_fragment.set_format(text_format).unwrap();
             });
     }
 
-    pub(crate) fn split(&self, position_in_block: usize) -> Result<Rc<Block>, ModelError> {
+    pub(crate) fn split(&self, position_in_block: usize) -> Result<&Block, ModelError> {
         let element_manager = self.element_manager.upgrade().unwrap();
 
         // create block
@@ -285,7 +285,7 @@ impl Block {
             }
             ImageElement(image) => TextElement(
                 element_manager
-                    .insert_new_text(image.uuid(), crate::text_document::InsertMode::After)?,
+                    .insert_new_text(image.uuid(), crate::text_document::InsertMode::After)?.clone()
             ),
             _ => unreachable!(),
         };
@@ -331,7 +331,7 @@ impl Block {
         //todo!();
     }
 
-    pub(crate) fn merge_with(&self, other_block: Rc<Block>) -> Result<(), ModelError> {
+    pub(crate) fn merge_with(&self, other_block: &Block) -> Result<(), ModelError> {
         let element_manager = self.element_manager.upgrade().unwrap();
 
         let mut own_children = self.list_all_children();
@@ -350,13 +350,13 @@ impl Block {
     }
 
     /// merge to texts, adopts the first text's char format
-    fn merge_text_elements(&self, first_text_rc: &Rc<Text>, second_text_rc: &Rc<Text>) -> Rc<Text> {
-        first_text_rc
-            .set_text(&(first_text_rc.plain_text() + second_text_rc.plain_text().as_str()));
+    fn merge_text_elements<'a>(&self, first_text: &'a Text, second_text: &Text) -> &'a Text {
+        first_text
+            .set_text(&(first_text.plain_text() + second_text.plain_text().as_str()));
         let element_manager = self.element_manager.upgrade().unwrap();
-        element_manager.remove(vec![second_text_rc.uuid()]);
+        element_manager.remove(vec![second_text.uuid()]);
 
-        first_text_rc.clone()
+        first_text
     }
 
     /// returns the plain text of this block
@@ -578,7 +578,7 @@ mod tests {
             .insert_new_text(block.uuid(), InsertMode::AsChild)
             .unwrap();
         element_manager_rc.debug_elements();
-        assert_eq!(block.list_all_children(), vec![TextElement(text)]);
+        assert_eq!(block.list_all_children(), vec![TextElement(text.clone())]);
     }
 
     #[test]
@@ -802,6 +802,6 @@ mod tests {
         block
             .iter()
             .filter_map(|element| element.get_text())
-            .for_each(|text: Rc<Text>| assert!(text.format().bold()));
+            .for_each(|text: &Text| assert!(text.format().bold()));
     }
 }

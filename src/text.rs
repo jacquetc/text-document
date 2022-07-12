@@ -98,24 +98,24 @@ impl Text {
         self.text.borrow().len()
     }
 
-    fn parent_bloc_rc(&self) -> Rc<Block> {
+    fn parent_bloc(&self) -> &Block {
         let element_manager = self.element_manager.upgrade().unwrap();
 
         match element_manager
             .get_parent_element_using_uuid(self.uuid())
             .unwrap()
         {
-            Element::BlockElement(block) => block,
+            Element::BlockElement(block) => &block,
             _ => unreachable!(),
         }
     }
     pub fn position_in_block(&self) -> usize {
-        let parent_block = self.parent_bloc_rc();
+        let parent_block = self.parent_bloc();
         parent_block.position_of_child(self.uuid())
     }
 
     pub fn start(&self) -> usize {
-        let parent_block = self.parent_bloc_rc();
+        let parent_block = self.parent_bloc();
 
         parent_block.position() + self.position_in_block()
     }

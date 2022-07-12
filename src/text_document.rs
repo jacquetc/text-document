@@ -45,16 +45,13 @@ impl TextDocument {
         document
     }
 
-    pub fn block_list(&self) -> Vec<Weak<Block>> {
+    pub fn block_list(&self) -> Vec<&Block> {
         self.element_manager
             .block_list()
-            .into_iter()
-            .map(|block| Rc::downgrade(&block))
-            .collect()
     }
 
-    pub fn root_frame(&self) -> Weak<Frame> {
-        Rc::downgrade(&self.element_manager.root_frame())
+    pub fn root_frame(&self) -> &Frame {
+        self.element_manager.root_frame()
     }
 
     /// Character count, without counting new line character \n
@@ -71,18 +68,17 @@ impl TextDocument {
         counter
     }
 
-    pub fn find_block(&self, position: usize) -> Option<Weak<Block>> {
+    pub fn find_block(&self, position: usize) -> Option<&Block> {
         self.element_manager
             .find_block(position)
-            .map(|block| Rc::downgrade(&block))
     }
 
-    pub fn first_block(&self) -> Weak<Block> {
-        Rc::downgrade(&self.element_manager.first_block().unwrap())
+    pub fn first_block(&self) -> &Block {
+        self.element_manager.first_block().unwrap()
     }
 
-    pub fn last_block(&self) -> Weak<Block> {
-        Rc::downgrade(&self.element_manager.last_block().unwrap())
+    pub fn last_block(&self) -> &Block {
+        &self.element_manager.last_block().unwrap()
     }
 
     pub fn block_count(&self) -> usize {
@@ -255,17 +251,17 @@ impl ElementManager {
     }
 
     // only used while creating a new document
-    pub(crate) fn create_root_frame(element_manager: Rc<ElementManager>) -> Rc<Frame> {
-        let new_frame = Rc::new(Frame::new(Rc::downgrade(&element_manager)));
+    pub(crate) fn create_root_frame(element_manager: Rc<ElementManager>) -> &'static Frame {
+        let new_frame = Frame::new(Rc::downgrade(&element_manager));
 
-        let new_element = Element::FrameElement(new_frame.clone());
+        let new_element = Element::FrameElement(new_frame);
 
         let mut tree_model = element_manager.tree_model.borrow_mut();
-        tree_model.set_root_element(new_element);
+        tree_model.set_root_element(new_element.clone());
 
         // create a first empty block
 
-        let new_block = Rc::new(Block::new(Rc::downgrade(&element_manager)));
+        let new_block = Block::new(Rc::downgrade(&element_manager));
 
         let new_block_element = Element::BlockElement(new_block);
 
@@ -273,7 +269,7 @@ impl ElementManager {
 
         // create a first empty text element
 
-        let new_text = Rc::new(Text::new(Rc::downgrade(&element_manager)));
+        let new_text = Text::new(Rc::downgrade(&element_manager));
 
         let new_text_element = Element::TextElement(new_text);
 
@@ -283,28 +279,28 @@ impl ElementManager {
 
         tree_model.recalculate_sort_order();
 
-        new_frame
+        &new_frame
     }
 
-    fn create_empty_root_frame(&self) -> Rc<Frame> {
-        let new_frame = Rc::new(Frame::new(self.self_weak.borrow().clone()));
+    fn create_empty_root_frame(&self) -> &Frame {
+        let new_frame = Frame::new(self.self_weak.borrow().clone());
 
-        let new_element = Element::FrameElement(new_frame.clone());
+        let new_element = Element::FrameElement(new_frame);
 
         self.tree_model.borrow_mut().set_root_element(new_element);
         self.tree_model.borrow_mut().recalculate_sort_order();
 
-        new_frame
+        &new_frame
     }
 
     pub(crate) fn insert_new_frame(
         &self,
         target_uuid: usize,
         insert_mode: InsertMode,
-    ) -> Result<Rc<Frame>, ModelError> {
-        let new_frame = Rc::new(Frame::new(self.self_weak.borrow().clone()));
+    ) -> Result<&Frame, ModelError> {
+        let new_frame = Frame::new(self.self_weak.borrow().clone());
 
-        let new_element = Element::FrameElement(new_frame.clone());
+        let new_element = Element::FrameElement(new_frame);
 
         self.insert(new_element.clone(), target_uuid, insert_mode)?;
         // verify:
@@ -316,17 +312,17 @@ impl ElementManager {
 
         self.tree_model.borrow_mut().recalculate_sort_order();
 
-        Ok(new_frame)
+        Ok(&new_frame)
     }
 
     pub(crate) fn insert_new_block(
         &self,
         target_uuid: usize,
         insert_mode: InsertMode,
-    ) -> Result<Rc<Block>, ModelError> {
-        let new_block = Rc::new(Block::new(self.self_weak.borrow().clone()));
+    ) -> Result<&Block, ModelError> {
+        let new_block = Block::new(self.self_weak.borrow().clone());
 
-        let new_element = Element::BlockElement(new_block.clone());
+        let new_element = Element::BlockElement(new_block);
 
         self.insert(new_element.clone(), target_uuid, insert_mode)?;
         // verify:
@@ -338,17 +334,17 @@ impl ElementManager {
 
         self.tree_model.borrow_mut().recalculate_sort_order();
 
-        Ok(new_block)
+        Ok(&new_block)
     }
 
     pub(crate) fn insert_new_text(
         &self,
         target_uuid: usize,
         insert_mode: InsertMode,
-    ) -> Result<Rc<Text>, ModelError> {
-        let new_text = Rc::new(Text::new(self.self_weak.borrow().clone()));
+    ) -> Result<&Text, ModelError> {
+        let new_text = Text::new(self.self_weak.borrow().clone());
 
-        let new_element = Element::TextElement(new_text.clone());
+        let new_element = Element::TextElement(new_text);
 
         self.insert(new_element.clone(), target_uuid, insert_mode)?;
         // verify:
@@ -359,17 +355,17 @@ impl ElementManager {
         new_text.verify_rule_with_parent(&parent_element)?;
         self.tree_model.borrow_mut().recalculate_sort_order();
 
-        Ok(new_text)
+        Ok(&new_text)
     }
 
     pub(crate) fn insert_new_image(
         &self,
         target_uuid: usize,
         insert_mode: InsertMode,
-    ) -> Result<Rc<Image>, ModelError> {
-        let new_image = Rc::new(Image::new(self.self_weak.borrow().clone()));
+    ) -> Result<&Image, ModelError> {
+        let new_image = Image::new(self.self_weak.borrow().clone());
 
-        let new_element = Element::ImageElement(new_image.clone());
+        let new_element = Element::ImageElement(new_image);
 
         self.insert(new_element.clone(), target_uuid, insert_mode)?;
         // verify:
@@ -380,7 +376,7 @@ impl ElementManager {
         new_image.verify_rule_with_parent(&parent_element)?;
         self.tree_model.borrow_mut().recalculate_sort_order();
 
-        Ok(new_image)
+        Ok(&new_image)
     }
 
     pub(crate) fn insert(
@@ -423,13 +419,13 @@ impl ElementManager {
         counter
     }
 
-    pub(crate) fn block_list(&self) -> Vec<Rc<Block>> {
+    pub(crate) fn block_list(&self) -> Vec<&Block> {
         let tree_model = self.tree_model.borrow();
 
         tree_model
             .iter()
             .filter_map(|x| match x {
-                BlockElement(block) => Some(block.clone()),
+                BlockElement(block) => Some(block),
                 _ => None,
             })
             .collect()
@@ -460,28 +456,28 @@ impl ElementManager {
         )
     }
 
-    pub(crate) fn root_frame(&self) -> Rc<Frame> {
+    pub(crate) fn root_frame(&self) -> &Frame {
         let tree_model = self.tree_model.borrow();
         let element = tree_model.get_root_element().unwrap();
 
         if let Element::FrameElement(c) = element {
-            c.clone()
+            c
         } else {
             unreachable!()
         }
     }
 
-    pub(crate) fn find_block(&self, position: usize) -> Option<Rc<Block>> {
-        for rc_block in self.block_list() {
-            if (rc_block.position()..=rc_block.end()).contains(&position) {
-                return Some(rc_block);
+    pub(crate) fn find_block(&self, position: usize) -> Option<&Block> {
+        for block in self.block_list() {
+            if (block.position()..=block.end()).contains(&position) {
+                return Some(block);
             }
         }
 
         None
     }
 
-    pub(crate) fn get_parent_frame(&self, element: &Element) -> Option<Rc<Frame>> {
+    pub(crate) fn get_parent_frame(&self, element: &Element) -> Option<&Frame> {
         let child_uuid = self.get_element_uuid(element);
 
         let tree_model = self.tree_model.borrow();
@@ -490,7 +486,7 @@ impl ElementManager {
         let parent_element = tree_model.get(parent_uuid)?;
 
         match parent_element {
-            FrameElement(frame_rc) => Some(frame_rc.clone()),
+            FrameElement(frame) => Some(frame),
             BlockElement(_) => None,
             TextElement(_) => None,
             ImageElement(_) => None,
@@ -561,24 +557,24 @@ impl ElementManager {
         tree_model.get(uuid).cloned()
     }
 
-    pub(crate) fn find_frame(&self, position: usize) -> Option<Rc<Frame>> {
+    pub(crate) fn find_frame(&self, position: usize) -> Option<&Frame> {
         let block = self
             .block_list()
             .into_iter()
-            .find(|rc_block| (rc_block.position()..rc_block.end()).contains(&position));
+            .find(|block| (block.position()..block.end()).contains(&position));
 
         match block {
-            Some(block_rc) => self.get_parent_frame(&BlockElement(block_rc)),
+            Some(block) => self.get_parent_frame(&BlockElement(block.clone())),
             None => None,
         }
     }
 
-    pub(crate) fn last_block(&self) -> Option<Rc<Block>> {
-        self.block_list().last().cloned()
+    pub(crate) fn last_block(&self) -> Option<&&Block> {
+        self.block_list().last()
     }
 
-    pub(crate) fn first_block(&self) -> Option<Rc<Block>> {
-        self.block_list().first().cloned()
+    pub(crate) fn first_block(&self) -> Option<&&Block> {
+        self.block_list().first()
     }
 
     /// list recursively all elements having uuid as their common ancestor
@@ -1320,10 +1316,10 @@ impl<'a> Iterator for TreeIter<'a> {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Element {
-    FrameElement(Rc<Frame>),
-    BlockElement(Rc<Block>),
-    TextElement(Rc<Text>),
-    ImageElement(Rc<Image>),
+    FrameElement(Frame),
+    BlockElement(Block),
+    TextElement(Text),
+    ImageElement(Image),
 }
 
 impl Element {
@@ -1372,9 +1368,9 @@ impl Element {
     pub fn is_block(&self) -> bool {
         matches!(self, Element::BlockElement(_))
     }
-    pub fn get_block(&self) -> Option<Rc<Block>> {
+    pub fn get_block(&self) -> Option<&Block> {
         match self {
-            Element::BlockElement(block) => Some(block.clone()),
+            Element::BlockElement(block) => Some(block),
             _ => None,
         }
     }
@@ -1382,9 +1378,9 @@ impl Element {
     pub fn is_frame(&self) -> bool {
         matches!(self, Element::FrameElement(_))
     }
-    pub fn get_frame(&self) -> Option<Rc<Frame>> {
+    pub fn get_frame(&self) -> Option<&Frame> {
         match self {
-            Element::FrameElement(frame) => Some(frame.clone()),
+            Element::FrameElement(frame) => Some(frame),
             _ => None,
         }
     }
@@ -1392,9 +1388,9 @@ impl Element {
     pub fn is_text(&self) -> bool {
         matches!(self, Element::TextElement(_))
     }
-    pub fn get_text(&self) -> Option<Rc<Text>> {
+    pub fn get_text(&self) -> Option<&Text> {
         match self {
-            Element::TextElement(text) => Some(text.clone()),
+            Element::TextElement(text) => Some(text),
             _ => None,
         }
     }
@@ -1402,9 +1398,9 @@ impl Element {
     pub fn is_image(&self) -> bool {
         matches!(self, Element::ImageElement(_))
     }
-    pub fn get_image(&self) -> Option<Rc<Image>> {
+    pub fn get_image(&self) -> Option<&Image> {
         match self {
-            Element::ImageElement(image) => Some(image.clone()),
+            Element::ImageElement(image) => Some(image),
             _ => None,
         }
     }
@@ -1419,7 +1415,7 @@ mod tests_element {
 
     #[test]
     fn get() {
-        let element = BlockElement(Rc::new(Block::new(Weak::new())));
+        let element = BlockElement(Block::new(Weak::new()));
         assert!(element.is_block());
         assert!(!element.is_image());
         assert!(!element.is_frame());
@@ -1539,7 +1535,7 @@ mod document_tests {
             .insert_new_block(0, InsertMode::AsChild)
             .expect("Insertion failed");
         document.print_debug_elements();
-        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 3);
+        assert_eq!(document.last_block().uuid(), 3);
 
         let children = document.element_manager.list_all_children(0);
         assert_eq!(children.len(), 3);
@@ -1554,11 +1550,11 @@ mod document_tests {
         document.print_debug_elements();
 
         let block = document.find_block(10).unwrap();
-        assert_eq!(block.upgrade().unwrap().uuid(), 1);
+        assert_eq!(block.uuid(), 1);
         let block = document.find_block(11).unwrap();
-        assert_eq!(block.upgrade().unwrap().uuid(), 3);
+        assert_eq!(block.uuid(), 3);
         let block = document.find_block(23).unwrap();
-        assert_eq!(block.upgrade().unwrap().uuid(), 5);
+        assert_eq!(block.uuid(), 5);
     }
 
     #[test]
@@ -1572,7 +1568,7 @@ mod document_tests {
             .insert_new_block(1, InsertMode::Before)
             .expect("Insertion failed");
         document.print_debug_elements();
-        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 1);
+        assert_eq!(document.last_block().uuid(), 1);
 
         let children = document.element_manager.list_all_children(0);
         assert_eq!(children.len(), 3);
@@ -1589,7 +1585,7 @@ mod document_tests {
             .insert_new_block(1, InsertMode::After)
             .expect("Insertion failed");
         document.print_debug_elements();
-        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 3);
+        assert_eq!(document.last_block().uuid(), 3);
 
         let children = document.element_manager.list_all_children(0);
         assert_eq!(children.len(), 3);
@@ -1600,7 +1596,7 @@ mod document_tests {
             .insert_new_block(1, InsertMode::After)
             .expect("Insertion failed");
         document.print_debug_elements();
-        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 3);
+        assert_eq!(document.last_block().uuid(), 3);
 
         let children = document.element_manager.list_all_children(0);
         assert_eq!(children.len(), 4);
@@ -1617,7 +1613,7 @@ mod document_tests {
             .insert_new_block(1, InsertMode::After)
             .expect("Insertion failed");
         document.print_debug_elements();
-        assert_eq!(document.last_block().upgrade().unwrap().uuid(), 3);
+        assert_eq!(document.last_block().uuid(), 3);
 
         let frame = document
             .element_manager

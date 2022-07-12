@@ -64,21 +64,13 @@ impl TextCursor {
     }
 
     /// Give the current block under the cursor position
-    pub fn current_block(&self) -> Weak<Block> {
-        Rc::downgrade(&self.current_block_rc())
-    }
-
-    fn current_block_rc(&self) -> Rc<Block> {
-        self.element_manager
-            .find_block(self.position)
-            .unwrap_or_else(|| self.element_manager.last_block().unwrap())
+    pub fn current_block(&self) -> &Block {
+        self.current_block()
     }
 
     pub fn set_block_format(&mut self, block_format: &BlockFormat) -> Result<(), ModelError> {
         if self.position == self.anchor_position {
-            let current_block = self.current_block().upgrade().ok_or_else(|| {
-                ModelError::ElementNotFound("current block not found".to_string())
-            })?;
+            let current_block = self.current_block();
 
             match current_block.set_format(block_format) {
                 Ok(option) => match option {
@@ -106,7 +98,7 @@ impl TextCursor {
                 .find_block(right_position)
                 .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
 
-            let mut target_list: Vec<Rc<Block>> = self
+            let mut target_list: Vec<&Block> = self
                 .element_manager
                 .list_all_children(0)
                 .iter()
@@ -118,7 +110,7 @@ impl TextCursor {
             target_list.push(bottom_block);
 
             // merge, keeping changed elements
-            let list_to_signal: Vec<Rc<Block>> = target_list
+            let list_to_signal: Vec<&Block> = target_list
                 .iter()
                 .filter_map(|block| {
                     block
@@ -130,7 +122,7 @@ impl TextCursor {
 
             list_to_signal.iter().for_each(|block| {
                 self.element_manager.signal_for_element_change(
-                    Element::BlockElement(block.clone()),
+                    Element::BlockElement(*block.clone()),
                     ChangeReason::FormatChanged,
                 );
                 let block_length = block.text_length();
@@ -147,10 +139,7 @@ impl TextCursor {
 
     pub fn merge_block_format(&mut self, block_format: &BlockFormat) -> Result<(), ModelError> {
         if self.position == self.anchor_position {
-            let current_block = self.current_block().upgrade().ok_or_else(|| {
-                ModelError::ElementNotFound("current block not found".to_string())
-            })?;
-
+            let current_block = self.current_block();
             match current_block.merge_format(block_format) {
                 Ok(option) => match option {
                     Some(_) => {
@@ -177,7 +166,7 @@ impl TextCursor {
                 .find_block(right_position)
                 .ok_or_else(|| ModelError::ElementNotFound("bottom block not found".to_string()))?;
 
-            let mut target_list: Vec<Rc<Block>> = self
+            let mut target_list: Vec<&Block> = self
                 .element_manager
                 .list_all_children(0)
                 .iter()
@@ -189,7 +178,7 @@ impl TextCursor {
             target_list.push(bottom_block);
 
             // merge, keeping changed elements
-            let list_to_signal: Vec<Rc<Block>> = target_list
+            let list_to_signal: Vec<&Block> = target_list
                 .iter()
                 .filter_map(|block| {
                     block
@@ -201,7 +190,7 @@ impl TextCursor {
 
             list_to_signal.iter().for_each(|block| {
                 self.element_manager.signal_for_element_change(
-                    Element::BlockElement(block.clone()),
+                    Element::BlockElement(*block.clone()),
                     ChangeReason::FormatChanged,
                 );
                 let block_length = block.text_length();
@@ -217,7 +206,7 @@ impl TextCursor {
     }
 
     // split block at position, like if a new line is inserted
-    pub fn insert_block(&mut self) -> Result<Weak<Block>, ModelError> {
+    pub fn insert_block(&mut self) -> Result<&Block, ModelError> {
         // fix positions
         let left_position = self.position.min(self.anchor_position);
         let right_position = self.anchor_position.max(self.position);
@@ -232,17 +221,17 @@ impl TextCursor {
         }
 
         // find reference block
-        let old_block_rc = self
+        let old_block = self
             .element_manager
             .find_block(new_position)
             .ok_or_else(|| {
                 ModelError::ElementNotFound(format!("block not found at {}", new_position))
             })?;
 
-        let _u = old_block_rc.uuid();
+        let _u = old_block.uuid();
 
         let new_block =
-            old_block_rc.split(old_block_rc.convert_position_from_document(new_position))?;
+            old_block.split(old_block.convert_position_from_document(new_position))?;
         let _w = new_block.uuid();
         let _order = self
             .element_manager
@@ -267,20 +256,16 @@ impl TextCursor {
 
         self.element_manager.signal_for_element_change(
             self.element_manager
-                .get_parent_element(&Element::BlockElement(old_block_rc))
+                .get_parent_element(&Element::BlockElement(old_block.clone()))
                 .unwrap(),
             ChangeReason::ChildrenChanged,
         );
 
-        Ok(Rc::downgrade(&new_block))
+        Ok(&new_block)
     }
 
     /// Give the current frame under the cursor position
-    pub fn current_frame(&self) -> Weak<Frame> {
-        Rc::downgrade(&self.current_frame_rc())
-    }
-
-    fn current_frame_rc(&self) -> Rc<Frame> {
+    fn current_frame(&self) -> &Frame {
         self.element_manager
             .find_frame(self.position)
             .unwrap_or_else(|| self.element_manager.root_frame())
@@ -288,9 +273,7 @@ impl TextCursor {
 
     pub fn set_frame_format(&mut self, frame_format: &FrameFormat) -> Result<(), ModelError> {
         if self.position == self.anchor_position {
-            let current_frame = self.current_frame().upgrade().ok_or_else(|| {
-                ModelError::ElementNotFound("current frame not found".to_string())
-            })?;
+            let current_frame = self.current_frame();
 
             match current_frame.set_format(frame_format) {
                 Ok(option) => match option {
@@ -330,7 +313,7 @@ impl TextCursor {
                 .get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
 
-            let mut target_list: Vec<Rc<Frame>> = Vec::new();
+            let mut target_list: Vec<&Frame> = Vec::new();
             if top_frame == bottom_frame {
                 target_list.push(top_frame);
             } else {
@@ -345,7 +328,7 @@ impl TextCursor {
             }
 
             // merge, keeping changed elements
-            let list_to_signal: Vec<Rc<Frame>> = target_list
+            let list_to_signal: Vec<&Frame> = target_list
                 .iter()
                 .filter_map(|frame| {
                     frame
@@ -357,7 +340,7 @@ impl TextCursor {
 
             list_to_signal.iter().for_each(|frame| {
                 self.element_manager.signal_for_element_change(
-                    Element::FrameElement(frame.clone()),
+                    Element::FrameElement(*frame.clone()),
                     ChangeReason::FormatChanged,
                 );
                 let frame_length = frame.text_length();
@@ -374,9 +357,7 @@ impl TextCursor {
 
     pub fn merge_frame_format(&mut self, frame_format: &FrameFormat) -> Result<(), ModelError> {
         if self.position == self.anchor_position {
-            let current_frame = self.current_frame().upgrade().ok_or_else(|| {
-                ModelError::ElementNotFound("current frame not found".to_string())
-            })?;
+            let current_frame = self.current_frame();
 
             match current_frame.merge_format(frame_format) {
                 Ok(option) => match option {
@@ -416,7 +397,7 @@ impl TextCursor {
                 .get_frame()
                 .ok_or_else(|| ModelError::ElementNotFound("bottom frame not found".to_string()))?;
 
-            let mut target_list: Vec<Rc<Frame>> = Vec::new();
+            let mut target_list: Vec<&Frame> = Vec::new();
             if top_frame == bottom_frame {
                 target_list.push(top_frame);
             } else {
@@ -431,7 +412,7 @@ impl TextCursor {
             }
 
             // merge, keeping changed elements
-            let list_to_signal: Vec<Rc<Frame>> = target_list
+            let list_to_signal: Vec<&Frame> = target_list
                 .iter()
                 .filter_map(|frame| {
                     frame
@@ -444,7 +425,7 @@ impl TextCursor {
             // signal change for each frame
             list_to_signal.iter().for_each(|frame| {
                 self.element_manager.signal_for_element_change(
-                    Element::FrameElement(frame.clone()),
+                    Element::FrameElement(*frame.clone()),
                     ChangeReason::FormatChanged,
                 );
                 let frame_length = frame.text_length();
@@ -460,7 +441,7 @@ impl TextCursor {
     }
 
     /// insert a frame at the cursor position
-    pub fn insert_frame(&mut self) -> Result<Weak<Frame>, ModelError> {
+    pub fn insert_frame(&mut self) -> Result<&Frame, ModelError> {
         // fix positions
         let left_position = self.position.min(self.anchor_position);
         let right_position = self.anchor_position.max(self.position);
@@ -515,7 +496,7 @@ impl TextCursor {
             ChangeReason::ChildrenChanged,
         );
 
-        Ok(Rc::downgrade(&frame))
+        Ok(&frame)
     }
 
     /// Insert plain text and return (start position, end position)
@@ -610,13 +591,13 @@ impl TextCursor {
         // if only one line, so one Block element changed
         if count == 1 {
             self.element_manager.signal_for_element_change(
-                Element::BlockElement(block),
+                Element::BlockElement(block.clone()),
                 ChangeReason::ChildrenChanged,
             );
         } else {
             self.element_manager.signal_for_element_change(
                 self.element_manager
-                    .get_parent_element(&Element::BlockElement(block))
+                    .get_parent_element(&Element::BlockElement(block.clone()))
                     .unwrap(),
                 ChangeReason::ChildrenChanged,
             );
@@ -683,21 +664,21 @@ impl TextCursor {
 
     // fetch the char format at the cursor position. Anchor position is ignored
     pub fn text_format(&self) -> Option<TextFormat> {
-        let block_rc = self.current_block_rc();
+        let block_rc = self.current_block();
 
         block_rc.text_format_at(block_rc.convert_position_from_document(self.position))
     }
 
     // fetch the block format at the cursor position. Anchor position is ignored
     pub fn block_format(&self) -> Option<BlockFormat> {
-        let block_rc = self.current_block_rc();
+        let block_rc = self.current_block();
 
         Some(block_rc.block_format())
     }
 
     // fetch the frame format at the cursor position. Anchor position is ignored
     pub fn frame_format(&self) -> Option<FrameFormat> {
-        let frame_rc = self.current_frame_rc();
+        let frame_rc = self.current_frame();
 
         Some(frame_rc.frame_format())
     }
@@ -749,7 +730,7 @@ impl TextCursor {
 
             if send_change_signals {
                 self.element_manager.signal_for_element_change(
-                    Element::BlockElement(top_block),
+                    Element::BlockElement(top_block.clone()),
                     ChangeReason::ChildrenChanged,
                 );
             }
@@ -808,7 +789,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(common_ancestor)
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame()),
+                None => Element::FrameElement(self.element_manager.root_frame().clone()),
             };
 
             self.element_manager.remove(vec![common_ancestor]);
@@ -818,7 +799,7 @@ impl TextCursor {
                 self.element_manager.clear();
 
                 parent_element_for_signal =
-                    Element::FrameElement(self.element_manager.root_frame());
+                    Element::FrameElement(self.element_manager.root_frame().clone());
             }
         }
         // if top block's level is superior than (is a child of) bottom block
@@ -858,7 +839,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(bottom_block.uuid())
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame()),
+                None => Element::FrameElement(self.element_manager.root_frame().clone()),
             };
 
             self.element_manager.remove(vec![sibling_ancestor]);
@@ -902,7 +883,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(top_block.uuid())
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame()),
+                None => Element::FrameElement(self.element_manager.root_frame().clone()),
             };
 
             (new_position, removed_characters_count) = top_block
@@ -944,7 +925,7 @@ impl TextCursor {
                 .get_parent_element_using_uuid(top_block.uuid())
             {
                 Some(parent_of_ancestor) => parent_of_ancestor,
-                None => Element::FrameElement(self.element_manager.root_frame()),
+                None => Element::FrameElement(self.element_manager.root_frame().clone()),
             };
 
             (new_position, removed_characters_count) = top_block
@@ -1001,7 +982,7 @@ impl TextCursor {
             MoveOperation::Start => self.set_position(0, move_mode),
             MoveOperation::StartOfLine => todo!(),
             MoveOperation::StartOfBlock => {
-                self.set_position(self.current_block_rc().start(), move_mode)
+                self.set_position(self.current_block().start(), move_mode)
             }
             MoveOperation::StartOfWord => todo!(),
             MoveOperation::PreviousBlock => todo!(),
@@ -1016,7 +997,7 @@ impl TextCursor {
             MoveOperation::EndOfLine => todo!(),
             MoveOperation::EndOfWord => todo!(),
             MoveOperation::EndOfBlock => {
-                self.set_position(self.current_block_rc().end(), move_mode)
+                self.set_position(self.current_block().end(), move_mode)
             }
             MoveOperation::NextBlock => todo!(),
             MoveOperation::NextCharacter => self.set_position(self.position + 1, move_mode),

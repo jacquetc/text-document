@@ -53,24 +53,24 @@ impl Image {
         1
     }
 
-    fn parent_bloc_rc(&self) -> Rc<Block> {
+    fn parent_block(&self) -> &Block {
         let element_manager = self.element_manager.upgrade().unwrap();
 
         match element_manager
             .get_parent_element_using_uuid(self.uuid())
             .unwrap()
         {
-            Element::BlockElement(block) => block,
+            Element::BlockElement(block) => &block,
             _ => unreachable!(),
         }
     }
     pub fn position_in_block(&self) -> usize {
-        let parent_block = self.parent_bloc_rc();
+        let parent_block = self.parent_block();
         parent_block.position_of_child(self.uuid())
     }
 
     pub fn start(&self) -> usize {
-        let parent_block = self.parent_bloc_rc();
+        let parent_block = self.parent_block();
 
         parent_block.position() + self.position_in_block()
     }
@@ -144,7 +144,7 @@ mod tests {
             .insert_new_image(1, InsertMode::AsChild)
             .unwrap();
 
-        assert_eq!(image.parent_bloc_rc().uuid(), 1);
+        assert_eq!(image.parent_block().uuid(), 1);
         assert_eq!(image.start(), 0);
         assert_eq!(image.end(), 1);
     }
