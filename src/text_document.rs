@@ -17,11 +17,18 @@ use thiserror::Error;
 
 pub type ElementUuid = usize;
 
-#[derive(PartialEq, Clone)]
+#[derive(Clone)]
 pub struct TextDocument {
     //formats: Vec<Format>,
     element_manager: Rc<ElementManager>,
     uuid: Uuid,
+    text_cursor: TextCursor
+}
+
+impl PartialEq for TextDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.element_manager == other.element_manager && self.uuid == other.uuid
+    }
 }
 
 impl Default for TextDocument {
@@ -39,6 +46,8 @@ impl TextDocument {
         let document = Self {
             element_manager: element_manager.clone(),
             uuid: Uuid::new_v4(),
+            text_cursor: TextCursor::new(element_manager.clone())
+
         };
         // root frame:
         ElementManager::create_root_frame(element_manager);
@@ -88,11 +97,7 @@ impl TextDocument {
     pub fn block_count(&self) -> usize {
         self.element_manager.block_count()
     }
-
-    pub fn create_cursor(&self) -> TextCursor {
-        TextCursor::new(self.element_manager.clone())
-    }
-
+    
     pub fn set_plain_text<S: Into<String>>(&mut self, plain_text: S) -> Result<(), ModelError> {
         let plain_text: String = plain_text.into();
 
@@ -162,6 +167,17 @@ impl TextDocument {
     pub fn add_element_change_callback(&self, callback: fn(Element, ChangeReason)) {
         self.element_manager.add_element_change_callback(callback);
     }
+
+    /// Initialise text_cursor's position to 0 and get the text_cursor
+    pub fn text_cursor(&self) -> &TextCursor {
+        &self.text_cursor
+    }
+
+    /// Initialise text_cursor's position to 0 and get the mutable text_cursor
+    pub fn text_cursor_mut(&mut self) -> &mut TextCursor {
+        &mut self.text_cursor
+    }
+
 }
 
 #[derive(Default, PartialEq, Clone, Debug)]

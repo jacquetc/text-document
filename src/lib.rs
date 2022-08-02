@@ -1,7 +1,7 @@
 //! A model for text documents.
 //!
 //! This model is thought as a backend for a text UI. [`TextDocument`] can't be modified directly by the user, only for setting the whole document with `set_plain_text(...)`.
-//! The user must use a [`TextCursor`] using `document.create_cursor()` to make any change.
+//! The user must use a [`TextCursor`] using `document.text_cursor_mut()` to make any change.
 //!  
 //! # Document structure
 //!
@@ -75,7 +75,7 @@
 //!  } );
 //!  document.set_plain_text("beginningend").unwrap();
 //!
-//!  let mut cursor = document.create_cursor();
+//!  let cursor = document.text_cursor_mut();
 //!  cursor.set_position(9, MoveMode::MoveAnchor);
 //!  cursor.insert_plain_text("new\nplain_text\ntest");
 //!

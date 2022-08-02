@@ -9,10 +9,10 @@ mod common;
 
 #[test]
 fn cursor_insert_block() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
     document.print_debug_elements();
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
 
     cursor.insert_block().expect("Testing block insertion");
@@ -23,9 +23,9 @@ fn cursor_insert_block() {
 
 #[test]
 fn cursor_insert_plain_text() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_plain_text("\nplain_text\ntest").unwrap();
     document.print_debug_elements();
@@ -35,14 +35,16 @@ fn cursor_insert_plain_text() {
 
 #[test]
 fn cursor_insert_plain_text_at_position() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_plain_text("AB").unwrap();
     cursor.set_position(1, MoveMode::MoveAnchor);
     cursor.insert_plain_text("\nplain_text\ntest").unwrap();
     document.print_debug_elements();
+
+    let cursor = document.text_cursor();
 
     assert_eq!(document.block_count(), 3);
 
@@ -57,13 +59,16 @@ fn cursor_insert_plain_text_at_position() {
 
 #[test]
 fn cursor_insert_single_line_plain_text_at_position() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_plain_text("AB").unwrap();
     cursor.set_position(1, MoveMode::MoveAnchor);
     cursor.insert_plain_text("plain_text").unwrap();
+
+    let cursor = document.text_cursor();
+
     document.print_debug_elements();
 
     assert_eq!(document.block_count(), 1);
@@ -74,12 +79,13 @@ fn cursor_insert_single_line_plain_text_at_position() {
 
 #[test]
 fn cursor_select_text() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_plain_text("a\nplain_text\ntest").unwrap();
 
+    let cursor = document.text_cursor();
     document.print_debug_elements();
 
     cursor.set_position(0, MoveMode::MoveAnchor);
@@ -106,7 +112,7 @@ fn cursor_insert_plain_text_into_filled_block() {
         assert_eq!(added_characters, 19);
     });
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(9, MoveMode::MoveAnchor);
     cursor.insert_plain_text("new\nplain_text\ntest").unwrap();
     document.print_debug_elements();
@@ -156,7 +162,7 @@ fn remove_in_blocks_at_the_same_level() {
         assert_eq!(reason, ChangeReason::ChildrenChanged);
     });
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(3, MoveMode::MoveAnchor);
     cursor.set_position(17, MoveMode::KeepAnchor);
     cursor.remove().unwrap();
@@ -168,7 +174,7 @@ fn remove_in_blocks_at_the_same_level() {
 
 #[test]
 fn remove_in_blocks_where_top_is_child_of_bottom_block() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
     //document.set_plain_text("beginning\nblock\nend").unwrap();
     document.print_debug_elements();
 
@@ -186,23 +192,30 @@ fn remove_in_blocks_where_top_is_child_of_bottom_block() {
     // assert_eq!(reason, ChangeReason::ChildrenChanged );
     //});
 
-    let mut cursor = document.create_cursor();
+    {
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_frame().unwrap();
     cursor.insert_plain_text("beginning").unwrap();
+      assert_eq!(cursor.position(), 10);
+  }
     document.print_debug_elements();
 
-    assert_eq!(cursor.position(), 10);
-
+    {
+    let cursor = document.text_cursor_mut();
     cursor.insert_block().unwrap();
+    
+    }
     document.print_debug_elements();
-
+    {
+    let cursor = document.text_cursor_mut();
     cursor.set_position(17, MoveMode::MoveAnchor);
     cursor.insert_plain_text("end").unwrap();
-
+    }
     document.print_debug_elements();
 
     //position and remove
+    let cursor = document.text_cursor_mut();
     cursor.set_position(4, MoveMode::MoveAnchor);
     cursor.set_position(13, MoveMode::KeepAnchor);
     cursor.remove().unwrap();
@@ -214,7 +227,7 @@ fn remove_in_blocks_where_top_is_child_of_bottom_block() {
 
 #[test]
 fn remove_in_blocks_where_bottom_is_child_of_top_block() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
     //document.set_plain_text("beginning\nblock\nend").unwrap();
     document.print_debug_elements();
 
@@ -231,8 +244,8 @@ fn remove_in_blocks_where_bottom_is_child_of_top_block() {
     // assert_eq!(element.uuid(), 0);
     // assert_eq!(reason, ChangeReason::ChildrenChanged );
     //});
-
-    let mut cursor = document.create_cursor();
+        {
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_plain_text("beginning").unwrap();
     cursor.insert_block().unwrap();
@@ -240,9 +253,11 @@ fn remove_in_blocks_where_bottom_is_child_of_top_block() {
     cursor.insert_block().unwrap();
     cursor.insert_plain_text("end").unwrap();
     cursor.insert_block().unwrap();
+     assert_eq!(cursor.position(), 16);
+       }
     document.print_debug_elements();
 
-    assert_eq!(cursor.position(), 16);
+    let cursor = document.text_cursor_mut();
 
     //position and remove
     cursor.set_position(3, MoveMode::MoveAnchor);
@@ -256,7 +271,7 @@ fn remove_in_blocks_where_bottom_is_child_of_top_block() {
 
 #[test]
 fn remove_in_blocks_where_bottom_child_and_top_block_are_on_their_own_frame() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
     //document.set_plain_text("beginning\nblock\nend").unwrap();
     document.print_debug_elements();
 
@@ -273,8 +288,8 @@ fn remove_in_blocks_where_bottom_child_and_top_block_are_on_their_own_frame() {
     // assert_eq!(element.uuid(), 0);
     // assert_eq!(reason, ChangeReason::ChildrenChanged );
     //});
-
-    let mut cursor = document.create_cursor();
+    {
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_frame().unwrap();
     cursor.insert_plain_text("beginning").unwrap();
@@ -284,12 +299,15 @@ fn remove_in_blocks_where_bottom_child_and_top_block_are_on_their_own_frame() {
     cursor.insert_block().unwrap();
     cursor.insert_plain_text("end").unwrap();
     cursor.insert_block().unwrap();
-    document.print_debug_elements();
+       assert_eq!(cursor.position(), 18);
+ }
 
-    assert_eq!(cursor.position(), 18);
+    document.print_debug_elements();
+    
 
     //position and remove
-    cursor.set_position(3, MoveMode::MoveAnchor);
+     let cursor = document.text_cursor_mut();
+   cursor.set_position(3, MoveMode::MoveAnchor);
     cursor.set_position(15, MoveMode::KeepAnchor);
     cursor.remove().unwrap();
     document.print_debug_elements();
@@ -300,7 +318,7 @@ fn remove_in_blocks_where_bottom_child_and_top_block_are_on_their_own_frame() {
 
 #[test]
 fn remove_in_blocks_where_bottom_child_and_top_block_are_the_same() {
-    let document = TextDocument::new();
+    let mut document = TextDocument::new();
     //document.set_plain_text("beginning\nblock\nend").unwrap();
     document.print_debug_elements();
 
@@ -318,7 +336,7 @@ fn remove_in_blocks_where_bottom_child_and_top_block_are_the_same() {
     // assert_eq!(reason, ChangeReason::ChildrenChanged );
     //});
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.insert_plain_text("beginning end").unwrap();
 
@@ -340,7 +358,7 @@ fn move_operation() {
     document.set_plain_text("beginning\nblock\nend").unwrap();
     document.print_debug_elements();
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.move_position(text_document::MoveOperation::End, MoveMode::MoveAnchor);
 
     assert_eq!(cursor.position(), 19);
@@ -351,7 +369,7 @@ fn move_cursor() {
     let mut document = TextDocument::new();
     document.set_plain_text("beginning\nblock\nend").unwrap();
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(19, MoveMode::MoveAnchor);
 
     assert_eq!(cursor.position(), 19);
@@ -377,7 +395,7 @@ fn format_blocks() {
     let mut format = BlockFormat::new();
     format.left_margin = Some(10);
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     assert!(cursor.set_block_format(&format).is_ok());
     assert_eq!(cursor.block_format().unwrap().left_margin, Some(10));
@@ -408,7 +426,7 @@ fn format_frames() {
     let mut format = FrameFormat::new();
     format.left_margin = Some(10);
 
-    let mut cursor = document.create_cursor();
+    let cursor = document.text_cursor_mut();
     cursor.set_position(0, MoveMode::MoveAnchor);
     assert!(cursor.set_frame_format(&format).is_ok());
     assert_eq!(cursor.frame_format().unwrap().left_margin, Some(10));

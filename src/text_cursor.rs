@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::rc::{Rc, Weak};
 
 use crate::block::Block;
@@ -7,11 +8,11 @@ use crate::text_document::Element::BlockElement;
 use crate::text_document::{ElementManager, InsertMode, ModelError};
 use crate::{ChangeReason, Element};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct TextCursor {
     element_manager: Rc<ElementManager>,
-    position: usize,
-    anchor_position: usize,
+    position: Cell<usize>,
+    anchor_position: Cell<usize>,
 }
 
 impl TextCursor {
@@ -24,7 +25,7 @@ impl TextCursor {
     }
 
     pub fn position(&self) -> usize {
-        let mut position = self.position;
+        let mut position = self.position.get();
 
         let end_of_document = self.element_manager.root_frame().end();
         if position > end_of_document {
@@ -35,7 +36,7 @@ impl TextCursor {
     }
 
     pub fn anchor_position(&self) -> usize {
-        let mut anchor_position = self.anchor_position;
+        let mut anchor_position = self.anchor_position.get();
 
         let end_of_document = self.element_manager.root_frame().end();
         if anchor_position > end_of_document {
@@ -46,7 +47,7 @@ impl TextCursor {
     }
 
     /// set the cursor position, with or without the anchor depending of move_mode. Ensure that the cursor position is in the document.
-    pub fn set_position(&mut self, position: usize, move_mode: MoveMode) {
+    pub fn set_position(&self, position: usize, move_mode: MoveMode) {
         let mut position = position;
 
         let end_of_document = self.element_manager.root_frame().end();
@@ -56,10 +57,10 @@ impl TextCursor {
 
         match move_mode {
             MoveMode::MoveAnchor => {
-                self.position = position;
-                self.anchor_position = position;
+                self.position.set(position);
+                self.anchor_position.set(position);
             }
-            MoveMode::KeepAnchor => self.position = position,
+            MoveMode::KeepAnchor => self.position.set(position),
         }
     }
 
@@ -70,7 +71,7 @@ impl TextCursor {
 
     fn current_block_rc(&self) -> Rc<Block> {
         self.element_manager
-            .find_block(self.position)
+            .find_block(self.position.get())
             .unwrap_or_else(|| self.element_manager.last_block().unwrap())
     }
 
@@ -94,8 +95,8 @@ impl TextCursor {
                 Err(_) => Err(ModelError::Unknown),
             }
         } else {
-            let left_position = self.position.min(self.anchor_position);
-            let right_position = self.anchor_position.max(self.position);
+            let left_position = self.position().min(self.anchor_position());
+            let right_position = self.anchor_position().max(self.position());
 
             let top_block = self
                 .element_manager
@@ -165,8 +166,8 @@ impl TextCursor {
                 Err(_) => Err(ModelError::Unknown),
             }
         } else {
-            let left_position = self.position.min(self.anchor_position);
-            let right_position = self.anchor_position.max(self.position);
+            let left_position = self.position().min(self.anchor_position());
+            let right_position = self.anchor_position().max(self.position());
 
             let top_block = self
                 .element_manager
@@ -219,8 +220,8 @@ impl TextCursor {
     // split block at position, like if a new line is inserted
     pub fn insert_block(&mut self) -> Result<Weak<Block>, ModelError> {
         // fix positions
-        let left_position = self.position.min(self.anchor_position);
-        let right_position = self.anchor_position.max(self.position);
+        let left_position = self.position().min(self.anchor_position());
+        let right_position = self.anchor_position().max(self.position());
 
         let mut new_position = left_position;
         let mut removed_characters_count = 0;
@@ -282,7 +283,7 @@ impl TextCursor {
 
     fn current_frame_rc(&self) -> Rc<Frame> {
         self.element_manager
-            .find_frame(self.position)
+            .find_frame(self.position())
             .unwrap_or_else(|| self.element_manager.root_frame())
     }
 
@@ -306,8 +307,8 @@ impl TextCursor {
                 Err(_) => Err(ModelError::Unknown),
             }
         } else {
-            let left_position = self.position.min(self.anchor_position);
-            let right_position = self.anchor_position.max(self.position);
+            let left_position = self.position().min(self.anchor_position());
+            let right_position = self.anchor_position().max(self.position());
 
             let top_block = self
                 .element_manager
@@ -392,8 +393,8 @@ impl TextCursor {
                 Err(_) => Err(ModelError::Unknown),
             }
         } else {
-            let left_position = self.position.min(self.anchor_position);
-            let right_position = self.anchor_position.max(self.position);
+            let left_position = self.position().min(self.anchor_position());
+            let right_position = self.anchor_position().max(self.position());
 
             let top_block = self
                 .element_manager
@@ -462,8 +463,8 @@ impl TextCursor {
     /// insert a frame at the cursor position
     pub fn insert_frame(&mut self) -> Result<Weak<Frame>, ModelError> {
         // fix positions
-        let left_position = self.position.min(self.anchor_position);
-        let right_position = self.anchor_position.max(self.position);
+        let left_position = self.position().min(self.anchor_position());
+        let right_position = self.anchor_position().max(self.position());
 
         let mut new_position = left_position;
         let mut removed_characters_count = 0;
@@ -532,8 +533,8 @@ impl TextCursor {
         // };
 
         // fix positions
-        let left_position = self.position.min(self.anchor_position);
-        let right_position = self.anchor_position.max(self.position);
+        let left_position = self.position().min(self.anchor_position());
+        let right_position = self.anchor_position().max(self.position());
 
         let mut new_position = left_position;
         let start_position = left_position;
@@ -631,8 +632,8 @@ impl TextCursor {
     // select plain text between cursor position and the anchor position
     pub fn selected_text(&self) -> String {
         // fix positions
-        let left_position = self.position.min(self.anchor_position);
-        let right_position = self.anchor_position.max(self.position);
+        let left_position = self.position().min(self.anchor_position());
+        let right_position = self.anchor_position().max(self.position());
         if left_position == right_position {
             return String::new();
         }
@@ -685,7 +686,7 @@ impl TextCursor {
     pub fn text_format(&self) -> Option<TextFormat> {
         let block_rc = self.current_block_rc();
 
-        block_rc.text_format_at(block_rc.convert_position_from_document(self.position))
+        block_rc.text_format_at(block_rc.convert_position_from_document(self.position.get()))
     }
 
     // fetch the block format at the cursor position. Anchor position is ignored
@@ -707,7 +708,7 @@ impl TextCursor {
     ///
     /// Return new position and number of removed chars
     pub fn remove(&mut self) -> Result<(usize, usize), ModelError> {
-        self.remove_with_signal(self.position, self.anchor_position, true)
+        self.remove_with_signal(self.position.get(), self.anchor_position.get(), true)
     }
 
     /// same as 'remove()' but with signal argument
@@ -1005,10 +1006,10 @@ impl TextCursor {
             }
             MoveOperation::StartOfWord => todo!(),
             MoveOperation::PreviousBlock => todo!(),
-            MoveOperation::PreviousCharacter => self.set_position(self.position - 1, move_mode),
+            MoveOperation::PreviousCharacter => self.set_position(self.position.get() - 1, move_mode),
             MoveOperation::PreviousWord => todo!(),
             MoveOperation::Up => todo!(),
-            MoveOperation::Left => self.set_position(self.position - 1, move_mode),
+            MoveOperation::Left => self.set_position(self.position.get() - 1, move_mode),
             MoveOperation::WordLeft => todo!(),
             MoveOperation::End => {
                 self.set_position(self.element_manager.root_frame().end(), move_mode)
@@ -1019,10 +1020,10 @@ impl TextCursor {
                 self.set_position(self.current_block_rc().end(), move_mode)
             }
             MoveOperation::NextBlock => todo!(),
-            MoveOperation::NextCharacter => self.set_position(self.position + 1, move_mode),
+            MoveOperation::NextCharacter => self.set_position(self.position.get() + 1, move_mode),
             MoveOperation::NextWord => todo!(),
             MoveOperation::Down => todo!(),
-            MoveOperation::Right => self.set_position(self.position + 1, move_mode),
+            MoveOperation::Right => self.set_position(self.position.get() + 1, move_mode),
             MoveOperation::WordRight => todo!(),
             MoveOperation::NextCell => todo!(),
             MoveOperation::PreviousCell => todo!(),
