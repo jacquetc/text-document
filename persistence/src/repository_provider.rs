@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
+use contracts::persistence::CursorRepositoryTrait;
 use contracts::persistence::DocumentRepositoryTrait;
 use contracts::persistence::RepositoryProviderTrait;
 
 pub enum Repository {
     Document(Box<dyn DocumentRepositoryTrait>),
+    Cursor(Box<dyn CursorRepositoryTrait>),
 }
 
 pub struct RepositoryProvider {
@@ -33,6 +35,20 @@ impl RepositoryProviderTrait for RepositoryProvider {
     fn get_document_repository_mut(&mut self) -> &mut dyn DocumentRepositoryTrait {
         match self.repositories.get_mut("Document") {
             Some(Repository::Document(repository)) => repository.as_mut(),
+            _ => panic!("Repository not found"),
+        }
+    }
+
+    fn get_cursor_repository(&self) -> &dyn CursorRepositoryTrait {
+        match self.repositories.get("Cursor") {
+            Some(Repository::Cursor(repository)) => repository.as_ref(),
+            _ => panic!("Repository not found"),
+        }
+    }
+
+    fn get_cursor_repository_mut(&mut self) -> &mut dyn CursorRepositoryTrait {
+        match self.repositories.get_mut("Cursor") {
+            Some(Repository::Cursor(repository)) => repository.as_mut(),
             _ => panic!("Repository not found"),
         }
     }

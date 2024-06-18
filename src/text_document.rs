@@ -13,6 +13,14 @@ impl TextDocument {
         }
     }
 
+    pub(crate) fn get_repository_provider(&self) -> &RepositoryProvider {
+        &self.repository_provider
+    }
+
+    pub(crate) fn get_repository_provider_mut(&mut self) -> &mut RepositoryProvider {
+        &mut self.repository_provider
+    }
+
     pub fn get_plain_text(&self) -> String {
         ConversionInteractor::get_plain_text(&self.repository_provider)
     }

@@ -8,3 +8,4 @@ edition.workspace = true
 
 [dependencies]
 domain = { path = "../domain" }
+thiserror = { workspace = true }
