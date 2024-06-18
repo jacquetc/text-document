@@ -1,3 +1,14 @@
+[workspace]
+members = [
+    "interactor",
+    "persistence",
+    "domain",
+    "contracts",
+    "application",
+    ".",
+]
+
+
 [package]
 name = "text-document"
 version = "0.0.5"
@@ -10,9 +21,10 @@ documentation = "https://docs.rs/text-document/"
 description = """
 Text document structure and management.
 """
-keywords = ["text", "document", "model","format"]
+keywords = ["text", "document", "model", "format"]
 categories = ["data-structures", "text-editors", "text-processing", "parsing"]
 
 
 [dependencies]
-controller = { path = "controller" }
+interactor = { path = "interactor" }
+persistence = { path = "persistence" }
