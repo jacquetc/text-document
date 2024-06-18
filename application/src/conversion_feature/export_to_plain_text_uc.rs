@@ -34,7 +34,12 @@ impl<'a> ExportToPlainTextUseCase<'a> {
                     .join(""),
                 DocumentNode::List(list) => list
                     .iter()
-                    .map(|list_item| list_item.content.clone())
+                    .map(|list_item| {
+                        let text = list_item.content.clone();
+                        let mut caret = "• ".to_string();
+                        caret.push_str(&text);
+                        caret
+                    })
                     .collect::<Vec<String>>()
                     .join("\n"),
             })

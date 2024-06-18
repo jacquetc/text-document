@@ -8,11 +8,15 @@ members = [
     ".",
 ]
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
 
 [package]
 name = "text-document"
-version = "0.0.5"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 license = "MIT OR Apache-2.0"
 authors = ["Cyril Jacquet <cyril.jacquet@skribisto.eu>"]
 repository = "https://github.com/jacquetc/text-document"

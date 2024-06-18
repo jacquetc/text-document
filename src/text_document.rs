@@ -17,7 +17,15 @@ impl TextDocument {
         ConversionInteractor::get_plain_text(&self.repository_provider)
     }
 
-    pub fn set_plain_text(&mut self, text: String) {
-        ConversionInteractor::set_plain_text(&mut self.repository_provider, text);
+    pub fn set_plain_text<T: AsRef<str>>(&mut self, text: T) {
+        ConversionInteractor::set_plain_text(&mut self.repository_provider, text.as_ref());
+    }
+
+    pub fn get_markdown(&self) -> String {
+        ConversionInteractor::get_markdown(&self.repository_provider)
+    }
+
+    pub fn set_markdown<T: AsRef<str>>(&mut self, markdown: T) {
+        ConversionInteractor::set_markdown(&mut self.repository_provider, markdown.as_ref());
     }
 }

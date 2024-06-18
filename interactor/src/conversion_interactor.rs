@@ -10,8 +10,18 @@ impl ConversionInteractor {
         ExportToPlainTextUseCase::new(document_repository).execute()
     }
 
-    pub fn set_plain_text(repository_provider: &mut dyn RepositoryProviderTrait, text: String) {
+    pub fn set_plain_text(repository_provider: &mut dyn RepositoryProviderTrait, text: &str) {
         let document_repository = repository_provider.get_document_repository_mut();
-        let _ = ImportFromPlainTextUseCase::new(document_repository).execute(text.as_str());
+        let _ = ImportFromPlainTextUseCase::new(document_repository).execute(text);
+    }
+
+    pub fn get_markdown(repository_provider: &dyn RepositoryProviderTrait) -> String {
+        let document_repository = repository_provider.get_document_repository();
+        ExportToPlainTextUseCase::new(document_repository).execute()
+    }
+
+    pub fn set_markdown(repository_provider: &mut dyn RepositoryProviderTrait, markdown: &str) {
+        let document_repository = repository_provider.get_document_repository_mut();
+        let _ = ImportFromPlainTextUseCase::new(document_repository).execute(markdown);
     }
 }
