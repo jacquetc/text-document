@@ -1,5 +1,5 @@
-use domain::cursor::Cursor;
-use domain::document::Document;
+use entities::cursor::Cursor;
+use entities::document::Document;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

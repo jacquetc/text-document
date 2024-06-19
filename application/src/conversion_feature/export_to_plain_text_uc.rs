@@ -1,6 +1,6 @@
 use contracts::persistence::DocumentRepositoryTrait;
-use domain::document::PlainText;
-use domain::document::{DocumentNode, Section, TextNode};
+use entities::document::PlainText;
+use entities::document::{DocumentNode, Section, TextNode};
 
 pub struct ExportToPlainTextUseCase<'a> {
     document_repository: &'a dyn DocumentRepositoryTrait,

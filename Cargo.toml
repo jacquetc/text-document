@@ -2,7 +2,7 @@
 members = [
     "interactor",
     "persistence",
-    "domain",
+    "entities",
     "contracts",
     "application",
     ".",

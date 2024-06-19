@@ -1,5 +1,5 @@
 use contracts::persistence::CursorRepositoryTrait;
-use domain::cursor::Cursor;
+use entities::cursor::Cursor;
 
 pub struct CreateCursorUseCase<'a> {
     cursor_repository: &'a dyn CursorRepositoryTrait,

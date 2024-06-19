@@ -1,6 +1,6 @@
 use contracts::dtos::cursor_dtos::MoveCursorDTO;
 use contracts::persistence::CursorRepositoryTrait;
-use domain::cursor::Cursor;
+use entities::cursor::Cursor;
 
 pub struct MoveCursorUseCase<'a> {
     cursor_repository: &'a mut dyn CursorRepositoryTrait,

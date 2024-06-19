@@ -1,5 +1,5 @@
 use contracts::persistence::DocumentRepositoryTrait;
-use domain::document::Document;
+use entities::document::Document;
 #[derive(Debug)]
 pub struct DocumentRepository {
     content: Document,

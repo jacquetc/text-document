@@ -1,6 +1,6 @@
 use contracts::persistence::CursorRepositoryTrait;
 use contracts::persistence::RepositoryError;
-use domain::cursor::Cursor;
+use entities::cursor::Cursor;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;

@@ -1,7 +1,7 @@
 use contracts::persistence::DocumentRepositoryTrait;
 
-use domain::document::PlainText;
-use domain::document::{Document, DocumentNode, TextNode};
+use entities::document::PlainText;
+use entities::document::{Document, DocumentNode, TextNode};
 
 pub struct ImportFromPlainTextUseCase<'a> {
     document_repository: &'a mut dyn DocumentRepositoryTrait,
@@ -45,7 +45,7 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::document::DocumentNode;
+    use entities::document::DocumentNode;
 
     struct DummyDocumentRepository {
         content: Document,

@@ -8,5 +8,5 @@ edition.workspace = true
 
 
 [dependencies]
-domain = { path = "../domain" }
+entities = { path = "../entities" }
 contracts = { path = "../contracts" }
