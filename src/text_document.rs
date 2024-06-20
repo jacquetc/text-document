@@ -1,39 +1,55 @@
-use interactor::conversion_interactor::ConversionInteractor;
-use persistence::persistence_registration::register_repositories;
-use persistence::repository_provider::RepositoryProvider;
+use common::repositories::cursor_repository::CursorRepository;
+use common::repositories::document_repository::DocumentRepository;
 
 pub struct TextDocument {
-    repository_provider: RepositoryProvider,
+    cursor_repository: CursorRepository,
+    document_repository: DocumentRepository,
+}
+
+impl Default for TextDocument {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TextDocument {
     pub fn new() -> TextDocument {
         TextDocument {
-            repository_provider: register_repositories(),
+            cursor_repository: CursorRepository::new(),
+            document_repository: DocumentRepository::new(),
         }
     }
 
-    pub(crate) fn get_repository_provider(&self) -> &RepositoryProvider {
-        &self.repository_provider
+    pub(crate) fn get_cursor_repository(&self) -> &CursorRepository {
+        &self.cursor_repository
     }
 
-    pub(crate) fn get_repository_provider_mut(&mut self) -> &mut RepositoryProvider {
-        &mut self.repository_provider
+    pub(crate) fn get_cursor_repository_mut(&mut self) -> &mut CursorRepository {
+        &mut self.cursor_repository
+    }
+
+    pub(crate) fn get_document_repository(&self) -> &DocumentRepository {
+        &self.document_repository
+    }
+
+    pub(crate) fn get_document_repository_mut(&mut self) -> &mut DocumentRepository {
+        &mut self.document_repository
     }
 
     pub fn get_plain_text(&self) -> String {
-        ConversionInteractor::get_plain_text(&self.repository_provider)
+        conversion_feature::get_plain_text(&self.document_repository)
     }
 
     pub fn set_plain_text<T: AsRef<str>>(&mut self, text: T) {
-        ConversionInteractor::set_plain_text(&mut self.repository_provider, text.as_ref());
+        conversion_feature::set_plain_text(&mut self.document_repository, text.as_ref());
     }
 
     pub fn get_markdown(&self) -> String {
-        ConversionInteractor::get_markdown(&self.repository_provider)
+        conversion_feature::get_markdown(&self.document_repository)
     }
 
     pub fn set_markdown<T: AsRef<str>>(&mut self, markdown: T) {
-        ConversionInteractor::set_markdown(&mut self.repository_provider, markdown.as_ref());
+        conversion_feature::set_markdown(&mut self.document_repository, markdown.as_ref());
     }
 }
+

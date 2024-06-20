@@ -1,10 +1,8 @@
 [workspace]
 members = [
-    "interactor",
-    "persistence",
-    "entities",
-    "contracts",
-    "application",
+    "conversion_feature",
+    "cursor_feature",
+    "common",
     ".",
 ]
 
@@ -33,5 +31,6 @@ categories = ["data-structures", "text-editors", "text-processing", "parsing"]
 
 
 [dependencies]
-interactor = { path = "interactor" }
-persistence = { path = "persistence" }
+common = { path = "common" }
+conversion_feature = { path = "conversion_feature" }
+cursor_feature = { path = "cursor_feature" }
