@@ -1,4 +1,5 @@
 use crate::contracts::repositories::CursorRepositoryTrait;
+use crate::contracts::repositories::RepositoryTrait;
 use crate::contracts::repositories::RepositoryError;
 use crate::entities::cursor::Cursor;
 use std::cell::Cell;
@@ -12,14 +13,14 @@ pub struct CursorRepository {
     free_id_list: RefCell<Vec<usize>>,
 }
 
-impl CursorRepository {
+impl CursorRepository{
     pub fn new() -> CursorRepository {
         CursorRepository::default()
     }
 }
 
 impl CursorRepositoryTrait for CursorRepository {
-    fn create(&self, cursor: Cursor) -> usize {
+    fn create(&self, entity: Cursor) -> usize {
         let id = if let Some(free_id) = self.free_id_list.borrow_mut().pop() {
             free_id
         } else {
@@ -27,21 +28,27 @@ impl CursorRepositoryTrait for CursorRepository {
             self.free_id.set(id + 1);
             id
         };
-        self.cursors.borrow_mut().insert(id, cursor);
+        self.cursors.borrow_mut().insert(id, entity);
         id
     }
 
-    fn update(&self, cursor: Cursor) -> Result<(), RepositoryError> {
-        let id = cursor.id;
+    fn update(&self, entity: Cursor) -> Result<(), RepositoryError> {
+        let id = entity.id;
         if !self.cursors.borrow().contains_key(&id) {
             return Err(RepositoryError::IdNotFound);
         }
-        self.cursors.borrow_mut().insert(id, cursor);
+        self.cursors.borrow_mut().insert(id, entity);
         Ok(())
     }
 
     fn get(&self, id: usize) -> Option<Cursor> {
         self.cursors.borrow().get(&id).copied()
+    }
+
+    fn get_slice(&self, ids: Vec<usize>) -> Vec<Cursor> {
+        ids.iter()
+            .filter_map(|id| self.cursors.borrow().get(id).copied())
+            .collect()
     }
 
     fn remove(&self, id: usize) -> Option<Cursor> {
@@ -61,5 +68,9 @@ impl CursorRepositoryTrait for CursorRepository {
 
     fn is_empty(&self) -> bool {
         self.cursors.borrow().is_empty()
+    }
+    
+    fn len(&self) -> usize {
+        self.cursors.borrow().len()
     }
 }

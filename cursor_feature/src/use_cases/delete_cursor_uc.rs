@@ -1,5 +1,4 @@
 use common::contracts::repositories::CursorRepositoryTrait;
-use common::entities::cursor::Cursor;
 
 pub struct DeleteCursorUseCase<'a> {
     cursor_repository: &'a dyn CursorRepositoryTrait,

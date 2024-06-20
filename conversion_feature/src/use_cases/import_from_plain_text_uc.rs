@@ -64,15 +64,7 @@ mod tests {
             self.content = document;
         }
     }
-
-    impl DummyDocumentRepository {
-        fn new() -> Self {
-            DummyDocumentRepository {
-                content: Document::new(),
-            }
-        }
-    }
-
+    
     #[test]
     fn test_import_from_plain_text() {
         let document = Document::new();

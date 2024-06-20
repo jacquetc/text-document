@@ -8,4 +8,5 @@ edition.workspace = true
 
 [dependencies]
 bitflags = "2.4.1"
+im-rc = "15.1.0"
 thiserror = { workspace = true }
