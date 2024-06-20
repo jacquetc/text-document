@@ -19,6 +19,6 @@ impl<'a> MovePositionUseCase<'a> {
     }
 
     pub fn execute(&mut self, cursor_id: usize, dto: MovePositionDTO) {
-        let mut cursor = self.cursor_repository.get(cursor_id);
+        unimplemented!()
     }
 }

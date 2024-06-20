@@ -1,6 +1,5 @@
-use core::slice;
-
 use common::contracts::repositories::DocumentRepositoryTrait;
+use common::contracts::repositories::ParagraphGroupRepositoryTrait;
 use common::contracts::repositories::ParagraphRepositoryTrait;
 
 use common::entities::document::{Document, Node};
@@ -8,30 +7,36 @@ use common::entities::paragraph::{Paragraph, TextSlice};
 
 pub struct ImportFromPlainTextUseCase<'a> {
     document_repository: &'a mut dyn DocumentRepositoryTrait,
-
     paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
+    paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
 }
 
 impl<'a> ImportFromPlainTextUseCase<'a> {
     pub fn new(
         document_repository: &'a mut dyn DocumentRepositoryTrait,
         paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
+        paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
     ) -> ImportFromPlainTextUseCase<'a> {
         ImportFromPlainTextUseCase {
             document_repository,
             paragraph_repository,
+            paragraph_group_repository,
         }
     }
 
     pub fn execute(&mut self, text: &str) -> Result<(), String> {
         let mut document = Document::new();
+        self.paragraph_group_repository.clear();
+        self.paragraph_repository.clear();
 
         text.lines().for_each(|line| {
             let slice = TextSlice::PlainText {
                 content: line.to_string(),
             };
 
-            let paragraph = Paragraph::new(&[slice]);
+            let mut paragraph = Paragraph::new(&[slice]);
+            self.paragraph_group_repository
+                .add_paragraph_to_a_group(&mut paragraph);
 
             document.nodes.push(Node::Paragraph {
                 paragraph_id: self.paragraph_repository.create(paragraph),
@@ -43,7 +48,9 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
                 content: "".to_string(),
             };
 
-            let paragraph = Paragraph::new(&[slice]);
+            let mut paragraph = Paragraph::new(&[slice]);
+            self.paragraph_group_repository
+                .add_paragraph_to_a_group(&mut paragraph);
 
             document.nodes.push(Node::Paragraph {
                 paragraph_id: self.paragraph_repository.create(paragraph),
@@ -60,6 +67,7 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
 mod tests {
     use common::contracts::repositories::RepositoryTrait;
     use common::repositories::document_repository::DocumentRepository;
+    use common::repositories::paragraph_group_repository::ParagraphGroupRepository;
     use common::repositories::paragraph_repository::ParagraphRepository;
 
     use super::*;
@@ -68,9 +76,13 @@ mod tests {
     fn test_import_from_plain_text() {
         let mut document_repository = DocumentRepository::new();
         let mut paragraph_repository = ParagraphRepository::new();
+        let mut paragraph_group_repository = ParagraphGroupRepository::new();
 
-        let mut use_case =
-            ImportFromPlainTextUseCase::new(&mut document_repository, &mut paragraph_repository);
+        let mut use_case = ImportFromPlainTextUseCase::new(
+            &mut document_repository,
+            &mut paragraph_repository,
+            &mut paragraph_group_repository,
+        );
 
         let text = "First line\nSecond line\nThird line\n";
 
