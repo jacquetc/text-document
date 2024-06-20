@@ -1,6 +1,7 @@
 use crate::contracts::repositories::DocumentRepositoryTrait;
 use crate::entities::document::Document;
-#[derive(Debug)]
+
+#[derive(Debug, Default)]
 pub struct DocumentRepository {
     content: Document,
 }

@@ -8,11 +8,17 @@ pub struct MovePositionUseCase<'a> {
 }
 
 impl<'a> MovePositionUseCase<'a> {
-    pub fn new(cursor_repository: &'a mut dyn CursorRepositoryTrait, document_repository: &'a dyn DocumentRepositoryTrait) -> MovePositionUseCase<'a> {
-        MovePositionUseCase { cursor_repository, document_repository }
+    pub fn new(
+        cursor_repository: &'a mut dyn CursorRepositoryTrait,
+        document_repository: &'a dyn DocumentRepositoryTrait,
+    ) -> MovePositionUseCase<'a> {
+        MovePositionUseCase {
+            cursor_repository,
+            document_repository,
+        }
     }
 
-    pub fn execute(&mut self, cursor_id: usize,dto: MovePositionDTO) {
+    pub fn execute(&mut self, cursor_id: usize, dto: MovePositionDTO) {
         let mut cursor = self.cursor_repository.get(cursor_id);
     }
 }
