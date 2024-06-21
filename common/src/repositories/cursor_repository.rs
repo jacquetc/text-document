@@ -27,6 +27,8 @@ impl CursorRepositoryTrait for CursorRepository {
             self.free_id.set(id + 1);
             id
         };
+        let mut entity = entity;
+        entity.id = id;
         self.cursors.borrow_mut().insert(id, entity);
         id
     }

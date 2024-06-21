@@ -1,8 +1,8 @@
 use common::repositories::cursor_repository::CursorRepository;
 use common::repositories::document_repository::DocumentRepository;
-use common::repositories::paragraph_repository::ParagraphRepository;
 use common::repositories::paragraph_group_repository::ParagraphGroupRepository;
-
+use common::repositories::paragraph_repository::ParagraphRepository;
+use cursor_feature::dtos::{MovePositionDTO, SetPositionDTO};
 
 use crate::TextDocument;
 
@@ -21,7 +21,6 @@ impl TextCursor<'_> {
         let paragraph_repository = text_document.get_paragraph_repository();
         let paragraph_group_repository = text_document.get_paragraph_group_repository();
 
-
         let id = cursor_feature::create_cursor(cursor_repository);
 
         TextCursor {
@@ -37,8 +36,24 @@ impl TextCursor<'_> {
         cursor_feature::get_position(self.cursor_repository, self.id)
     }
 
-    pub fn set_position(&mut self, position: usize) {
-        cursor_feature::set_position(self.cursor_repository, self.paragraph_group_repository, self.id, position);
+    pub fn set_position(&mut self, dto: SetPositionDTO) {
+        cursor_feature::set_position(
+            self.cursor_repository,
+            self.paragraph_group_repository,
+            self.id,
+            dto,
+        );
+    }
+
+    pub fn move_position(&mut self, dto: MovePositionDTO) {
+        cursor_feature::move_position(
+            self.cursor_repository,
+            self.document_repository,
+            self.paragraph_repository,
+            self.paragraph_group_repository,
+            self.id,
+            dto,
+        );
     }
 }
 

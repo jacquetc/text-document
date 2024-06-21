@@ -15,6 +15,7 @@ pub trait RepositoryTrait<T> {
     fn update(&mut self, entity: T) -> Result<(), RepositoryError>;
     fn get(&self, id: usize) -> Option<&T>;
     fn get_slice(&self, ids: Vec<usize>) -> Vec<&T>;
+    fn get_mut(&mut self, id: usize) -> Option<&mut T>;
     fn remove(&mut self, id: usize) -> Option<T>;
     fn get_all(&self) -> Vec<&T>;
     fn clear(&mut self);

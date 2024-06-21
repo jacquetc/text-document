@@ -133,7 +133,7 @@ mod tests {
 
         assert_eq!(paragraphs[3].unwrap().slices.len(), 1);
         match &paragraphs[3].unwrap().slices[0] {
-            TextSlice::PlainText { content } => assert!(content == ""),
+            TextSlice::PlainText { content } => assert!(content.is_empty()),
             _ => unreachable!(),
         }
     }

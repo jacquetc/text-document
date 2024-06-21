@@ -3,10 +3,8 @@ mod use_cases;
 use crate::use_cases::export_to_plain_text_uc::ExportToPlainTextUseCase;
 use crate::use_cases::import_from_plain_text_uc::ImportFromPlainTextUseCase;
 use common::contracts::repositories::DocumentRepositoryTrait;
-use common::contracts::repositories::ParagraphRepositoryTrait;
 use common::contracts::repositories::ParagraphGroupRepositoryTrait;
-
-
+use common::contracts::repositories::ParagraphRepositoryTrait;
 
 pub fn get_plain_text(
     document_repository: &dyn DocumentRepositoryTrait,
@@ -21,8 +19,12 @@ pub fn set_plain_text(
     paragraph_group_repository: &mut dyn ParagraphGroupRepositoryTrait,
     text: &str,
 ) {
-    let _ =
-        ImportFromPlainTextUseCase::new(document_repository, paragraph_repository, paragraph_group_repository).execute(text);
+    let _ = ImportFromPlainTextUseCase::new(
+        document_repository,
+        paragraph_repository,
+        paragraph_group_repository,
+    )
+    .execute(text);
 }
 
 pub fn get_markdown(
@@ -38,6 +40,10 @@ pub fn set_markdown(
     paragraph_group_repository: &mut dyn ParagraphGroupRepositoryTrait,
     markdown: &str,
 ) {
-    let _ = ImportFromPlainTextUseCase::new(document_repository, paragraph_repository, paragraph_group_repository)
-        .execute(markdown);
+    let _ = ImportFromPlainTextUseCase::new(
+        document_repository,
+        paragraph_repository,
+        paragraph_group_repository,
+    )
+    .execute(markdown);
 }

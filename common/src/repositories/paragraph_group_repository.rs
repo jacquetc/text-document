@@ -26,6 +26,8 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
         self.paragraph_groups
             .retain(|_, group| group.paragraph_count > 0);
 
+        let char_count: usize = paragraph.get_char_count();
+
         // Find a group with less than 10 paragraphs
         if let Some(group) = self.paragraph_groups.iter_mut().find_map(|(_, group)| {
             if group.paragraph_count < 10 {
@@ -37,7 +39,10 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
             paragraph.paragraph_group_id = group.id;
 
             group.paragraph_count += 1;
-            group.char_count += paragraph.get_char_count();
+            group
+                .char_count_per_paragraph
+                .insert(paragraph.id, char_count);
+            group.char_count += char_count;
             group.word_count += paragraph.get_word_count();
 
             return;
@@ -47,7 +52,11 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
         let group = ParagraphGroup {
             id: 0,
             paragraph_count: 1,
-            char_count: paragraph.get_char_count(),
+            char_count_per_paragraph: [(paragraph.id, char_count)]
+                .iter()
+                .cloned()
+                .collect(),
+            char_count,
             word_count: paragraph.get_word_count(),
         };
         let id = self.create(group);
@@ -61,6 +70,7 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
             .get_mut(&paragraph.paragraph_group_id)
             .unwrap();
         group.paragraph_count -= 1;
+        group.char_count_per_paragraph.remove(&paragraph.id);
         group.char_count -= paragraph.get_char_count();
         group.word_count -= paragraph.get_word_count();
     }
@@ -70,10 +80,14 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
             .paragraph_groups
             .get_mut(&old_paragraph.paragraph_group_id)
             .unwrap();
+        let new_char_count: usize = new_paragraph.get_char_count();
+        group
+            .char_count_per_paragraph
+            .insert(new_paragraph.id, new_char_count);
         group.char_count = group
             .char_count
             .saturating_sub(old_paragraph.get_char_count())
-            .saturating_add(new_paragraph.get_char_count());
+            .saturating_add(new_char_count);
         group.word_count = group
             .word_count
             .saturating_sub(old_paragraph.get_word_count())
@@ -84,6 +98,8 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
 impl RepositoryTrait<ParagraphGroup> for ParagraphGroupRepository {
     fn create(&mut self, entity: ParagraphGroup) -> usize {
         let id = self.paragraph_groups.len();
+        let mut entity = entity;
+        entity.id = id;
         self.paragraph_groups.insert(id, entity);
         id
     }
@@ -105,6 +121,10 @@ impl RepositoryTrait<ParagraphGroup> for ParagraphGroupRepository {
         ids.iter()
             .filter_map(|id| self.paragraph_groups.get(id))
             .collect()
+    }
+
+    fn get_mut(&mut self, id: usize) -> Option<&mut ParagraphGroup> {
+        self.paragraph_groups.get_mut(&id)
     }
 
     fn remove(&mut self, id: usize) -> Option<ParagraphGroup> {

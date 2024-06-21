@@ -21,6 +21,8 @@ impl ParagraphRepositoryTrait for ParagraphRepository {}
 impl RepositoryTrait<Paragraph> for ParagraphRepository {
     fn create(&mut self, entity: Paragraph) -> usize {
         let id = self.paragraphs.len();
+        let mut entity = entity;
+        entity.id = id;
         self.paragraphs.insert(id, entity);
         id
     }
@@ -42,6 +44,10 @@ impl RepositoryTrait<Paragraph> for ParagraphRepository {
         ids.iter()
             .filter_map(|id| self.paragraphs.get(id))
             .collect()
+    }
+
+    fn get_mut(&mut self, id: usize) -> Option<&mut Paragraph> {
+        self.paragraphs.get_mut(&id)
     }
 
     fn remove(&mut self, id: usize) -> Option<Paragraph> {

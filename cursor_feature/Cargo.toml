@@ -8,3 +8,4 @@ edition.workspace = true
 
 [dependencies]
 common = { path = "../common" }
+thiserror = "1.0.61"

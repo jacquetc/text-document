@@ -62,7 +62,7 @@ impl<'a> ExportToPlainTextUseCase<'a> {
 
     fn export_section(&self, section: &Section) -> String {
         section
-            .content
+            .nodes
             .iter()
             .map(|node| match node {
                 Node::Section(section) => self.export_section(section),

@@ -4,42 +4,34 @@ pub enum MoveOperation {
     NoMove,
     /// Move to the start of the document.
     Start,
-    /// Move to the start of the current line.
-    StartOfLine,
-    /// Move to the start of the current block.
-    StartOfBlock,
+    /// Move to the start of the current Paragraph.
+    StartOfParagraph,
     /// Move to the start of the current word.
     StartOfWord,
-    /// Move to the start of the previous block.
-    PreviousBlock,
+    /// Move to the start of the previous Paragraph.
+    PreviousParagraph,
     /// Move to the previous character.
     PreviousCharacter,
     /// Move to the beginning of the previous word.
     PreviousWord,
-    /// Move up one line.
-    Up,
     /// Move left one character.
-    #[default]
     Left,
     /// Move left one word.
     WordLeft,
     /// Move to the end of the document.
     End,
-    /// Move to the end of the current line.
-    EndOfLine,
     /// Move to the end of the current word.
     EndOfWord,
-    /// Move to the end of the current block.
-    EndOfBlock,
-    /// Move to the beginning of the next block.
-    NextBlock,
+    /// Move to the end of the current Paragraph.
+    EndOfParagraph,
+    /// Move to the beginning of the next Paragraph.
+    NextParagraph,
     /// Move to the next character.
     NextCharacter,
     /// Move to the next word.
     NextWord,
-    /// Move down one line.
-    Down,
     /// Move right one character.
+    #[default]
     Right,
     /// Move right one word.
     WordRight,
@@ -56,7 +48,7 @@ pub enum MoveOperation {
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub enum MoveMode {
     #[default]
-    MoveAnchorToo,
+    MoveAnchorWithCursor,
     MoveCursorOnly,
 }
 
@@ -80,5 +72,5 @@ impl Default for MovePositionDTO {
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct SetPositionDTO {
     pub position: usize,
-    pub anchor_position: Option<usize>,
+    pub mode: MoveMode,
 }

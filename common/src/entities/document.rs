@@ -1,4 +1,3 @@
-use std::default;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Node {
@@ -17,7 +16,13 @@ impl Default for Node {
 // Define a section with a content
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct Section {
-    pub content: Vec<Node>,
+    pub nodes: Vec<Node>,
+}
+
+impl Section {
+    pub fn new() -> Self {
+        Section { nodes: Vec::new() }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]

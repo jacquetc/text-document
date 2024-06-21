@@ -1,7 +1,7 @@
 use common::repositories::cursor_repository::CursorRepository;
 use common::repositories::document_repository::DocumentRepository;
-use common::repositories::paragraph_repository::ParagraphRepository;
 use common::repositories::paragraph_group_repository::ParagraphGroupRepository;
+use common::repositories::paragraph_repository::ParagraphRepository;
 
 pub struct TextDocument {
     cursor_repository: CursorRepository,
