@@ -14,10 +14,6 @@ pub enum MoveOperation {
     PreviousCharacter,
     /// Move to the beginning of the previous word.
     PreviousWord,
-    /// Move left one character.
-    Left,
-    /// Move left one word.
-    WordLeft,
     /// Move to the end of the document.
     End,
     /// Move to the end of the current word.
@@ -27,14 +23,10 @@ pub enum MoveOperation {
     /// Move to the beginning of the next Paragraph.
     NextParagraph,
     /// Move to the next character.
+    #[default]
     NextCharacter,
     /// Move to the next word.
     NextWord,
-    /// Move right one character.
-    #[default]
-    Right,
-    /// Move right one word.
-    WordRight,
     /// Move to the beginning of the next table cell inside the current table. If the current cell is the last cell in the row, the cursor will move to the first cell in the next row.
     NextCell,
     /// Move to the beginning of the previous table cell inside the current table. If the current cell is the first cell in the row, the cursor will move to the last cell in the previous row.

@@ -166,176 +166,181 @@ impl<'a> MovePositionUseCase<'a> {
                 }
             }
             MoveOperation::PreviousParagraph => {
-                let cursor_position = cursor.position;
-                let previous_paragraph_id = paragraph_operations::get_previous_paragraph_id(
-                    cursor_position,
-                    self.document_repository,
-                )
-                .ok_or(MovePositionError::NoPreviousParagraph)?;
+                for _ in 0..dto.count {
+                    let cursor_position = cursor.position;
+                    let previous_paragraph_id = paragraph_operations::get_previous_paragraph_id(
+                        cursor_position,
+                        self.document_repository,
+                    )
+                    .ok_or(MovePositionError::NoPreviousParagraph)?;
 
-                let paragraph_position = paragraph_operations::paragraph_position(
-                    previous_paragraph_id,
-                    self.document_repository,
-                    self.paragraph_group_repository,
-                );
+                    let paragraph_position = paragraph_operations::paragraph_position(
+                        previous_paragraph_id,
+                        self.document_repository,
+                        self.paragraph_group_repository,
+                    );
 
-                let new_position = paragraph_position;
+                    let new_position = paragraph_position;
 
-                match dto.mode {
-                    MoveMode::MoveAnchorWithCursor => {
-                        cursor.position = new_position;
-                        cursor.anchor_position = None;
-                        self.cursor_repository.update(cursor)?;
-                        Ok(())
-                    }
-                    MoveMode::MoveCursorOnly => {
-                        if cursor.anchor_position.is_none() {
-                            cursor.anchor_position = Some(cursor.position);
+                    match dto.mode {
+                        MoveMode::MoveAnchorWithCursor => {
+                            cursor.position = new_position;
+                            cursor.anchor_position = None;
+                            self.cursor_repository.update(cursor)?;
                         }
-                        cursor.position = new_position;
-                        self.cursor_repository.update(cursor)?;
-                        Ok(())
+                        MoveMode::MoveCursorOnly => {
+                            if cursor.anchor_position.is_none() {
+                                cursor.anchor_position = Some(cursor.position);
+                            }
+                            cursor.position = new_position;
+                            self.cursor_repository.update(cursor)?;
+                        }
                     }
                 }
+                Ok(())
             }
 
-            MoveOperation::PreviousCharacter => todo!(),
-            MoveOperation::PreviousWord => todo!(),
-            MoveOperation::Left => match dto.mode {
-                MoveMode::MoveAnchorWithCursor => {
-                    if cursor.position == 0 {
-                        return Err(MovePositionError::StartOfDocument);
+            MoveOperation::PreviousCharacter => {
+                for _ in 0..dto.count {
+                    match dto.mode {
+                        MoveMode::MoveAnchorWithCursor => {
+                            if cursor.position == 0 {
+                                return Err(MovePositionError::StartOfDocument);
+                            }
+                            cursor.position -= 1;
+                            cursor.anchor_position = None;
+                            self.cursor_repository.update(cursor)?;
+                        }
+                        MoveMode::MoveCursorOnly => {
+                            if cursor.position == 0 {
+                                return Err(MovePositionError::StartOfDocument);
+                            }
+                            if cursor.anchor_position.is_none() {
+                                cursor.anchor_position = Some(cursor.position);
+                            }
+                            cursor.position -= 1;
+                            self.cursor_repository.update(cursor)?;
+                        }
                     }
-                    cursor.position -= 1;
-                    cursor.anchor_position = None;
-                    self.cursor_repository.update(cursor)?;
-                    Ok(())
                 }
-                MoveMode::MoveCursorOnly => {
-                    if cursor.position == 0 {
-                        return Err(MovePositionError::StartOfDocument);
-                    }
-                    if cursor.anchor_position.is_none() {
-                        cursor.anchor_position = Some(cursor.position);
-                    }
-                    cursor.position -= 1;
-                    self.cursor_repository.update(cursor)?;
-                    Ok(())
-                }
-            },
-            MoveOperation::WordLeft => {
-                let cursor_current_position = cursor.position;
+                Ok(())
+            }
+            MoveOperation::PreviousWord => {
+                for _ in 0..dto.count {
+                    let cursor_current_position = cursor.position;
 
-                let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
-                    cursor.position,
-                    self.document_repository,
-                    self.paragraph_group_repository,
-                )
-                .ok_or(MovePositionError::NoPreviousWord)?;
-
-                let paragraph_position = paragraph_operations::paragraph_position(
-                    paragraph_id,
-                    self.document_repository,
-                    self.paragraph_group_repository,
-                );
-
-                let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
-                let words = paragraph_operations::get_words(paragraph);
-                let have_words_in_paragraph = !words.is_empty();
-                let cursor_relative_position = cursor_current_position - paragraph_position;
-
-                fn recursively_find_previous_word_in_previous_paragraph(
-                    document_repository: &dyn DocumentRepositoryTrait,
-                    paragraph_group_repository: &dyn ParagraphGroupRepositoryTrait,
-                    paragraph_repository: &dyn ParagraphRepositoryTrait,
-                    cursor: &mut Cursor,
-                ) -> Result<usize, MovePositionError> {
-                    let previous_paragraph_id = paragraph_operations::get_previous_paragraph_id(
+                    let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
                         cursor.position,
-                        document_repository,
+                        self.document_repository,
+                        self.paragraph_group_repository,
                     )
                     .ok_or(MovePositionError::NoPreviousWord)?;
 
                     let paragraph_position = paragraph_operations::paragraph_position(
-                        previous_paragraph_id,
-                        document_repository,
-                        paragraph_group_repository,
+                        paragraph_id,
+                        self.document_repository,
+                        self.paragraph_group_repository,
                     );
 
-                    let paragraph = paragraph_repository.get(previous_paragraph_id).unwrap();
-
+                    let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
                     let words = paragraph_operations::get_words(paragraph);
+                    let have_words_in_paragraph = !words.is_empty();
+                    let cursor_relative_position = cursor_current_position - paragraph_position;
 
-                    let have_words_in_paragraph: bool = !words.is_empty();
+                    fn recursively_find_previous_word_in_previous_paragraph(
+                        document_repository: &dyn DocumentRepositoryTrait,
+                        paragraph_group_repository: &dyn ParagraphGroupRepositoryTrait,
+                        paragraph_repository: &dyn ParagraphRepositoryTrait,
+                        cursor: &mut Cursor,
+                    ) -> Result<usize, MovePositionError> {
+                        let previous_paragraph_id =
+                            paragraph_operations::get_previous_paragraph_id(
+                                cursor.position,
+                                document_repository,
+                            )
+                            .ok_or(MovePositionError::NoPreviousWord)?;
 
-                    if have_words_in_paragraph {
-                        let last_word = words.last().unwrap();
-
-                        let new_position = paragraph_position + last_word.start;
-
-                        Ok(new_position)
-                    } else {
-                        cursor.position = paragraph_position;
-                        cursor.anchor_position = None;
-                        recursively_find_previous_word_in_previous_paragraph(
+                        let paragraph_position = paragraph_operations::paragraph_position(
+                            previous_paragraph_id,
                             document_repository,
                             paragraph_group_repository,
-                            paragraph_repository,
-                            cursor,
-                        )
+                        );
+
+                        let paragraph = paragraph_repository.get(previous_paragraph_id).unwrap();
+
+                        let words = paragraph_operations::get_words(paragraph);
+
+                        let have_words_in_paragraph: bool = !words.is_empty();
+
+                        if have_words_in_paragraph {
+                            let last_word = words.last().unwrap();
+
+                            let new_position = paragraph_position + last_word.start;
+
+                            Ok(new_position)
+                        } else {
+                            cursor.position = paragraph_position;
+                            cursor.anchor_position = None;
+                            recursively_find_previous_word_in_previous_paragraph(
+                                document_repository,
+                                paragraph_group_repository,
+                                paragraph_repository,
+                                cursor,
+                            )
+                        }
                     }
-                }
 
-                let mut new_position = 0;
+                    let new_position;
 
-                if have_words_in_paragraph {
-                    let current_word = words
-                        .iter()
-                        .enumerate()
-                        .find(|(_, word)| {
-                            let start = word.start;
-                            let end = word.end;
-                            start <= cursor_relative_position && cursor_relative_position < end
-                        })
-                        .unwrap();
+                    if have_words_in_paragraph {
+                        let current_word = words
+                            .iter()
+                            .enumerate()
+                            .find(|(_, word)| {
+                                let start = word.start;
+                                let end = word.end;
+                                start <= cursor_relative_position && cursor_relative_position < end
+                            })
+                            .unwrap();
 
-                    if current_word.0 == 0 {
+                        if current_word.0 == 0 {
+                            new_position = recursively_find_previous_word_in_previous_paragraph(
+                                self.document_repository,
+                                self.paragraph_group_repository,
+                                self.paragraph_repository,
+                                &mut cursor,
+                            )?;
+                        } else {
+                            let previous_word = &words[current_word.0 - 1];
+
+                            new_position = paragraph_position + previous_word.start;
+                        }
+                    } else {
                         new_position = recursively_find_previous_word_in_previous_paragraph(
                             self.document_repository,
                             self.paragraph_group_repository,
                             self.paragraph_repository,
                             &mut cursor,
                         )?;
-                    } else {
-                        let previous_word = &words[current_word.0 - 1];
-
-                        new_position = paragraph_position + previous_word.start;
                     }
-                } else {
-                    new_position = recursively_find_previous_word_in_previous_paragraph(
-                        self.document_repository,
-                        self.paragraph_group_repository,
-                        self.paragraph_repository,
-                        &mut cursor,
-                    )?;
-                }
 
-                match dto.mode {
-                    MoveMode::MoveAnchorWithCursor => {
-                        cursor.position = new_position;
-                        cursor.anchor_position = None;
-                        self.cursor_repository.update(cursor)?;
-                        Ok(())
-                    }
-                    MoveMode::MoveCursorOnly => {
-                        if cursor.anchor_position.is_none() {
-                            cursor.anchor_position = Some(cursor.position);
+                    match dto.mode {
+                        MoveMode::MoveAnchorWithCursor => {
+                            cursor.position = new_position;
+                            cursor.anchor_position = None;
+                            self.cursor_repository.update(cursor)?;
                         }
-                        cursor.position = new_position;
-                        self.cursor_repository.update(cursor)?;
-                        Ok(())
+                        MoveMode::MoveCursorOnly => {
+                            if cursor.anchor_position.is_none() {
+                                cursor.anchor_position = Some(cursor.position);
+                            }
+                            cursor.position = new_position;
+                            self.cursor_repository.update(cursor)?;
+                        }
                     }
                 }
+
+                Ok(())
             }
 
             MoveOperation::End => match dto.mode {
@@ -463,43 +468,180 @@ impl<'a> MovePositionUseCase<'a> {
             }
 
             MoveOperation::NextParagraph => {
-                let cursor_position = cursor.position;
-                let next_paragraph_id = paragraph_operations::get_next_paragraph_id(
-                    cursor_position,
-                    self.document_repository,
-                )
-                .ok_or(MovePositionError::NoNextParagraph)?;
+                for _ in 0..dto.count {
+                    let cursor_position = cursor.position;
+                    let next_paragraph_id = paragraph_operations::get_next_paragraph_id(
+                        cursor_position,
+                        self.document_repository,
+                    )
+                    .ok_or(MovePositionError::NoNextParagraph)?;
 
-                let paragraph_position = paragraph_operations::paragraph_position(
-                    next_paragraph_id,
-                    self.document_repository,
-                    self.paragraph_group_repository,
-                );
+                    let paragraph_position = paragraph_operations::paragraph_position(
+                        next_paragraph_id,
+                        self.document_repository,
+                        self.paragraph_group_repository,
+                    );
 
-                let new_position = paragraph_position;
+                    let new_position = paragraph_position;
 
-                match dto.mode {
-                    MoveMode::MoveAnchorWithCursor => {
-                        cursor.position = new_position;
-                        cursor.anchor_position = None;
-                        self.cursor_repository.update(cursor)?;
-                        Ok(())
-                    }
-                    MoveMode::MoveCursorOnly => {
-                        if cursor.anchor_position.is_none() {
-                            cursor.anchor_position = Some(cursor.position);
+                    match dto.mode {
+                        MoveMode::MoveAnchorWithCursor => {
+                            cursor.position = new_position;
+                            cursor.anchor_position = None;
+                            self.cursor_repository.update(cursor)?;
                         }
-                        cursor.position = new_position;
-                        self.cursor_repository.update(cursor)?;
-                        Ok(())
+                        MoveMode::MoveCursorOnly => {
+                            if cursor.anchor_position.is_none() {
+                                cursor.anchor_position = Some(cursor.position);
+                            }
+                            cursor.position = new_position;
+                            self.cursor_repository.update(cursor)?;
+                        }
                     }
                 }
+                Ok(())
             }
 
-            MoveOperation::NextCharacter => todo!(),
-            MoveOperation::NextWord => todo!(),
-            MoveOperation::Right => todo!(),
-            MoveOperation::WordRight => todo!(),
+            MoveOperation::NextCharacter => {
+                for _ in 0..dto.count {
+                    match dto.mode {
+                        MoveMode::MoveAnchorWithCursor => {
+                            if cursor.position == position_max {
+                                return Err(MovePositionError::EndOfDocument);
+                            }
+                            cursor.position += 1;
+                            cursor.anchor_position = None;
+                            self.cursor_repository.update(cursor)?;
+                        }
+                        MoveMode::MoveCursorOnly => {
+                            if cursor.position == position_max {
+                                return Err(MovePositionError::EndOfDocument);
+                            }
+                            if cursor.anchor_position.is_none() {
+                                cursor.anchor_position = Some(cursor.position);
+                            }
+                            cursor.position += 1;
+                            self.cursor_repository.update(cursor)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            MoveOperation::NextWord => {
+                for _ in 0..dto.count {
+                    let cursor_current_position = cursor.position;
+
+                    let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
+                        cursor.position,
+                        self.document_repository,
+                        self.paragraph_group_repository,
+                    )
+                    .ok_or(MovePositionError::NoNextWord)?;
+
+                    let paragraph_position = paragraph_operations::paragraph_position(
+                        paragraph_id,
+                        self.document_repository,
+                        self.paragraph_group_repository,
+                    );
+
+                    let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
+                    let words = paragraph_operations::get_words(paragraph);
+                    let have_words_in_paragraph = !words.is_empty();
+                    let cursor_relative_position = cursor_current_position - paragraph_position;
+
+                    fn recursively_find_next_word_in_next_paragraph(
+                        document_repository: &dyn DocumentRepositoryTrait,
+                        paragraph_group_repository: &dyn ParagraphGroupRepositoryTrait,
+                        paragraph_repository: &dyn ParagraphRepositoryTrait,
+                        cursor: &mut Cursor,
+                    ) -> Result<usize, MovePositionError> {
+                        let next_paragraph_id = paragraph_operations::get_next_paragraph_id(
+                            cursor.position,
+                            document_repository,
+                        )
+                        .ok_or(MovePositionError::NoNextWord)?;
+
+                        let paragraph_position = paragraph_operations::paragraph_position(
+                            next_paragraph_id,
+                            document_repository,
+                            paragraph_group_repository,
+                        );
+
+                        let paragraph = paragraph_repository.get(next_paragraph_id).unwrap();
+
+                        let words = paragraph_operations::get_words(paragraph);
+
+                        let have_words_in_paragraph: bool = !words.is_empty();
+
+                        if have_words_in_paragraph {
+                            let first_word = words.first().unwrap();
+
+                            let new_position = paragraph_position + first_word.start;
+
+                            Ok(new_position)
+                        } else {
+                            cursor.position = paragraph_position;
+                            cursor.anchor_position = None;
+                            recursively_find_next_word_in_next_paragraph(
+                                document_repository,
+                                paragraph_group_repository,
+                                paragraph_repository,
+                                cursor,
+                            )
+                        }
+                    }
+
+                    let new_position;
+
+                    if have_words_in_paragraph {
+                        let current_word = words
+                            .iter()
+                            .enumerate()
+                            .find(|(_, word)| {
+                                let start = word.start;
+                                let end = word.end;
+                                start <= cursor_relative_position && cursor_relative_position < end
+                            })
+                            .unwrap();
+
+                        if current_word.0 == words.len() - 1 {
+                            new_position = recursively_find_next_word_in_next_paragraph(
+                                self.document_repository,
+                                self.paragraph_group_repository,
+                                self.paragraph_repository,
+                                &mut cursor,
+                            )?;
+                        } else {
+                            let next_word = &words[current_word.0 + 1];
+
+                            new_position = paragraph_position + next_word.start;
+                        }
+                    } else {
+                        new_position = recursively_find_next_word_in_next_paragraph(
+                            self.document_repository,
+                            self.paragraph_group_repository,
+                            self.paragraph_repository,
+                            &mut cursor,
+                        )?;
+                    }
+
+                    match dto.mode {
+                        MoveMode::MoveAnchorWithCursor => {
+                            cursor.position = new_position;
+                            cursor.anchor_position = None;
+                            self.cursor_repository.update(cursor)?;
+                        }
+                        MoveMode::MoveCursorOnly => {
+                            if cursor.anchor_position.is_none() {
+                                cursor.anchor_position = Some(cursor.position);
+                            }
+                            cursor.position = new_position;
+                            self.cursor_repository.update(cursor)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
             MoveOperation::NextCell => todo!(),
             MoveOperation::PreviousCell => todo!(),
             MoveOperation::NextRow => todo!(),
