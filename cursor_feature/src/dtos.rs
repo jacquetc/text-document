@@ -1,4 +1,3 @@
-
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub enum MoveOperation {
     /// Keep the cursor where it is.
@@ -61,7 +60,6 @@ pub enum MoveMode {
     MoveCursorOnly,
 }
 
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MovePositionDTO {
     pub operation: MoveOperation,
@@ -71,7 +69,11 @@ pub struct MovePositionDTO {
 
 impl Default for MovePositionDTO {
     fn default() -> Self {
-        Self { operation: Default::default(), mode: Default::default(), count: 1 }
+        Self {
+            operation: Default::default(),
+            mode: Default::default(),
+            count: 1,
+        }
     }
 }
 

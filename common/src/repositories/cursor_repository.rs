@@ -1,5 +1,4 @@
 use crate::contracts::repositories::CursorRepositoryTrait;
-use crate::contracts::repositories::RepositoryTrait;
 use crate::contracts::repositories::RepositoryError;
 use crate::entities::cursor::Cursor;
 use std::cell::Cell;
@@ -13,7 +12,7 @@ pub struct CursorRepository {
     free_id_list: RefCell<Vec<usize>>,
 }
 
-impl CursorRepository{
+impl CursorRepository {
     pub fn new() -> CursorRepository {
         CursorRepository::default()
     }
@@ -69,7 +68,7 @@ impl CursorRepositoryTrait for CursorRepository {
     fn is_empty(&self) -> bool {
         self.cursors.borrow().is_empty()
     }
-    
+
     fn len(&self) -> usize {
         self.cursors.borrow().len()
     }

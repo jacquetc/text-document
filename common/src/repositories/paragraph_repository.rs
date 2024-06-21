@@ -18,9 +18,7 @@ impl ParagraphRepository {
 
 impl ParagraphRepositoryTrait for ParagraphRepository {}
 
-
 impl RepositoryTrait<Paragraph> for ParagraphRepository {
-
     fn create(&mut self, entity: Paragraph) -> usize {
         let id = self.paragraphs.len();
         self.paragraphs.insert(id, entity);
@@ -41,7 +39,9 @@ impl RepositoryTrait<Paragraph> for ParagraphRepository {
     }
 
     fn get_slice(&self, ids: Vec<usize>) -> Vec<&Paragraph> {
-        ids.iter().filter_map(|id| self.paragraphs.get(id)).collect()
+        ids.iter()
+            .filter_map(|id| self.paragraphs.get(id))
+            .collect()
     }
 
     fn remove(&mut self, id: usize) -> Option<Paragraph> {
@@ -63,11 +63,4 @@ impl RepositoryTrait<Paragraph> for ParagraphRepository {
     fn len(&self) -> usize {
         self.paragraphs.len()
     }
-
-
-
-    
-    
-
-    
 }

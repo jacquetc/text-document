@@ -1,6 +1,7 @@
 use crate::entities::cursor::Cursor;
 use crate::entities::document::Document;
 use crate::entities::paragraph::Paragraph;
+use crate::entities::paragraph_group::ParagraphGroup;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -21,8 +22,13 @@ pub trait RepositoryTrait<T> {
     fn len(&self) -> usize;
 }
 
-
 pub trait ParagraphRepositoryTrait: RepositoryTrait<Paragraph> {}
+
+pub trait ParagraphGroupRepositoryTrait: RepositoryTrait<ParagraphGroup> {
+    fn add_paragraph_to_a_group(&mut self, paragraph: &mut Paragraph);
+    fn remove_paragraph_from_a_group(&mut self, paragraph: &Paragraph);
+    fn update_paragraph_group(&mut self, old_paragraph: &Paragraph, new_paragraph: &Paragraph);
+}
 
 pub trait CursorRepositoryTrait {
     fn create(&self, entity: Cursor) -> usize;

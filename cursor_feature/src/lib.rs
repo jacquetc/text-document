@@ -1,11 +1,14 @@
-mod use_cases;
 pub mod dtos;
+mod use_cases;
 
 use crate::use_cases::create_cursor_uc::CreateCursorUseCase;
 use crate::use_cases::delete_cursor_uc::DeleteCursorUseCase;
 use crate::use_cases::move_position_uc::MovePositionUseCase;
 use common::contracts::repositories::CursorRepositoryTrait;
 use common::contracts::repositories::DocumentRepositoryTrait;
+use common::contracts::repositories::ParagraphGroupRepositoryTrait;
+use use_cases::get_position_uc::GetPositionUseCase;
+use use_cases::set_position_uc::SetPositionUseCase;
 
 pub fn create_cursor(cursor_repository: &dyn CursorRepositoryTrait) -> usize {
     CreateCursorUseCase::new(cursor_repository).execute()
@@ -15,6 +18,24 @@ pub fn delete_cursor(cursor_repository: &dyn CursorRepositoryTrait, cursor_id: u
     DeleteCursorUseCase::new(cursor_repository).execute(cursor_id);
 }
 
-pub fn move_position(cursor_repository: &mut dyn CursorRepositoryTrait, document_repository: &dyn DocumentRepositoryTrait, cursor_id: usize, dto: dtos::MovePositionDTO) {
+pub fn move_position(
+    cursor_repository: &mut dyn CursorRepositoryTrait,
+    document_repository: &dyn DocumentRepositoryTrait,
+    cursor_id: usize,
+    dto: dtos::MovePositionDTO,
+) {
     MovePositionUseCase::new(cursor_repository, document_repository).execute(cursor_id, dto);
+}
+
+pub fn get_position(cursor_repository: &dyn CursorRepositoryTrait, cursor_id: usize) -> usize {
+    GetPositionUseCase::new(cursor_repository).execute(cursor_id)
+}
+
+pub fn set_position(
+    cursor_repository: &dyn CursorRepositoryTrait,
+    paragraph_group_repository: &dyn ParagraphGroupRepositoryTrait,
+    cursor_id: usize,
+    position: usize,
+) {
+    SetPositionUseCase::new(cursor_repository, paragraph_group_repository).execute(cursor_id, position);
 }

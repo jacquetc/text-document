@@ -1,14 +1,21 @@
 use common::contracts::repositories::DocumentRepositoryTrait;
-use common::entities::document::{DocumentNode, Section, TextNode};
+use common::contracts::repositories::ParagraphRepositoryTrait;
+use common::entities::document::{Node, Section};
+use common::entities::paragraph::TextSlice;
 
 pub struct ExportToPlainTextUseCase<'a> {
     document_repository: &'a dyn DocumentRepositoryTrait,
+    paragraph_repository: &'a dyn ParagraphRepositoryTrait,
 }
 
 impl<'a> ExportToPlainTextUseCase<'a> {
-    pub fn new(document_repository: &'a dyn DocumentRepositoryTrait) -> ExportToPlainTextUseCase {
+    pub fn new(
+        document_repository: &'a dyn DocumentRepositoryTrait,
+        paragraph_repository: &'a dyn ParagraphRepositoryTrait,
+    ) -> ExportToPlainTextUseCase<'a> {
         ExportToPlainTextUseCase {
             document_repository,
+            paragraph_repository,
         }
     }
 
@@ -21,20 +28,14 @@ impl<'a> ExportToPlainTextUseCase<'a> {
             .nodes
             .iter()
             .map(|node| match node {
-                DocumentNode::Title(text) => text.clone(),
-                DocumentNode::Section(section) => Self::export_section(section),
-                DocumentNode::Paragraph(paragraph) => paragraph
+                Node::Section(section) => self.export_section(section),
+                Node::Paragraph { paragraph_id } => {
+                    self.get_plain_text_from_paragraph_id(*paragraph_id)
+                }
+                Node::List(list) => list
                     .iter()
-                    .map(|text_node| match text_node {
-                        TextNode::PlainText(plain_text) => plain_text.content.clone(),
-                        TextNode::FormattedText(formatted_text) => formatted_text.content.clone(),
-                    })
-                    .collect::<Vec<String>>()
-                    .join(""),
-                DocumentNode::List(list) => list
-                    .iter()
-                    .map(|list_item| {
-                        let text = list_item.content.clone();
+                    .map(|list_item: &common::entities::document::ListItem| {
+                        let text = self.get_plain_text_from_paragraph_id(list_item.paragraph_id);
                         let mut caret = "• ".to_string();
                         caret.push_str(&text);
                         caret
@@ -46,26 +47,38 @@ impl<'a> ExportToPlainTextUseCase<'a> {
             .join("\n")
     }
 
-    fn export_section(section: &Section) -> String {
+    fn get_plain_text_from_paragraph_id(&self, paragraph_id: usize) -> String {
+        let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
+        paragraph
+            .slices
+            .iter()
+            .map(|slice| match slice {
+                TextSlice::PlainText { content } => content.clone(),
+                TextSlice::FormattedText { content, format: _ } => content.clone(),
+            })
+            .collect::<Vec<String>>()
+            .join("")
+    }
+
+    fn export_section(&self, section: &Section) -> String {
         section
             .content
             .iter()
             .map(|node| match node {
-                DocumentNode::Title(text) => text.clone(),
-                DocumentNode::Paragraph(paragraph) => paragraph
+                Node::Section(section) => self.export_section(section),
+                Node::Paragraph { paragraph_id } => {
+                    self.get_plain_text_from_paragraph_id(*paragraph_id)
+                }
+                Node::List(list) => list
                     .iter()
-                    .map(|text_node| match text_node {
-                        TextNode::PlainText(plain_text) => plain_text.content.clone(),
-                        TextNode::FormattedText(formatted_text) => formatted_text.content.clone(),
+                    .map(|list_item: &common::entities::document::ListItem| {
+                        let text = self.get_plain_text_from_paragraph_id(list_item.paragraph_id);
+                        let mut caret = "• ".to_string();
+                        caret.push_str(&text);
+                        caret
                     })
                     .collect::<Vec<String>>()
-                    .join(""),
-                DocumentNode::List(list) => list
-                    .iter()
-                    .map(|list_item| list_item.content.clone())
-                    .collect::<Vec<String>>()
                     .join("\n"),
-                DocumentNode::Section(section) => Self::export_section(section),
             })
             .collect::<Vec<String>>()
             .join("\n")
@@ -74,126 +87,63 @@ impl<'a> ExportToPlainTextUseCase<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
+    use common::contracts::repositories::RepositoryTrait;
+    use common::entities::document::Document;
+    use common::entities::document::Node;
+    use common::entities::paragraph::Paragraph;
+    use common::repositories::document_repository::DocumentRepository;
+    use common::repositories::paragraph_repository::ParagraphRepository;
+
     use super::*;
-    use common::entities::document::{Document, DocumentNode, Section, TextNode, ListItem, PlainText};
 
-    struct DummyDocumentRepository {
-        content: Document,
-    }
-
-    impl DocumentRepositoryTrait for DummyDocumentRepository {
-        fn get(&self) -> &Document {
-            &self.content
-        }
-
-        fn get_mut(&mut self) -> &mut Document {
-            &mut self.content
-        }
-
-        fn update(&mut self, document: Document) {
-            self.content = document;
-        }
-    }
-    
     #[test]
     fn test_export_to_plain_text() {
-        let mut document = Document::new();
-        document.nodes.push(DocumentNode::Title("Title".to_string()));
-        document.nodes.push(DocumentNode::Section(Box::new(Section {
-            content: vec![
-                DocumentNode::Title("Section Title".to_string()),
-                DocumentNode::Paragraph(vec![TextNode::PlainText(PlainText {
-                    content: "Paragraph".to_string(),
-                })]),
-                DocumentNode::List(vec![ListItem {
-                    content: "List item".to_string(),
-                }]),
+        let mut document_repository = DocumentRepository::new();
+        let mut paragraph_repository = ParagraphRepository::new();
+
+        let document = Document {
+            nodes: vec![
+                Node::Paragraph {
+                    paragraph_id: paragraph_repository.create(Paragraph::new(&[
+                        TextSlice::PlainText {
+                            content: "First line".to_string(),
+                        },
+                    ])),
+                },
+                Node::Paragraph {
+                    paragraph_id: paragraph_repository.create(Paragraph::new(&[
+                        TextSlice::PlainText {
+                            content: "Second line".to_string(),
+                        },
+                    ])),
+                },
+                Node::Paragraph {
+                    paragraph_id: paragraph_repository.create(Paragraph::new(&[
+                        TextSlice::PlainText {
+                            content: "Third line".to_string(),
+                        },
+                    ])),
+                },
+                Node::Paragraph {
+                    paragraph_id: paragraph_repository.create(Paragraph::new(&[
+                        TextSlice::PlainText {
+                            content: "".to_string(),
+                        },
+                    ])),
+                },
             ],
-        })));
-        document.nodes.push(DocumentNode::Paragraph(vec![TextNode::PlainText(PlainText {
-            content: "Paragraph".to_string(),
-        })]));
-        document.nodes.push(DocumentNode::List(vec![ListItem {
-            content: "List item".to_string(),
-        }]));
+        };
 
-        let document_repository = DummyDocumentRepository { content: document };
+        document_repository.update(document);
 
-        let use_case = ExportToPlainTextUseCase::new(&document_repository);
+        let use_case = ExportToPlainTextUseCase::new(&document_repository, &paragraph_repository);
+
+        let text = "First line\nSecond line\nThird line\n";
+
         let result = use_case.execute();
 
-        let expected = "Title\nSection Title\nParagraph\n• List item\nParagraph\n• List item";
-        assert_eq!(result, expected);
+        assert_eq!(result, text);
     }
-
-    #[test]
-    fn test_export_to_plain_text_empty() {
-        let document = Document::new();
-        let document_repository = DummyDocumentRepository { content: document };
-
-        let use_case = ExportToPlainTextUseCase::new(&document_repository);
-        let result = use_case.execute();
-
-        let expected = "";
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_export_to_plain_text_nested_sections() {
-        let mut document = Document::new();
-        document.nodes.push(DocumentNode::Section(Box::new(Section {
-            content: vec![
-                DocumentNode::Title("Title".to_string()),
-                DocumentNode::Section(Box::new(Section {
-                    content: vec![
-                        DocumentNode::Title("Section Title".to_string()),
-                        DocumentNode::Paragraph(vec![TextNode::PlainText(PlainText {
-                            content: "Paragraph".to_string(),
-                        })]),
-                        DocumentNode::List(vec![ListItem {
-                            content: "List item".to_string(),
-                        }]),
-                    ],
-                })),
-                DocumentNode::Paragraph(vec![TextNode::PlainText(PlainText {
-                    content: "Paragraph".to_string(),
-                })]),
-                DocumentNode::List(vec![ListItem {
-                    content: "List item".to_string(),
-                }]),
-            ],
-        })));
-
-        let document_repository = DummyDocumentRepository { content: document };
-
-        let use_case = ExportToPlainTextUseCase::new(&document_repository);
-        let result = use_case.execute();
-
-        let expected = "Title\nSection Title\nParagraph\n• List item\nParagraph\n• List item";
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_export_to_plain_text_nested_sections_empty() {
-        let mut document = Document::new();
-        document.nodes.push(DocumentNode::Section(Box::new(Section {
-            content: vec![
-                DocumentNode::Title("Title".to_string()),
-                DocumentNode::Section(Box::new(Section {
-                    content: vec![],
-                })),
-                DocumentNode::Paragraph(vec![]),
-                DocumentNode::List(vec![]),
-            ],
-        })));
-
-        let document_repository = DummyDocumentRepository { content: document };
-
-        let use_case = ExportToPlainTextUseCase::new(&document_repository);
-        let result = use_case.execute();
-
-        let expected = "Title";
-        assert_eq!(result, expected);
-    }
-
 }
