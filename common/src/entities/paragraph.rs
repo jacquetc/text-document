@@ -102,10 +102,7 @@ impl Paragraph {
         }
         None
     }
-
-
 }
-
 
 // Define text nodes, which can be plain or formatted
 #[derive(Debug, Eq, PartialEq, Clone)]

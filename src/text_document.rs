@@ -18,12 +18,16 @@ impl Default for TextDocument {
 
 impl TextDocument {
     pub fn new() -> TextDocument {
-        TextDocument {
+        let mut text_document = TextDocument {
             cursor_repository: CursorRepository::new(),
             document_repository: DocumentRepository::new(),
             paragraph_repository: ParagraphRepository::new(),
             paragraph_group_repository: ParagraphGroupRepository::new(),
-        }
+        };
+
+        // Initialize the document with an empty paragraph
+        text_document.set_plain_text("");
+        text_document
     }
 
     pub(crate) fn get_cursor_repository(&self) -> &CursorRepository {
@@ -64,6 +68,7 @@ impl TextDocument {
 
     pub fn set_plain_text<T: AsRef<str>>(&mut self, text: T) {
         conversion_feature::set_plain_text(
+            &self.cursor_repository,
             &mut self.document_repository,
             &mut self.paragraph_repository,
             &mut self.paragraph_group_repository,
@@ -77,6 +82,7 @@ impl TextDocument {
 
     pub fn set_markdown<T: AsRef<str>>(&mut self, markdown: T) {
         conversion_feature::set_markdown(
+            &self.cursor_repository,
             &mut self.document_repository,
             &mut self.paragraph_repository,
             &mut self.paragraph_group_repository,

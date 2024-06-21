@@ -52,10 +52,7 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
         let group = ParagraphGroup {
             id: 0,
             paragraph_count: 1,
-            char_count_per_paragraph: [(paragraph.id, char_count)]
-                .iter()
-                .cloned()
-                .collect(),
+            char_count_per_paragraph: [(paragraph.id, char_count)].iter().cloned().collect(),
             char_count,
             word_count: paragraph.get_word_count(),
         };

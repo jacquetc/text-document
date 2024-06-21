@@ -1,4 +1,3 @@
-
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Node {
     Section(Box<Section>),

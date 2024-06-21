@@ -8,10 +8,9 @@ use common::contracts::repositories::CursorRepositoryTrait;
 use common::contracts::repositories::DocumentRepositoryTrait;
 use common::contracts::repositories::ParagraphGroupRepositoryTrait;
 use common::contracts::repositories::ParagraphRepositoryTrait;
-use common::entities::paragraph;
 use dtos::SetPositionDTO;
 use use_cases::get_position_uc::GetPositionUseCase;
-use use_cases::move_position_uc::MovePositionError;
+pub use use_cases::move_position_uc::MovePositionError;
 use use_cases::set_position_uc::SetPositionUseCase;
 
 pub fn create_cursor(cursor_repository: &dyn CursorRepositoryTrait) -> usize {

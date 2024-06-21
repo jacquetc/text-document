@@ -13,7 +13,6 @@ edition = "2021"
 [workspace.dependencies]
 thiserror = "1.0.61"
 
-
 [package]
 name = "text-document"
 version.workspace = true
@@ -31,6 +30,7 @@ categories = ["data-structures", "text-editors", "text-processing", "parsing"]
 
 
 [dependencies]
+clap = { version = "4.5.7", features = ["derive"] }
 common = { path = "common" }
 conversion_feature = { path = "conversion_feature" }
 cursor_feature = { path = "cursor_feature" }

@@ -1,9 +1,11 @@
-
 use crate::{
     contracts::repositories::{
         DocumentRepositoryTrait, ParagraphGroupRepositoryTrait, ParagraphRepositoryTrait,
     },
-    entities::{document::{Node, Section}, paragraph::Paragraph},
+    entities::{
+        document::{Node, Section},
+        paragraph::Paragraph,
+    },
 };
 
 fn get_ordered_paragraph_ids(document_repository: &dyn DocumentRepositoryTrait) -> Vec<usize> {

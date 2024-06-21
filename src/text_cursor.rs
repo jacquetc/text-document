@@ -3,6 +3,7 @@ use common::repositories::document_repository::DocumentRepository;
 use common::repositories::paragraph_group_repository::ParagraphGroupRepository;
 use common::repositories::paragraph_repository::ParagraphRepository;
 use cursor_feature::dtos::{MovePositionDTO, SetPositionDTO};
+use cursor_feature::MovePositionError;
 
 use crate::TextDocument;
 
@@ -45,7 +46,7 @@ impl TextCursor<'_> {
         );
     }
 
-    pub fn move_position(&mut self, dto: MovePositionDTO) {
+    pub fn move_position(&mut self, dto: MovePositionDTO) -> Result<(), MovePositionError> {
         cursor_feature::move_position(
             self.cursor_repository,
             self.document_repository,
@@ -53,7 +54,7 @@ impl TextCursor<'_> {
             self.paragraph_group_repository,
             self.id,
             dto,
-        );
+        )
     }
 }
 

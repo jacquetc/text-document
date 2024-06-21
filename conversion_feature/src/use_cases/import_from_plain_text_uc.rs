@@ -1,3 +1,4 @@
+use common::contracts::repositories::CursorRepositoryTrait;
 use common::contracts::repositories::DocumentRepositoryTrait;
 use common::contracts::repositories::ParagraphGroupRepositoryTrait;
 use common::contracts::repositories::ParagraphRepositoryTrait;
@@ -6,6 +7,7 @@ use common::entities::document::{Document, Node};
 use common::entities::paragraph::{Paragraph, TextSlice};
 
 pub struct ImportFromPlainTextUseCase<'a> {
+    cursor_repository: &'a dyn CursorRepositoryTrait,
     document_repository: &'a mut dyn DocumentRepositoryTrait,
     paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
     paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
@@ -13,11 +15,13 @@ pub struct ImportFromPlainTextUseCase<'a> {
 
 impl<'a> ImportFromPlainTextUseCase<'a> {
     pub fn new(
+        cursor_repository: &'a dyn CursorRepositoryTrait,
         document_repository: &'a mut dyn DocumentRepositoryTrait,
         paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
         paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
     ) -> ImportFromPlainTextUseCase<'a> {
         ImportFromPlainTextUseCase {
+            cursor_repository,
             document_repository,
             paragraph_repository,
             paragraph_group_repository,
@@ -28,6 +32,16 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
         let mut document = Document::new();
         self.paragraph_group_repository.clear();
         self.paragraph_repository.clear();
+
+        // reinitialize the cursor positions to the beginning of the document
+        self.cursor_repository.get_all().iter().for_each(|cursor| {
+            let mut cursor = *cursor;
+            cursor.position = 0;
+            cursor.anchor_position = None;
+            let _ = self.cursor_repository.update(cursor);
+        });
+
+        // split the text into lines and create a paragraph for each line
 
         text.lines().for_each(|line| {
             let slice = TextSlice::PlainText {
@@ -42,6 +56,8 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
                 paragraph_id: self.paragraph_repository.create(paragraph),
             });
         });
+
+        // if the text ends with a newline character, add an empty paragraph
 
         if text.ends_with('\n') {
             let slice = TextSlice::PlainText {
@@ -66,6 +82,7 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
 #[cfg(test)]
 mod tests {
     use common::contracts::repositories::RepositoryTrait;
+    use common::repositories::cursor_repository::CursorRepository;
     use common::repositories::document_repository::DocumentRepository;
     use common::repositories::paragraph_group_repository::ParagraphGroupRepository;
     use common::repositories::paragraph_repository::ParagraphRepository;
@@ -74,11 +91,13 @@ mod tests {
 
     #[test]
     fn test_import_from_plain_text() {
+        let cursor_repository = CursorRepository::new();
         let mut document_repository = DocumentRepository::new();
         let mut paragraph_repository = ParagraphRepository::new();
         let mut paragraph_group_repository = ParagraphGroupRepository::new();
 
         let mut use_case = ImportFromPlainTextUseCase::new(
+            &cursor_repository,
             &mut document_repository,
             &mut paragraph_repository,
             &mut paragraph_group_repository,
