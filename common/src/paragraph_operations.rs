@@ -1,20 +1,18 @@
 use crate::{
-    contracts::repositories::{
-        DocumentRepositoryTrait, ParagraphGroupRepositoryTrait, ParagraphRepositoryTrait,
-    },
+    contracts::repositories::{DocumentRepositoryTrait, ParagraphGroupRepositoryTrait},
     entities::{
         document::{Node, Section},
         paragraph::Paragraph,
     },
 };
 
-fn get_ordered_paragraph_ids(document_repository: &dyn DocumentRepositoryTrait) -> Vec<usize> {
+fn ordered_paragraph_ids(document_repository: &dyn DocumentRepositoryTrait) -> Vec<usize> {
     fn recursively_get_paragraph_ids_from_section(section: &Section) -> Vec<usize> {
         section
             .nodes
             .iter()
             .flat_map(|node| match node {
-                Node::Section(section) => recursively_get_paragraph_ids_from_section(&section),
+                Node::Section(section) => recursively_get_paragraph_ids_from_section(section),
                 Node::Paragraph { paragraph_id } => vec![*paragraph_id],
                 Node::List(list_items) => list_items
                     .iter()
@@ -30,7 +28,7 @@ fn get_ordered_paragraph_ids(document_repository: &dyn DocumentRepositoryTrait) 
         .nodes
         .iter()
         .flat_map(|node| match node {
-            Node::Section(section) => recursively_get_paragraph_ids_from_section(&section),
+            Node::Section(section) => recursively_get_paragraph_ids_from_section(section),
             Node::Paragraph { paragraph_id } => vec![*paragraph_id],
             Node::List(list_items) => list_items
                 .iter()
@@ -45,7 +43,7 @@ pub fn paragraph_position(
     document_repository: &dyn DocumentRepositoryTrait,
     paragraph_group_repository: &dyn ParagraphGroupRepositoryTrait,
 ) -> usize {
-    let ordered_paragraph_ids = get_ordered_paragraph_ids(document_repository);
+    let ordered_paragraph_ids = ordered_paragraph_ids(document_repository);
     let mut previous_paragraph_ids: Vec<Option<usize>> = ordered_paragraph_ids
         .iter()
         .take_while(|&id| *id != paragraph_id)
@@ -82,12 +80,12 @@ pub fn paragraph_position(
     position
 }
 
-pub fn get_paragraph_id_by_position(
+pub fn paragraph_id_by_position(
     cursor_position: usize,
     document_repository: &dyn DocumentRepositoryTrait,
     paragraph_group_repository: &dyn ParagraphGroupRepositoryTrait,
 ) -> Option<usize> {
-    let ordered_paragraph_ids = get_ordered_paragraph_ids(document_repository);
+    let ordered_paragraph_ids = ordered_paragraph_ids(document_repository);
     let previous_paragraph_id_and_position = ordered_paragraph_ids
         .iter()
         .take_while(|&id| {
@@ -106,12 +104,12 @@ pub fn get_paragraph_id_by_position(
     Some(current_paragraph.0)
 }
 
-pub fn get_paragraph_position_by_cursor_position(
+pub fn paragraph_position_by_cursor_position(
     cursor_position: usize,
     document_repository: &dyn DocumentRepositoryTrait,
     paragraph_group_repository: &dyn ParagraphGroupRepositoryTrait,
 ) -> usize {
-    let ordered_paragraph_ids = get_ordered_paragraph_ids(document_repository);
+    let ordered_paragraph_ids = ordered_paragraph_ids(document_repository);
     let previous_paragraph_id_and_position = ordered_paragraph_ids
         .iter()
         .take_while(|&id| {
@@ -130,11 +128,11 @@ pub fn get_paragraph_position_by_cursor_position(
     current_paragraph.1
 }
 
-pub fn get_previous_paragraph_id(
+pub fn previous_paragraph_id(
     paragraph_id: usize,
     document_repository: &dyn DocumentRepositoryTrait,
 ) -> Option<usize> {
-    let ordered_paragraph_ids = get_ordered_paragraph_ids(document_repository);
+    let ordered_paragraph_ids = ordered_paragraph_ids(document_repository);
 
     let index = ordered_paragraph_ids
         .iter()
@@ -146,11 +144,11 @@ pub fn get_previous_paragraph_id(
     }
 }
 
-pub fn get_next_paragraph_id(
+pub fn next_paragraph_id(
     paragraph_id: usize,
     document_repository: &dyn DocumentRepositoryTrait,
 ) -> Option<usize> {
-    let ordered_paragraph_ids = get_ordered_paragraph_ids(document_repository);
+    let ordered_paragraph_ids = ordered_paragraph_ids(document_repository);
 
     let index = ordered_paragraph_ids
         .iter()
@@ -169,8 +167,8 @@ pub struct Word {
     pub end: usize,
 }
 
-pub fn get_words(paragraph: &Paragraph) -> Vec<Word> {
-    let text = paragraph.get_text();
+pub fn words(paragraph: &Paragraph) -> Vec<Word> {
+    let text = paragraph.text();
     let mut words = Vec::new();
     let mut start = 0;
     for (index, c) in text.char_indices() {
@@ -203,6 +201,7 @@ mod tests {
     use crate::repositories::document_repository::DocumentRepository;
     use crate::repositories::paragraph_group_repository::ParagraphGroupRepository;
     use crate::repositories::paragraph_repository::ParagraphRepository;
+    use im_rc::vector;
 
     use super::*;
 
@@ -240,7 +239,7 @@ mod tests {
             .add_paragraph_to_a_group(paragraph_repository.get_mut(paragraph4_id).unwrap());
 
         let section = Section {
-            nodes: vec![
+            nodes: vector![
                 Node::Paragraph {
                     paragraph_id: paragraph1_id,
                 },
@@ -254,7 +253,7 @@ mod tests {
         };
 
         let document = Document {
-            nodes: vec![
+            nodes: vector![
                 Node::Section(Box::new(section)),
                 Node::Paragraph {
                     paragraph_id: paragraph4_id,
@@ -295,7 +294,7 @@ mod tests {
             content: "First   line".to_string(),
         }]);
 
-        let words = get_words(&paragraph);
+        let words = words(&paragraph);
 
         assert_eq!(words.len(), 2);
         assert_eq!(words[0].text, "First");

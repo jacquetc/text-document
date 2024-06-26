@@ -26,67 +26,74 @@ impl TextDocument {
         };
 
         // Initialize the document with an empty paragraph
-        text_document.set_plain_text("");
+        let _ = text_document.set_plain_text("");
         text_document
     }
 
-    pub(crate) fn get_cursor_repository(&self) -> &CursorRepository {
+    pub(crate) fn cursor_repository(&self) -> &CursorRepository {
         &self.cursor_repository
     }
 
-    pub(crate) fn get_cursor_repository_mut(&mut self) -> &mut CursorRepository {
-        &mut self.cursor_repository
+    pub(crate) fn set_document_repository(&mut self, document_repository: DocumentRepository) {
+        self.document_repository = document_repository;
     }
 
-    pub(crate) fn get_document_repository(&self) -> &DocumentRepository {
+    pub(crate) fn document_repository(&self) -> &DocumentRepository {
         &self.document_repository
     }
 
-    pub(crate) fn get_document_repository_mut(&mut self) -> &mut DocumentRepository {
-        &mut self.document_repository
+    pub(crate) fn set_paragraph_repository(&mut self, paragraph_repository: ParagraphRepository) {
+        self.paragraph_repository = paragraph_repository;
     }
 
-    pub(crate) fn get_paragraph_repository(&self) -> &ParagraphRepository {
+    pub(crate) fn paragraph_repository(&self) -> &ParagraphRepository {
         &self.paragraph_repository
     }
 
-    pub(crate) fn get_paragraph_repository_mut(&mut self) -> &mut ParagraphRepository {
-        &mut self.paragraph_repository
+    pub(crate) fn set_paragraph_group_repository(
+        &mut self,
+        paragraph_group_repository: ParagraphGroupRepository,
+    ) {
+        self.paragraph_group_repository = paragraph_group_repository;
     }
 
-    pub(crate) fn get_paragraph_group_repository(&self) -> &ParagraphGroupRepository {
+    pub(crate) fn paragraph_group_repository(&self) -> &ParagraphGroupRepository {
         &self.paragraph_group_repository
-    }
-
-    pub(crate) fn get_paragraph_group_repository_mut(&mut self) -> &mut ParagraphGroupRepository {
-        &mut self.paragraph_group_repository
     }
 
     pub fn get_plain_text(&self) -> String {
         conversion_feature::get_plain_text(&self.document_repository, &self.paragraph_repository)
+            .unwrap()
     }
 
-    pub fn set_plain_text<T: AsRef<str>>(&mut self, text: T) {
+    pub fn set_plain_text<T: AsRef<str>>(
+        &mut self,
+        text: T,
+    ) -> Result<(), conversion_feature::SetPlainTextError> {
         conversion_feature::set_plain_text(
             &self.cursor_repository,
             &mut self.document_repository,
             &mut self.paragraph_repository,
             &mut self.paragraph_group_repository,
             text.as_ref(),
-        );
+        )
     }
 
-    pub fn get_markdown(&self) -> String {
+    pub fn get_markdown_text(&self) -> String {
         conversion_feature::get_markdown(&self.document_repository, &self.paragraph_repository)
+            .unwrap()
     }
 
-    pub fn set_markdown<T: AsRef<str>>(&mut self, markdown: T) {
+    pub fn set_markdown<T: AsRef<str>>(
+        &mut self,
+        text: T,
+    ) -> Result<(), conversion_feature::SetMarkdownError> {
         conversion_feature::set_markdown(
             &self.cursor_repository,
             &mut self.document_repository,
             &mut self.paragraph_repository,
             &mut self.paragraph_group_repository,
-            markdown.as_ref(),
-        );
+            text.as_ref(),
+        )
     }
 }

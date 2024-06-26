@@ -4,7 +4,6 @@ use common::contracts::repositories::{
     ParagraphRepositoryTrait, RepositoryError,
 };
 use common::entities::cursor::Cursor;
-use common::entities::paragraph;
 use common::paragraph_operations;
 use thiserror::Error;
 
@@ -82,7 +81,7 @@ impl<'a> MovePositionUseCase<'a> {
             },
             MoveOperation::StartOfParagraph => {
                 let old_cursor_position = cursor.position;
-                cursor.position = paragraph_operations::get_paragraph_position_by_cursor_position(
+                cursor.position = paragraph_operations::paragraph_position_by_cursor_position(
                     old_cursor_position,
                     self.document_repository,
                     self.paragraph_group_repository,
@@ -106,7 +105,7 @@ impl<'a> MovePositionUseCase<'a> {
             MoveOperation::StartOfWord => {
                 let cursor_current_position = cursor.position;
 
-                let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
+                let paragraph_id = paragraph_operations::paragraph_id_by_position(
                     cursor.position,
                     self.document_repository,
                     self.paragraph_group_repository,
@@ -121,7 +120,7 @@ impl<'a> MovePositionUseCase<'a> {
 
                 let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
 
-                let paragraph_plain_text = paragraph.get_text();
+                let paragraph_plain_text = paragraph.text();
                 let cursor_relative_position = cursor_current_position - paragraph_position;
 
                 let mut word_start_position = 0;
@@ -168,7 +167,7 @@ impl<'a> MovePositionUseCase<'a> {
             MoveOperation::PreviousParagraph => {
                 for _ in 0..dto.count {
                     let cursor_position = cursor.position;
-                    let previous_paragraph_id = paragraph_operations::get_previous_paragraph_id(
+                    let previous_paragraph_id = paragraph_operations::previous_paragraph_id(
                         cursor_position,
                         self.document_repository,
                     )
@@ -229,7 +228,7 @@ impl<'a> MovePositionUseCase<'a> {
                 for _ in 0..dto.count {
                     let cursor_current_position = cursor.position;
 
-                    let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
+                    let paragraph_id = paragraph_operations::paragraph_id_by_position(
                         cursor.position,
                         self.document_repository,
                         self.paragraph_group_repository,
@@ -243,7 +242,7 @@ impl<'a> MovePositionUseCase<'a> {
                     );
 
                     let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
-                    let words = paragraph_operations::get_words(paragraph);
+                    let words = paragraph_operations::words(paragraph);
                     let have_words_in_paragraph = !words.is_empty();
                     let cursor_relative_position = cursor_current_position - paragraph_position;
 
@@ -253,12 +252,11 @@ impl<'a> MovePositionUseCase<'a> {
                         paragraph_repository: &dyn ParagraphRepositoryTrait,
                         cursor: &mut Cursor,
                     ) -> Result<usize, MovePositionError> {
-                        let previous_paragraph_id =
-                            paragraph_operations::get_previous_paragraph_id(
-                                cursor.position,
-                                document_repository,
-                            )
-                            .ok_or(MovePositionError::NoPreviousWord)?;
+                        let previous_paragraph_id = paragraph_operations::previous_paragraph_id(
+                            cursor.position,
+                            document_repository,
+                        )
+                        .ok_or(MovePositionError::NoPreviousWord)?;
 
                         let paragraph_position = paragraph_operations::paragraph_position(
                             previous_paragraph_id,
@@ -268,7 +266,7 @@ impl<'a> MovePositionUseCase<'a> {
 
                         let paragraph = paragraph_repository.get(previous_paragraph_id).unwrap();
 
-                        let words = paragraph_operations::get_words(paragraph);
+                        let words = paragraph_operations::words(paragraph);
 
                         let have_words_in_paragraph: bool = !words.is_empty();
 
@@ -369,7 +367,7 @@ impl<'a> MovePositionUseCase<'a> {
             MoveOperation::EndOfWord => {
                 let cursor_current_position = cursor.position;
 
-                let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
+                let paragraph_id = paragraph_operations::paragraph_id_by_position(
                     cursor.position,
                     self.document_repository,
                     self.paragraph_group_repository,
@@ -384,7 +382,7 @@ impl<'a> MovePositionUseCase<'a> {
 
                 let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
 
-                let paragraph_plain_text = paragraph.get_text();
+                let paragraph_plain_text = paragraph.text();
                 let cursor_relative_position = cursor_current_position - paragraph_position;
 
                 let mut _word_start_position = 0;
@@ -430,7 +428,7 @@ impl<'a> MovePositionUseCase<'a> {
             }
             MoveOperation::EndOfParagraph => {
                 let cursor_position = cursor.position;
-                let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
+                let paragraph_id = paragraph_operations::paragraph_id_by_position(
                     cursor_position,
                     self.document_repository,
                     self.paragraph_group_repository,
@@ -445,7 +443,7 @@ impl<'a> MovePositionUseCase<'a> {
                     .paragraph_repository
                     .get(paragraph_id)
                     .unwrap()
-                    .get_char_count();
+                    .char_count();
 
                 let new_position = paragraph_position + paragraph_size;
 
@@ -470,7 +468,7 @@ impl<'a> MovePositionUseCase<'a> {
             MoveOperation::NextParagraph => {
                 for _ in 0..dto.count {
                     let cursor_position = cursor.position;
-                    let next_paragraph_id = paragraph_operations::get_next_paragraph_id(
+                    let next_paragraph_id = paragraph_operations::next_paragraph_id(
                         cursor_position,
                         self.document_repository,
                     )
@@ -531,7 +529,7 @@ impl<'a> MovePositionUseCase<'a> {
                 for _ in 0..dto.count {
                     let cursor_current_position = cursor.position;
 
-                    let paragraph_id = paragraph_operations::get_paragraph_id_by_position(
+                    let paragraph_id = paragraph_operations::paragraph_id_by_position(
                         cursor.position,
                         self.document_repository,
                         self.paragraph_group_repository,
@@ -545,7 +543,7 @@ impl<'a> MovePositionUseCase<'a> {
                     );
 
                     let paragraph = self.paragraph_repository.get(paragraph_id).unwrap();
-                    let words = paragraph_operations::get_words(paragraph);
+                    let words = paragraph_operations::words(paragraph);
                     let have_words_in_paragraph = !words.is_empty();
                     let cursor_relative_position = cursor_current_position - paragraph_position;
 
@@ -555,7 +553,7 @@ impl<'a> MovePositionUseCase<'a> {
                         paragraph_repository: &dyn ParagraphRepositoryTrait,
                         cursor: &mut Cursor,
                     ) -> Result<usize, MovePositionError> {
-                        let next_paragraph_id = paragraph_operations::get_next_paragraph_id(
+                        let next_paragraph_id = paragraph_operations::next_paragraph_id(
                             cursor.position,
                             document_repository,
                         )
@@ -569,7 +567,7 @@ impl<'a> MovePositionUseCase<'a> {
 
                         let paragraph = paragraph_repository.get(next_paragraph_id).unwrap();
 
-                        let words = paragraph_operations::get_words(paragraph);
+                        let words = paragraph_operations::words(paragraph);
 
                         let have_words_in_paragraph: bool = !words.is_empty();
 
@@ -660,6 +658,7 @@ mod tests {
     use common::repositories::document_repository::DocumentRepository;
     use common::repositories::paragraph_group_repository::ParagraphGroupRepository;
     use common::repositories::paragraph_repository::ParagraphRepository;
+    use im_rc::vector;
 
     fn setup<'a>(
         cursor_repository: &'a dyn CursorRepositoryTrait,
@@ -695,7 +694,7 @@ mod tests {
             .add_paragraph_to_a_group(paragraph_repository.get_mut(paragraph4_id).unwrap());
 
         let section = Section {
-            nodes: vec![
+            nodes: vector![
                 Node::Paragraph {
                     paragraph_id: paragraph1_id,
                 },
@@ -709,7 +708,7 @@ mod tests {
         };
 
         let document = Document {
-            nodes: vec![
+            nodes: vector![
                 Node::Section(Box::new(section)),
                 Node::Paragraph {
                     paragraph_id: paragraph4_id,

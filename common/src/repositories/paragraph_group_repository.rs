@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use im_rc::HashMap;
 
 use crate::contracts::repositories::{
     ParagraphGroupRepositoryTrait, RepositoryError, RepositoryTrait,
@@ -6,7 +6,7 @@ use crate::contracts::repositories::{
 use crate::entities::paragraph::Paragraph;
 use crate::entities::paragraph_group::ParagraphGroup;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ParagraphGroupRepository {
     paragraph_groups: HashMap<usize, ParagraphGroup>,
 }
@@ -26,7 +26,7 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
         self.paragraph_groups
             .retain(|_, group| group.paragraph_count > 0);
 
-        let char_count: usize = paragraph.get_char_count();
+        let char_count: usize = paragraph.char_count();
 
         // Find a group with less than 10 paragraphs
         if let Some(group) = self.paragraph_groups.iter_mut().find_map(|(_, group)| {
@@ -43,7 +43,7 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
                 .char_count_per_paragraph
                 .insert(paragraph.id, char_count);
             group.char_count += char_count;
-            group.word_count += paragraph.get_word_count();
+            group.word_count += paragraph.word_count();
 
             return;
         }
@@ -54,7 +54,7 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
             paragraph_count: 1,
             char_count_per_paragraph: [(paragraph.id, char_count)].iter().cloned().collect(),
             char_count,
-            word_count: paragraph.get_word_count(),
+            word_count: paragraph.word_count(),
         };
         let id = self.create(group);
 
@@ -68,8 +68,8 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
             .unwrap();
         group.paragraph_count -= 1;
         group.char_count_per_paragraph.remove(&paragraph.id);
-        group.char_count -= paragraph.get_char_count();
-        group.word_count -= paragraph.get_word_count();
+        group.char_count -= paragraph.char_count();
+        group.word_count -= paragraph.word_count();
     }
 
     fn update_paragraph_group(&mut self, old_paragraph: &Paragraph, new_paragraph: &Paragraph) {
@@ -77,18 +77,18 @@ impl ParagraphGroupRepositoryTrait for ParagraphGroupRepository {
             .paragraph_groups
             .get_mut(&old_paragraph.paragraph_group_id)
             .unwrap();
-        let new_char_count: usize = new_paragraph.get_char_count();
+        let new_char_count: usize = new_paragraph.char_count();
         group
             .char_count_per_paragraph
             .insert(new_paragraph.id, new_char_count);
         group.char_count = group
             .char_count
-            .saturating_sub(old_paragraph.get_char_count())
+            .saturating_sub(old_paragraph.char_count())
             .saturating_add(new_char_count);
         group.word_count = group
             .word_count
-            .saturating_sub(old_paragraph.get_word_count())
-            .saturating_add(new_paragraph.get_word_count());
+            .saturating_sub(old_paragraph.word_count())
+            .saturating_add(new_paragraph.word_count());
     }
 }
 

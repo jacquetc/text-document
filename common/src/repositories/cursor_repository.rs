@@ -1,11 +1,11 @@
 use crate::contracts::repositories::CursorRepositoryTrait;
 use crate::contracts::repositories::RepositoryError;
 use crate::entities::cursor::Cursor;
+use im_rc::HashMap;
 use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CursorRepository {
     cursors: RefCell<HashMap<usize, Cursor>>,
     free_id: Cell<usize>,

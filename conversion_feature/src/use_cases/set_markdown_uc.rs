@@ -1,0 +1,167 @@
+use common::contracts::repositories::CursorRepositoryTrait;
+use common::contracts::repositories::DocumentRepositoryTrait;
+use common::contracts::repositories::ParagraphGroupRepositoryTrait;
+use common::contracts::repositories::ParagraphRepositoryTrait;
+use common::entities::paragraph::TextFormat;
+use thiserror::Error;
+
+use common::entities::document::{Document, Node};
+use common::entities::paragraph::{Paragraph, TextSlice};
+
+#[derive(Error, Debug)]
+pub enum SetMarkdownError {}
+
+pub struct SetMarkdownUseCase<'a> {
+    cursor_repository: &'a dyn CursorRepositoryTrait,
+    document_repository: &'a mut dyn DocumentRepositoryTrait,
+    paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
+    paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
+}
+
+impl<'a> SetMarkdownUseCase<'a> {
+    pub fn new(
+        cursor_repository: &'a dyn CursorRepositoryTrait,
+        document_repository: &'a mut dyn DocumentRepositoryTrait,
+        paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
+        paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
+    ) -> SetMarkdownUseCase<'a> {
+        SetMarkdownUseCase {
+            cursor_repository,
+            document_repository,
+            paragraph_repository,
+            paragraph_group_repository,
+        }
+    }
+
+    pub fn execute(&mut self, text: &str) -> Result<(), SetMarkdownError> {
+        let mut document = Document::new();
+        self.paragraph_group_repository.clear();
+        self.paragraph_repository.clear();
+
+        // reinitialize the cursor positions to the beginning of the document
+        self.cursor_repository.get_all().iter().for_each(|cursor| {
+            let mut cursor = *cursor;
+            cursor.position = 0;
+            cursor.anchor_position = None;
+            let _ = self.cursor_repository.update(cursor);
+        });
+
+        // split the text into lines and create a paragraph for each line
+
+        text.lines().for_each(|line| {
+            let slice = TextSlice::PlainText {
+                content: line.to_string(),
+            };
+
+            let mut paragraph = Paragraph::new(&[slice]);
+            self.paragraph_group_repository
+                .add_paragraph_to_a_group(&mut paragraph);
+
+            document.nodes.push_back(Node::Paragraph {
+                paragraph_id: self.paragraph_repository.create(paragraph),
+            });
+        });
+
+        // if the text ends with 2 newline characters, add an empty paragraph
+
+        if text.ends_with("\n\n") {
+            let slice = TextSlice::FormattedText {
+                content: "".to_string(),
+                format: TextFormat {
+                    ..Default::default()
+                },
+            };
+
+            let mut paragraph = Paragraph::new(&[slice]);
+            self.paragraph_group_repository
+                .add_paragraph_to_a_group(&mut paragraph);
+
+            document.nodes.push_back(Node::Paragraph {
+                paragraph_id: self.paragraph_repository.create(paragraph),
+            });
+        }
+
+        self.document_repository.update(document);
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common::contracts::repositories::RepositoryTrait;
+    use common::repositories::cursor_repository::CursorRepository;
+    use common::repositories::document_repository::DocumentRepository;
+    use common::repositories::paragraph_group_repository::ParagraphGroupRepository;
+    use common::repositories::paragraph_repository::ParagraphRepository;
+
+    use super::*;
+
+    #[test]
+    fn test_import_from_plain_text() {
+        let cursor_repository = CursorRepository::new();
+        let mut document_repository = DocumentRepository::new();
+        let mut paragraph_repository = ParagraphRepository::new();
+        let mut paragraph_group_repository = ParagraphGroupRepository::new();
+
+        let mut use_case = SetMarkdownUseCase::new(
+            &cursor_repository,
+            &mut document_repository,
+            &mut paragraph_repository,
+            &mut paragraph_group_repository,
+        );
+
+        let text = "First line\nSecond line\nThird line\n";
+
+        let result = use_case.execute(text);
+
+        assert!(result.is_ok());
+
+        let document = document_repository.get();
+
+        assert_eq!(document.nodes.len(), 4);
+
+        let paragraph_ids: Vec<usize> = document
+            .nodes
+            .iter()
+            .map(|node| {
+                if let Node::Paragraph { paragraph_id } = node {
+                    *paragraph_id
+                } else {
+                    panic!("Expected a paragraph node");
+                }
+            })
+            .collect();
+
+        let paragraphs = paragraph_ids
+            .iter()
+            .map(|&id| paragraph_repository.get(id))
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs.len(), 4);
+
+        assert_eq!(paragraphs[0].unwrap().slices.len(), 1);
+        match &paragraphs[0].unwrap().slices[0] {
+            TextSlice::PlainText { content } => assert!(content == "First line"),
+            _ => unreachable!(),
+        }
+
+        assert_eq!(paragraphs[1].unwrap().slices.len(), 1);
+        match &paragraphs[1].unwrap().slices[0] {
+            TextSlice::PlainText { content } => assert!(content == "Second line"),
+            _ => unreachable!(),
+        }
+
+        assert_eq!(paragraphs[2].unwrap().slices.len(), 1);
+        match &paragraphs[2].unwrap().slices[0] {
+            TextSlice::PlainText { content } => assert!(content == "Third line"),
+            _ => unreachable!(),
+        }
+
+        assert_eq!(paragraphs[3].unwrap().slices.len(), 1);
+        match &paragraphs[3].unwrap().slices[0] {
+            TextSlice::PlainText { content } => assert!(content.is_empty()),
+            _ => unreachable!(),
+        }
+    }
+}

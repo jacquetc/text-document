@@ -2,29 +2,35 @@ use common::contracts::repositories::DocumentRepositoryTrait;
 use common::contracts::repositories::ParagraphRepositoryTrait;
 use common::entities::document::{Node, Section};
 use common::entities::paragraph::TextSlice;
+#[allow(unused_imports)]
+use im_rc::vector;
+use thiserror::Error;
 
-pub struct ExportToPlainTextUseCase<'a> {
+#[derive(Error, Debug)]
+pub enum GetPlainTextError {}
+
+pub struct GetPlainTextUseCase<'a> {
     document_repository: &'a dyn DocumentRepositoryTrait,
     paragraph_repository: &'a dyn ParagraphRepositoryTrait,
 }
 
-impl<'a> ExportToPlainTextUseCase<'a> {
+impl<'a> GetPlainTextUseCase<'a> {
     pub fn new(
         document_repository: &'a dyn DocumentRepositoryTrait,
         paragraph_repository: &'a dyn ParagraphRepositoryTrait,
-    ) -> ExportToPlainTextUseCase<'a> {
-        ExportToPlainTextUseCase {
+    ) -> GetPlainTextUseCase<'a> {
+        GetPlainTextUseCase {
             document_repository,
             paragraph_repository,
         }
     }
 
-    pub fn execute(&self) -> String {
+    pub fn execute(&self) -> Result<String, GetPlainTextError> {
         let document_repository = self.document_repository;
 
         let document = document_repository.get();
 
-        document
+        let text = document
             .nodes
             .iter()
             .map(|node| match node {
@@ -44,7 +50,9 @@ impl<'a> ExportToPlainTextUseCase<'a> {
                     .join("\n"),
             })
             .collect::<Vec<String>>()
-            .join("\n")
+            .join("\n");
+
+        Ok(text)
     }
 
     fn get_plain_text_from_paragraph_id(&self, paragraph_id: usize) -> String {
@@ -87,7 +95,6 @@ impl<'a> ExportToPlainTextUseCase<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::vec;
 
     use common::contracts::repositories::RepositoryTrait;
     use common::entities::document::Document;
@@ -104,7 +111,7 @@ mod tests {
         let mut paragraph_repository = ParagraphRepository::new();
 
         let document = Document {
-            nodes: vec![
+            nodes: vector![
                 Node::Paragraph {
                     paragraph_id: paragraph_repository.create(Paragraph::new(&[
                         TextSlice::PlainText {
@@ -138,11 +145,11 @@ mod tests {
 
         document_repository.update(document);
 
-        let use_case = ExportToPlainTextUseCase::new(&document_repository, &paragraph_repository);
+        let use_case = GetPlainTextUseCase::new(&document_repository, &paragraph_repository);
 
         let text = "First line\nSecond line\nThird line\n";
 
-        let result = use_case.execute();
+        let result = use_case.execute().expect("Error");
 
         assert_eq!(result, text);
     }

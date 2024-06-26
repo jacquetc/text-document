@@ -1,8 +1,10 @@
+use im_rc::Vector;
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Node {
     Section(Box<Section>),
     Paragraph { paragraph_id: usize },
-    List(Vec<ListItem>),
+    List(Vector<ListItem>),
     // ... other types of nodes
 }
 
@@ -15,28 +17,33 @@ impl Default for Node {
 // Define a section with a content
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct Section {
-    pub nodes: Vec<Node>,
+    pub nodes: Vector<Node>,
 }
 
 impl Section {
     pub fn new() -> Self {
-        Section { nodes: Vec::new() }
+        Section {
+            nodes: Vector::new(),
+        }
     }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct ListItem {
     pub paragraph_id: usize,
+    pub indent_level: usize,
 }
 
 // Define the root of the AST
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct Document {
-    pub nodes: Vec<Node>,
+    pub nodes: Vector<Node>,
 }
 
 impl Document {
     pub fn new() -> Self {
-        Document { nodes: Vec::new() }
+        Document {
+            nodes: Vector::new(),
+        }
     }
 }

@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use im_rc::HashMap;
 
 use crate::contracts::repositories::{ParagraphRepositoryTrait, RepositoryError, RepositoryTrait};
 use crate::entities::paragraph::Paragraph;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ParagraphRepository {
     paragraphs: HashMap<usize, Paragraph>,
 }

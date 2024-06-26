@@ -1,10 +1,5 @@
 [workspace]
-members = [
-    "conversion_feature",
-    "cursor_feature",
-    "common",
-    ".",
-]
+members = ["conversion_feature", "cursor_feature", "common", "."]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +7,7 @@ edition = "2021"
 
 [workspace.dependencies]
 thiserror = "1.0.61"
+im-rc = "15.1.0"
 
 [package]
 name = "text-document"
@@ -31,6 +27,15 @@ categories = ["data-structures", "text-editors", "text-processing", "parsing"]
 
 [dependencies]
 clap = { version = "4.5.7", features = ["derive"] }
+exitcode = "1.1.2"
 common = { path = "common" }
 conversion_feature = { path = "conversion_feature" }
 cursor_feature = { path = "cursor_feature" }
+tempfile = "3.10.1"
+
+[dev-dependencies]
+criterion = { version = "0.5.1", features = ["html_reports"] }
+
+[[bench]]
+name = "benches"
+harness = false

@@ -2,25 +2,29 @@ use common::contracts::repositories::CursorRepositoryTrait;
 use common::contracts::repositories::DocumentRepositoryTrait;
 use common::contracts::repositories::ParagraphGroupRepositoryTrait;
 use common::contracts::repositories::ParagraphRepositoryTrait;
+use thiserror::Error;
 
 use common::entities::document::{Document, Node};
 use common::entities::paragraph::{Paragraph, TextSlice};
 
-pub struct ImportFromPlainTextUseCase<'a> {
+#[derive(Error, Debug)]
+pub enum SetPlainTextError {}
+
+pub struct SetPlainTextUseCase<'a> {
     cursor_repository: &'a dyn CursorRepositoryTrait,
     document_repository: &'a mut dyn DocumentRepositoryTrait,
     paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
     paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
 }
 
-impl<'a> ImportFromPlainTextUseCase<'a> {
+impl<'a> SetPlainTextUseCase<'a> {
     pub fn new(
         cursor_repository: &'a dyn CursorRepositoryTrait,
         document_repository: &'a mut dyn DocumentRepositoryTrait,
         paragraph_repository: &'a mut dyn ParagraphRepositoryTrait,
         paragraph_group_repository: &'a mut dyn ParagraphGroupRepositoryTrait,
-    ) -> ImportFromPlainTextUseCase<'a> {
-        ImportFromPlainTextUseCase {
+    ) -> SetPlainTextUseCase<'a> {
+        SetPlainTextUseCase {
             cursor_repository,
             document_repository,
             paragraph_repository,
@@ -28,7 +32,7 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
         }
     }
 
-    pub fn execute(&mut self, text: &str) -> Result<(), String> {
+    pub fn execute(&mut self, text: &str) -> Result<(), SetPlainTextError> {
         let mut document = Document::new();
         self.paragraph_group_repository.clear();
         self.paragraph_repository.clear();
@@ -52,7 +56,7 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
             self.paragraph_group_repository
                 .add_paragraph_to_a_group(&mut paragraph);
 
-            document.nodes.push(Node::Paragraph {
+            document.nodes.push_back(Node::Paragraph {
                 paragraph_id: self.paragraph_repository.create(paragraph),
             });
         });
@@ -68,7 +72,7 @@ impl<'a> ImportFromPlainTextUseCase<'a> {
             self.paragraph_group_repository
                 .add_paragraph_to_a_group(&mut paragraph);
 
-            document.nodes.push(Node::Paragraph {
+            document.nodes.push_back(Node::Paragraph {
                 paragraph_id: self.paragraph_repository.create(paragraph),
             });
         }
@@ -96,7 +100,7 @@ mod tests {
         let mut paragraph_repository = ParagraphRepository::new();
         let mut paragraph_group_repository = ParagraphGroupRepository::new();
 
-        let mut use_case = ImportFromPlainTextUseCase::new(
+        let mut use_case = SetPlainTextUseCase::new(
             &cursor_repository,
             &mut document_repository,
             &mut paragraph_repository,

@@ -66,3 +66,17 @@ pub struct SetPositionDTO {
     pub position: usize,
     pub mode: MoveMode,
 }
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub enum TextType {
+    #[default]
+    PlainText,
+    Markdown,
+    Html
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct InsertTextDTO {
+    pub text_type: TextType,
+    pub text: String,
+}

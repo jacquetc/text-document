@@ -8,4 +8,5 @@ edition.workspace = true
 
 [dependencies]
 common = { path = "../common" }
-thiserror = "1.0.61"
+thiserror = { workspace = true }
+im-rc = { workspace = true }

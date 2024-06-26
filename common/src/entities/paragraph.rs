@@ -1,4 +1,3 @@
-use bitflags::bitflags;
 use im_rc::Vector;
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
@@ -18,16 +17,16 @@ impl Paragraph {
     }
 
     // Calculate the number of characters in the paragraph
-    pub fn get_char_count(&self) -> usize {
-        self.slices.iter().map(|slice| slice.get_char_count()).sum()
+    pub fn char_count(&self) -> usize {
+        self.slices.iter().map(|slice| slice.char_count()).sum()
     }
 
     // Calculate the number of words in the paragraph
-    pub fn get_word_count(&self) -> usize {
-        self.get_text().split_whitespace().count()
+    pub fn word_count(&self) -> usize {
+        self.text().split_whitespace().count()
     }
 
-    pub fn get_text(&self) -> String {
+    pub fn text(&self) -> String {
         self.slices
             .iter()
             .map(|slice| match slice {
@@ -38,15 +37,15 @@ impl Paragraph {
             .join("")
     }
 
-    pub fn get_slice_count(&self) -> usize {
+    pub fn slice_count(&self) -> usize {
         self.slices.len()
     }
 
-    pub fn get_slice(&self, index: usize) -> Option<&TextSlice> {
+    pub fn slice(&self, index: usize) -> Option<&TextSlice> {
         self.slices.get(index)
     }
 
-    pub fn get_slice_mut(&mut self, index: usize) -> Option<&mut TextSlice> {
+    pub fn slice_mut(&mut self, index: usize) -> Option<&mut TextSlice> {
         self.slices.get_mut(index)
     }
 
@@ -71,11 +70,11 @@ impl Paragraph {
     }
 
     // Get the slice at the specified position in the paragraph
-    pub fn get_slice_at_relative_position(&self, position: usize) -> Option<(usize, &TextSlice)> {
-        if position < self.get_char_count() {
+    pub fn slice_at_relative_position(&self, position: usize) -> Option<(usize, &TextSlice)> {
+        if position < self.char_count() {
             let mut char_count = 0;
             for (index, slice) in self.slices.iter().enumerate() {
-                let slice_char_count = slice.get_char_count();
+                let slice_char_count = slice.char_count();
                 if char_count + slice_char_count > position {
                     return Some((index, slice));
                 }
@@ -86,14 +85,14 @@ impl Paragraph {
     }
 
     // Get a mutable slice at the specified position in the paragraph
-    pub fn get_slice_at_relative_position_mut(
+    pub fn slice_at_relative_position_mut(
         &mut self,
         position: usize,
     ) -> Option<(usize, &mut TextSlice)> {
-        if position < self.get_char_count() {
+        if position < self.char_count() {
             let mut char_count = 0;
             for (index, slice) in self.slices.iter_mut().enumerate() {
-                let slice_char_count = slice.get_char_count();
+                let slice_char_count = slice.char_count();
                 if char_count + slice_char_count > position {
                     return Some((index, slice));
                 }
@@ -120,7 +119,7 @@ impl Default for TextSlice {
 }
 
 impl TextSlice {
-    pub fn get_char_count(&self) -> usize {
+    pub fn char_count(&self) -> usize {
         match self {
             TextSlice::PlainText { content } => content.chars().count(),
             TextSlice::FormattedText { content, .. } => content.chars().count(),
@@ -129,41 +128,25 @@ impl TextSlice {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
-enum FontStyle {
-    #[default]
-    Regular,
-    Bold,
-    Italic,
-}
-
-bitflags! {
-    #[derive(Debug, Eq, PartialEq, Clone, Default)]
-    struct TextDecoration: u32 {
-        const NONE = 0;
-        const UNDERLINE = 0b0001;
-        const STRIKETHROUGH = 0b0010;
-        // Add more flags here if needed
-    }
+pub struct Font {
+    pub family: String,
+    pub size: u8,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
-struct Font {
-    family: String,
-    size: u8,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Default)]
-struct Color {
-    red: u8,
-    green: u8,
-    blue: u8,
+pub struct Color {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
 }
 
 // Define the format of the text (font, style, etc.)
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct TextFormat {
-    style: FontStyle,
-    decoration: TextDecoration,
-    font: Font,
-    color: Color,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub strikethrough: Option<bool>,
+    pub font: Option<Font>,
+    pub color: Option<Color>,
 }
