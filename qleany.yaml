@@ -1,0 +1,978 @@
+schema:
+  version: 5
+
+global:
+  language: rust
+  application_name: TextDocument
+  organisation:
+    name: text-document
+    domain: text-document.dev
+  prefix_path: crates
+
+entities:
+  # ── Base ────────────────────────────────────────────────────
+  - name: EntityBase
+    only_for_heritage: true
+    fields:
+      - name: id
+        type: uinteger
+      - name: created_at
+        type: datetime
+      - name: updated_at
+        type: datetime
+
+  # ── Root (non-undoable application entry point) ─────────────
+  - name: Root
+    inherits_from: EntityBase
+    undoable: false
+    fields:
+      - name: document
+        type: entity
+        entity: Document
+        relationship: one_to_one
+        strong: true
+
+  # ── Document (the main document entity, undoable trunk) ─────
+  #    Owns ALL frames (flat ownership). The tree structure is
+  #    expressed via Frame.parent_frame references, not via
+  #    recursive strong ownership (which Qleany forbids).
+  - name: Document
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      - name: title
+        type: string
+      - name: frames
+        type: entity
+        entity: Frame
+        relationship: ordered_one_to_many
+        strong: true
+      - name: text_direction
+        type: enum
+        enum_name: TextDirection
+        enum_values:
+          - LeftToRight
+          - RightToLeft
+      - name: default_wrap_mode
+        type: enum
+        enum_name: WrapMode
+        enum_values:
+          - NoWrap
+          - WordWrap
+          - WrapAnywhere
+          - WrapAtWordBoundaryOrAnywhere
+      - name: resources
+        type: entity
+        entity: Resource
+        relationship: one_to_many
+        strong: true
+      - name: lists
+        type: entity
+        entity: List
+        relationship: one_to_many
+        strong: true
+      # ── Cached document stats (maintained by editing use cases) ──
+      # These avoid full tree walks for get_document_stats and isEmpty().
+      - name: character_count
+        type: integer
+      - name: block_count
+        type: integer
+
+  # ── Frame (container: holds blocks and nested frames) ───────
+  #    Document owns all frames. Nesting is expressed via the
+  #    parent_frame weak reference. The first frame (index 0)
+  #    in the document's list is the root frame.
+  - name: Frame
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      - name: parent_frame
+        type: entity
+        entity: Frame
+        relationship: many_to_one
+        optional: true
+      - name: blocks
+        type: entity
+        entity: Block
+        relationship: ordered_one_to_many
+        strong: true
+      # ── Child ordering (solves block/sub-frame interleaving) ──
+      - name: child_order
+        type: integer
+        is_list: true
+      # ── FrameFormat (all optional: None = inherit/default) ──
+      - name: fmt_height
+        type: integer
+        optional: true
+      - name: fmt_width
+        type: integer
+        optional: true
+      - name: fmt_top_margin
+        type: integer
+        optional: true
+      - name: fmt_bottom_margin
+        type: integer
+        optional: true
+      - name: fmt_left_margin
+        type: integer
+        optional: true
+      - name: fmt_right_margin
+        type: integer
+        optional: true
+      - name: fmt_padding
+        type: integer
+        optional: true
+      - name: fmt_border
+        type: integer
+        optional: true
+      - name: fmt_position
+        type: enum
+        enum_name: FramePosition
+        enum_values:
+          - InFlow
+          - FloatLeft
+          - FloatRight
+        optional: true
+
+  # ── Block (paragraph-level container: holds inline elements) ─
+  - name: Block
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      - name: elements
+        type: entity
+        entity: InlineElement
+        relationship: ordered_one_to_many
+        strong: true
+      - name: list
+        type: entity
+        entity: List
+        relationship: many_to_one
+        optional: true
+      # ── Cached fields (maintained by editing use cases) ──
+      - name: text_length
+        type: integer
+      - name: document_position
+        type: integer
+      - name: plain_text
+        type: string
+      # ── BlockFormat (all optional: None = inherit/default) ──
+      - name: fmt_alignment
+        type: enum
+        enum_name: Alignment
+        enum_values:
+          - Left
+          - Right
+          - Center
+          - Justify
+        optional: true
+      - name: fmt_top_margin
+        type: integer
+        optional: true
+      - name: fmt_bottom_margin
+        type: integer
+        optional: true
+      - name: fmt_left_margin
+        type: integer
+        optional: true
+      - name: fmt_right_margin
+        type: integer
+        optional: true
+      - name: fmt_heading_level
+        type: integer
+        optional: true
+      - name: fmt_indent
+        type: integer
+        optional: true
+      - name: fmt_text_indent
+        type: integer
+        optional: true
+      - name: fmt_marker
+        type: enum
+        enum_name: MarkerType
+        enum_values:
+          - NoMarker
+          - Unchecked
+          - Checked
+        optional: true
+      - name: fmt_tab_positions
+        type: integer
+        is_list: true
+
+  # ── InlineElement (text run or image within a block) ────────
+  #    The content field is a complex Rust enum that carries the
+  #    actual data: Text(String) or Image { name, width, height, quality }.
+  #    No dead fields. Block.elements (ordered_one_to_many) preserves
+  #    the interleaved visual sequence.
+  - name: InlineElement
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      # ── Content (complex enum: Text or Image) ──
+      - name: content
+        type: enum
+        enum_name: InlineContent
+        enum_values:
+          - Empty
+          - "Text(String)"
+          - "Image { name: String, width: i64, height: i64, quality: i64 }"
+      # ── CharFormat / TextFormat (all optional: None = inherit/default) ──
+      - name: fmt_font_family
+        type: string
+        optional: true
+      - name: fmt_font_point_size
+        type: integer
+        optional: true
+      - name: fmt_font_weight
+        type: integer
+        optional: true
+      - name: fmt_font_bold
+        type: boolean
+        optional: true
+      - name: fmt_font_italic
+        type: boolean
+        optional: true
+      - name: fmt_font_underline
+        type: boolean
+        optional: true
+      - name: fmt_font_overline
+        type: boolean
+        optional: true
+      - name: fmt_font_strikeout
+        type: boolean
+        optional: true
+      - name: fmt_letter_spacing
+        type: integer
+        optional: true
+      - name: fmt_word_spacing
+        type: integer
+        optional: true
+      - name: fmt_anchor_href
+        type: string
+        optional: true
+      - name: fmt_anchor_names
+        type: string
+        is_list: true
+      - name: fmt_is_anchor
+        type: boolean
+        optional: true
+      - name: fmt_tooltip
+        type: string
+        optional: true
+      - name: fmt_underline_style
+        type: enum
+        enum_name: UnderlineStyle
+        enum_values:
+          - NoUnderline
+          - SingleUnderline
+          - DashUnderline
+          - DotLine
+          - DashDotLine
+          - DashDotDotLine
+          - WaveUnderline
+          - SpellCheckUnderline
+        optional: true
+      - name: fmt_vertical_alignment
+        type: enum
+        enum_name: CharVerticalAlignment
+        enum_values:
+          - Normal
+          - SuperScript
+          - SubScript
+          - Middle
+          - Bottom
+          - Top
+          - Baseline
+        optional: true
+
+  # ── List (groups consecutive blocks into a numbered/bulleted list) ─
+  #    Document owns all lists. Blocks reference their list via
+  #    Block.list (many_to_one, optional). Multiple blocks can belong
+  #    to the same list. A block with list = None is not in any list.
+  - name: List
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      - name: style
+        type: enum
+        enum_name: ListStyle
+        enum_values:
+          - Disc
+          - Circle
+          - Square
+          - Decimal
+          - LowerAlpha
+          - UpperAlpha
+          - LowerRoman
+          - UpperRoman
+      - name: indent
+        type: integer
+      - name: prefix
+        type: string
+      - name: suffix
+        type: string
+
+  # ── Resource (binary/text resource referenced by name from elements) ─
+  #    Document owns all resources. InlineElement.image_name references
+  #    a resource by name. Resource types: Image, StyleSheet, etc.
+  - name: Resource
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      - name: resource_type
+        type: enum
+        enum_name: ResourceType
+        enum_values:
+          - Image
+          - StyleSheet
+          - Other
+      - name: name
+        type: string
+      - name: url
+        type: string
+      - name: mime_type
+        type: string
+      - name: data_base64
+        type: string
+
+# ── Features ──────────────────────────────────────────────────
+features:
+  # ── Document Editing (cursor-based text manipulation) ───────
+  - name: document_editing
+    use_cases:
+      - name: insert_text
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: InsertTextDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: text
+              type: string
+        dto_out:
+          name: InsertTextResultDto
+          fields:
+            - name: new_position
+              type: integer
+            - name: blocks_affected
+              type: integer
+
+      - name: delete_text
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: DeleteTextDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+        dto_out:
+          name: DeleteTextResultDto
+          fields:
+            - name: new_position
+              type: integer
+            - name: deleted_text
+              type: string
+
+      - name: insert_block
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: InsertBlockDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+        dto_out:
+          name: InsertBlockResultDto
+          fields:
+            - name: new_position
+              type: integer
+            - name: new_block_id
+              type: integer
+
+      - name: insert_image
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: InsertImageDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: image_name
+              type: string
+            - name: width
+              type: integer
+            - name: height
+              type: integer
+        dto_out:
+          name: InsertImageResultDto
+          fields:
+            - name: new_position
+              type: integer
+            - name: element_id
+              type: integer
+
+      - name: insert_frame
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: InsertFrameDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+        dto_out:
+          name: InsertFrameResultDto
+          fields:
+            - name: frame_id
+              type: integer
+
+      - name: insert_formatted_text
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: InsertFormattedTextDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: text
+              type: string
+            - name: font_family
+              type: string
+            - name: font_point_size
+              type: integer
+            - name: font_bold
+              type: boolean
+            - name: font_italic
+              type: boolean
+            - name: font_underline
+              type: boolean
+            - name: font_strikeout
+              type: boolean
+        dto_out:
+          name: InsertFormattedTextResultDto
+          fields:
+            - name: new_position
+              type: integer
+
+      - name: create_list
+        undoable: true
+        entities: [Document, Block, List]
+        dto_in:
+          name: CreateListDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: style
+              type: enum
+              enum_name: ListStyle
+              enum_values:
+                - Disc
+                - Circle
+                - Square
+                - Decimal
+                - LowerAlpha
+                - UpperAlpha
+                - LowerRoman
+                - UpperRoman
+        dto_out:
+          name: CreateListResultDto
+          fields:
+            - name: list_id
+              type: integer
+
+      - name: insert_list
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_in:
+          name: InsertListDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: style
+              type: enum
+              enum_name: ListStyle
+              enum_values:
+                - Disc
+                - Circle
+                - Square
+                - Decimal
+                - LowerAlpha
+                - UpperAlpha
+                - LowerRoman
+                - UpperRoman
+        dto_out:
+          name: InsertListResultDto
+          fields:
+            - name: list_id
+              type: integer
+            - name: new_position
+              type: integer
+
+      - name: insert_fragment
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_in:
+          name: InsertFragmentDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: html_content
+              type: string
+        dto_out:
+          name: InsertFragmentResultDto
+          fields:
+            - name: new_position
+              type: integer
+            - name: blocks_added
+              type: integer
+
+      - name: insert_html_at_position
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_in:
+          name: InsertHtmlAtPositionDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: html
+              type: string
+        dto_out:
+          name: InsertHtmlAtPositionResultDto
+          fields:
+            - name: new_position
+              type: integer
+            - name: blocks_added
+              type: integer
+
+      - name: insert_markdown_at_position
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_in:
+          name: InsertMarkdownAtPositionDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: markdown
+              type: string
+        dto_out:
+          name: InsertMarkdownAtPositionResultDto
+          fields:
+            - name: new_position
+              type: integer
+            - name: blocks_added
+              type: integer
+
+  # ── Document Formatting ─────────────────────────────────────
+  - name: document_formatting
+    use_cases:
+      - name: set_text_format
+        undoable: true
+        entities: [Document, Block, InlineElement]
+        dto_in:
+          name: SetTextFormatDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: font_family
+              type: string
+            - name: font_point_size
+              type: integer
+            - name: font_weight
+              type: integer
+            - name: font_bold
+              type: boolean
+            - name: font_italic
+              type: boolean
+            - name: font_underline
+              type: boolean
+            - name: font_overline
+              type: boolean
+            - name: font_strikeout
+              type: boolean
+            - name: letter_spacing
+              type: integer
+            - name: word_spacing
+              type: integer
+            - name: underline_style
+              type: enum
+              enum_name: UnderlineStyle
+              enum_values:
+                - NoUnderline
+                - SingleUnderline
+                - DashUnderline
+                - DotLine
+                - DashDotLine
+                - DashDotDotLine
+                - WaveUnderline
+                - SpellCheckUnderline
+            - name: vertical_alignment
+              type: enum
+              enum_name: CharVerticalAlignment
+              enum_values:
+                - Normal
+                - SuperScript
+                - SubScript
+                - Middle
+                - Bottom
+                - Top
+                - Baseline
+
+      - name: merge_text_format
+        undoable: true
+        entities: [Document, Block, InlineElement]
+        dto_in:
+          name: MergeTextFormatDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: font_family
+              type: string
+            - name: font_bold
+              type: boolean
+            - name: font_italic
+              type: boolean
+            - name: font_underline
+              type: boolean
+
+      - name: set_block_format
+        undoable: true
+        entities: [Document, Block]
+        dto_in:
+          name: SetBlockFormatDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: alignment
+              type: enum
+              enum_name: Alignment
+              enum_values:
+                - Left
+                - Right
+                - Center
+                - Justify
+            - name: heading_level
+              type: integer
+            - name: indent
+              type: integer
+            - name: marker
+              type: enum
+              enum_name: MarkerType
+              enum_values:
+                - NoMarker
+                - Unchecked
+                - Checked
+
+      - name: set_frame_format
+        undoable: true
+        entities: [Document, Frame]
+        dto_in:
+          name: SetFrameFormatDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: frame_id
+              type: integer
+            - name: height
+              type: integer
+            - name: width
+              type: integer
+            - name: top_margin
+              type: integer
+            - name: bottom_margin
+              type: integer
+            - name: left_margin
+              type: integer
+            - name: right_margin
+              type: integer
+            - name: padding
+              type: integer
+            - name: border
+              type: integer
+
+  # ── Document I/O (import/export in various formats) ─────────
+  - name: document_io
+    use_cases:
+      - name: import_plain_text
+        undoable: false
+        entities: [Root, Document, Frame, Block, InlineElement]
+        dto_in:
+          name: ImportPlainTextDto
+          fields:
+            - name: plain_text
+              type: string
+
+      - name: export_plain_text
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_out:
+          name: ExportPlainTextDto
+          fields:
+            - name: plain_text
+              type: string
+
+      - name: import_markdown
+        undoable: false
+        long_operation: true
+        entities: [Root, Document, Frame, Block, InlineElement, List]
+        dto_in:
+          name: ImportMarkdownDto
+          fields:
+            - name: markdown_text
+              type: string
+        dto_out:
+          name: ImportMarkdownResultDto
+          fields:
+            - name: block_count
+              type: integer
+
+      - name: export_markdown
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_out:
+          name: ExportMarkdownDto
+          fields:
+            - name: markdown_text
+              type: string
+
+      - name: import_html
+        undoable: false
+        long_operation: true
+        entities: [Root, Document, Frame, Block, InlineElement, List, Resource]
+        dto_in:
+          name: ImportHtmlDto
+          fields:
+            - name: html_text
+              type: string
+        dto_out:
+          name: ImportHtmlResultDto
+          fields:
+            - name: block_count
+              type: integer
+
+      - name: export_html
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement, List, Resource]
+        dto_out:
+          name: ExportHtmlDto
+          fields:
+            - name: html_text
+              type: string
+
+      - name: export_latex
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_in:
+          name: ExportLatexDto
+          fields:
+            - name: document_class
+              type: string
+            - name: include_preamble
+              type: boolean
+        dto_out:
+          name: ExportLatexResultDto
+          fields:
+            - name: latex_text
+              type: string
+
+      - name: export_docx
+        undoable: false
+        read_only: true
+        long_operation: true
+        entities: [Document, Frame, Block, InlineElement, List, Resource]
+        dto_in:
+          name: ExportDocxDto
+          fields:
+            - name: output_path
+              type: string
+        dto_out:
+          name: ExportDocxResultDto
+          fields:
+            - name: file_path
+              type: string
+            - name: paragraph_count
+              type: integer
+
+  # ── Document Search (find & replace) ────────────────────────
+  - name: document_search
+    use_cases:
+      - name: find_text
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: FindTextDto
+          fields:
+            - name: query
+              type: string
+            - name: case_sensitive
+              type: boolean
+            - name: whole_word
+              type: boolean
+            - name: use_regex
+              type: boolean
+            - name: search_backward
+              type: boolean
+            - name: start_position
+              type: integer
+        dto_out:
+          name: FindResultDto
+          fields:
+            - name: found
+              type: boolean
+            - name: position
+              type: integer
+            - name: length
+              type: integer
+
+      - name: find_all
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: FindAllDto
+          fields:
+            - name: query
+              type: string
+            - name: case_sensitive
+              type: boolean
+            - name: whole_word
+              type: boolean
+            - name: use_regex
+              type: boolean
+        dto_out:
+          name: FindAllResultDto
+          fields:
+            - name: positions
+              type: integer
+              is_list: true
+            - name: lengths
+              type: integer
+              is_list: true
+            - name: count
+              type: integer
+
+      - name: replace_text
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: ReplaceTextDto
+          fields:
+            - name: query
+              type: string
+            - name: replacement
+              type: string
+            - name: case_sensitive
+              type: boolean
+            - name: whole_word
+              type: boolean
+            - name: use_regex
+              type: boolean
+            - name: replace_all
+              type: boolean
+        dto_out:
+          name: ReplaceResultDto
+          fields:
+            - name: replacements_count
+              type: integer
+
+  # ── Document Inspection (read-only queries about structure) ──
+  - name: document_inspection
+    use_cases:
+      - name: get_document_stats
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_out:
+          name: DocumentStatsDto
+          fields:
+            - name: character_count
+              type: integer
+            - name: word_count
+              type: integer
+            - name: block_count
+              type: integer
+            - name: frame_count
+              type: integer
+            - name: image_count
+              type: integer
+            - name: list_count
+              type: integer
+
+      - name: get_text_at_position
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: GetTextAtPositionDto
+          fields:
+            - name: position
+              type: integer
+            - name: length
+              type: integer
+        dto_out:
+          name: TextAtPositionDto
+          fields:
+            - name: text
+              type: string
+            - name: block_id
+              type: integer
+            - name: element_id
+              type: integer
+
+      - name: get_block_at_position
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement]
+        dto_in:
+          name: GetBlockAtPositionDto
+          fields:
+            - name: position
+              type: integer
+        dto_out:
+          name: BlockInfoDto
+          fields:
+            - name: block_id
+              type: integer
+            - name: block_start
+              type: integer
+            - name: block_length
+              type: integer
+            - name: block_number
+              type: integer
+
+ui:
+  rust_cli: true
