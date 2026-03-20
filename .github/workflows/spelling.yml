@@ -1,15 +1,48 @@
 name: Spelling
-on: [pull_request]
+
+on:
+  pull_request:
+    paths:
+      - "**.rs"
+      - "**.md"
+      - "**.txt"
+      - "**.toml"
+      - "**.yml"
+      - "**.yaml"
+      - ".typos.toml"
+      - "_typos.toml"
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - "**.rs"
+      - "**.md"
+      - "**.txt"
+      - "**.toml"
+      - "**.yml"
+      - "**.yaml"
+      - ".typos.toml"
+      - "_typos.toml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   spelling:
-    name: Spell Check with Typos
+    name: Spell Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-    - name: Checkout Actions Repository
-      uses: actions/checkout@v3
-    - name: Spell Check Repo
-      uses: crate-ci/typos@master
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check spelling with typos
+        uses: crate-ci/typos@v1.44.0
+        with:
+          # Optional: specify config file location
+          config: .github/typos.toml

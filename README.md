@@ -1,94 +1,134 @@
 [![crates.io](https://img.shields.io/crates/v/text-document?style=flat-square&logo=rust)](https://crates.io/crates/text-document)
 [![API](https://docs.rs/text-document/badge.svg)](https://docs.rs/text-document)
-[![license](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue?style=flat-square)](#license)
 [![build status](https://img.shields.io/github/workflow/status/jacquetc/text-document/CI/main?style=flat-square&logo=github)](https://github.com/jacquetc/text-document/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jacquetc/text-document/branch/main/graph/badge.svg?token=S4M513A2XR)](https://codecov.io/gh/jacquetc/text-document)
-![Lines of code](https://img.shields.io/tokei/lines/github.com/jacquetc/text-document)
+[![license](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue?style=flat-square)](#license)
 
 # text-document
-A text document structure and management for Rust
 
-This model is thought as a backend for a text UI. [`TextDocument`] can't be modified directly by the user, only for setting the whole document with `set_plain_text(...)`.
-The user must use a [`TextCursor`] using `document.text_cursor_mut()` to make any change.
-  
-# Document structure
+A rich text document model for Rust, inspired by Qt's QTextDocument/QTextCursor API.
 
-## Elements
+Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architecture with redb (embedded ACID database), full undo/redo, and multi-cursor support.
 
-- [`Frame`]: contains Block elements and other Frame elements, formatable with FrameFormat
-- [`Block`]: contains Text elements or Image elements, formatable with BlockFormat
-- [`Text`]: contains the actuel text, formatable with TextFormat
-- [`Image`]: represent the position of an image, formatable with ImageFormat
+## Features
 
-All these items are encapsulated in its corresponding [`Element`] for ease of storage.
+- **Rich text model**: Frames, Blocks, InlineElements with `InlineContent::Text | Image`
+- **Multi-cursor editing**: Qt-style cursors with automatic position adjustment
+- **Full undo/redo**: Snapshot-based, with composite grouping (`begin_edit_block` / `end_edit_block`)
+- **Import/Export**: Plain text, Markdown, HTML, LaTeX, DOCX
+- **Search**: Find, find all, regex, replace (undoable)
+- **Formatting**: Character format (`bold`, `italic`, `underline`, ...), block format (`alignment`, `heading_level`, ...), frame format
+- **Event system**: Callback-based (`on_change`) and polling-based (`poll_events`)
+- **Thread-safe**: `Send + Sync` throughout, `Arc<Mutex<...>>` interior mutability
+- **Resources**: Image and stylesheet storage with base64 encoding
 
-## The simpler plain text
-
-```raw
-Frame
-|- Block
-   |- Text
-|- Block
-   |- Text
-```
-
-## The more complex rich text
-
-```raw
-Frame
-|- Block
-   |- Text  --> I really lo
-   |- Text  --> ve (imagine it Formatted in bold)
-   |- Text  --> Rust
-   |- Image
-   |- Text
-|- Frame
-   |- Block
-      |- Text
-      |- Text
-      |- Text
-   |- Block
-      |- Text
-      |- Text
-      |- Text
-|- Block
-   |- Image
-```
-
-# Signaling changes
-
-Each modification is signaled using callbacks. [`TextDocument`] offers different ways to make your code aware of any change:
-- [`TextDocument::add_text_change_callback()`]
-
-   Give the  number of removed characters and number of added characters with the reference of a cursor position.
-
-- [`TextDocument::add_element_change_callback()`]
-
-   Give the modified element with the reason. If two direct children elements changed at the same time.
-
-# Examples
+## Quick start
 
 ```rust
-use text_document::{TextDocument, ChangeReason, MoveMode};
+use text_document::{TextDocument, MoveMode, MoveOperation};
 
-let mut document = TextDocument::new();
+let doc = TextDocument::new();
+doc.set_plain_text("Hello world").unwrap();
 
-document.add_text_change_callback(|position, removed_characters, added_characters|{
-  println!("position: {}, removed_characters: {}, added_characters: {}", position, removed_characters, added_characters);
-} );
+// Cursor-based editing
+let cursor = doc.cursor();
+cursor.move_position(MoveOperation::EndOfWord, MoveMode::KeepAnchor, 1);
+cursor.insert_text("Goodbye").unwrap(); // replaces "Hello"
 
-document.add_element_change_callback(|element, reason|{
-  assert_eq!(element.uuid(), 0);
-  assert_eq!(reason, ChangeReason::ChildrenChanged );
-} );
-document.set_plain_text("beginningend").unwrap();
+// Multiple cursors
+let c1 = doc.cursor();
+let c2 = doc.cursor_at(5);
+c1.insert_text("A").unwrap();
+// c2's position is automatically adjusted
 
-let cursor = document.text_cursor_mut();
-cursor.set_position(9, MoveMode::MoveAnchor);
-cursor.insert_plain_text("new\nplain_text\ntest");
+// Undo
+doc.undo().unwrap();
 
-  
+// Search
+use text_document::FindOptions;
+let matches = doc.find_all("world", &FindOptions::default()).unwrap();
+
+// Export
+let html = doc.to_html().unwrap();
+let markdown = doc.to_markdown().unwrap();
 ```
+
+## CLI
+
+A command-line tool for format conversion and text processing:
+
+```bash
+# Convert between formats (detected by file extension)
+text-document convert README.md output.html
+text-document convert article.html article.tex
+
+# Show document statistics
+text-document stats manuscript.md
+
+# Find text (grep-like output)
+text-document find paper.md "TODO" --case-sensitive
+
+# Find and replace
+text-document replace draft.md "colour" "color" --output fixed.md
+
+# Print to stdout in a different format
+text-document cat notes.html --format plain
+```
+
+Supported formats:
+
+| Extension | Import | Export |
+|-----------|--------|--------|
+| `.txt` | yes | yes |
+| `.md` | yes | yes |
+| `.html`/`.htm` | yes | yes |
+| `.tex`/`.latex` | - | yes |
+| `.docx` | - | yes |
+
+## Document structure
+
+```
+Root
+ +-- Document
+     +-- Frame (root frame)
+     |   +-- Block
+     |   |   +-- InlineElement (Text "Hello ")
+     |   |   +-- InlineElement (Text "world" with bold)
+     |   |   +-- InlineElement (Image { name, width, height })
+     |   +-- Block
+     |       +-- InlineElement (Text "Second paragraph")
+     +-- List (style: Decimal, indent: 1)
+     +-- Resource (image data, stylesheets)
+```
+
+- **Frame**: contains Blocks and child Frames. `child_order` interleaves them.
+- **Block**: a paragraph. Contains InlineElements. Has `document_position` for O(log n) lookup.
+- **InlineElement**: either `Text(String)`, `Image { name, width, height, quality }`, or `Empty`.
+- **List**: styling for list items (Disc, Decimal, LowerAlpha, ...). Blocks reference lists via weak relationship.
+- **Resource**: binary data (images, stylesheets) stored as base64.
+
+All format fields are `Option<T>` — `None` means "inherit from parent/default", `Some(value)` means "explicitly set".
+
+## Architecture
+
+Generated by [Qleany](https://github.com/jacquetc/qleany) v1.5.1, following Clean Architecture with Package by Feature (Vertical Slice):
+
+```
+crates/
++-- public_api/       # TextDocument, TextCursor, DocumentEvent (the public crate)
++-- cli/              # Command-line tool
++-- frontend/         # AppContext, commands, event hub client
++-- common/           # Entities, database (redb), events, undo/redo, repositories
++-- macros/           # #[uow_action] proc macro
++-- direct_access/    # Entity CRUD controllers + DTOs
++-- document_editing/ # 11 use cases (insert, delete, block, image, frame, list, fragment, ...)
++-- document_formatting/ # 4 use cases (set/merge text format, block format, frame format)
++-- document_io/      # 8 use cases (import/export plain text, markdown, HTML, LaTeX, DOCX)
++-- document_search/  # 3 use cases (find, find_all, replace)
++-- document_inspection/ # 4 use cases (stats, text at position, block at position, extract fragment)
+```
+
+Data flow: `TextDocument / TextCursor -> frontend::commands -> controllers -> use cases -> UoW -> repositories -> redb`
 
 ## License
 
