@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Resource};
+use common::entities::{Block, Document, Frame, InlineElement, List, Resource, Root};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]
@@ -41,29 +41,16 @@ impl QueryUnitOfWork for ExportDocxUnitOfWork {
         Ok(())
     }
 }
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationshipRO, GetRelationshipsFromRightIdsRO
-//
-// You have here a long operation read-only unit of work.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Don't forget to set thread_safe = true for long operation's unit of work.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros (without thread_safe) must be set in the use case file in ../use_cases/export_docx_uc.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "Document", action = "GetRO", thread_safe = true)]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO", thread_safe = true)]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "GetRO", thread_safe = true)]
-#[macros::uow_action(entity = "Frame", action = "GetMultiRO", thread_safe = true)]
-#[macros::uow_action(entity = "Block", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Block", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "GetRO", thread_safe = true)]
-#[macros::uow_action(entity = "List", action = "GetMultiRO", thread_safe = true)]
-#[macros::uow_action(entity = "Resource", action = "GetRO", thread_safe = true)]
-#[macros::uow_action(entity = "Resource", action = "GetMultiRO", thread_safe = true)]
 impl ExportDocxUnitOfWorkTrait for ExportDocxUnitOfWork {}
 
 pub struct ExportDocxUnitOfWorkFactory {

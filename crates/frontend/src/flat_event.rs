@@ -78,6 +78,7 @@ pub enum FlatEventKind {
     DocumentInspectionGetDocumentStats,
     DocumentInspectionGetTextAtPosition,
     DocumentInspectionGetBlockAtPosition,
+    DocumentInspectionExtractFragment,
 
     // Undo/redo
     UndoPerformed,
@@ -211,6 +212,9 @@ impl From<Event> for FlatEvent {
                 }
                 DocumentInspectionEvent::GetBlockAtPosition => {
                     FlatEventKind::DocumentInspectionGetBlockAtPosition
+                }
+                DocumentInspectionEvent::ExtractFragment => {
+                    FlatEventKind::DocumentInspectionExtractFragment
                 }
             },
             Origin::UndoRedo(ur) => match ur {

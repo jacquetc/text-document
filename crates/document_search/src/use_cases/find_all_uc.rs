@@ -3,33 +3,157 @@ use crate::FindAllDto;
 use crate::FindAllResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement};
+use common::direct_access::document::document_repository::DocumentRelationshipField;
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
+use common::direct_access::root::root_repository::RootRelationshipField;
+use common::entities::{Block, Document, Frame, InlineElement, Root};
 use common::types::EntityId;
+use regex::Regex;
 
 pub trait FindAllUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn FindAllUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/find_all_uow.rs
-//
-#[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Frame", action = "GetRO")]
-#[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 pub trait FindAllUnitOfWorkTrait: QueryUnitOfWork {}
+
+/// Build the full document text by concatenating block plain_text with '\n' separators.
+fn build_full_text(uow: &dyn FindAllUnitOfWorkTrait) -> Result<String> {
+    let root = uow
+        .get_root(&1)?
+        .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+    let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+    let doc_id = *doc_ids
+        .first()
+        .ok_or_else(|| anyhow!("Root has no document"))?;
+
+    let frame_ids =
+        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+
+    let mut all_block_ids: Vec<EntityId> = Vec::new();
+    for frame_id in &frame_ids {
+        let block_ids =
+            uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        all_block_ids.extend(block_ids);
+    }
+
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    blocks.sort_by_key(|b| b.document_position);
+
+    let full_text = blocks
+        .iter()
+        .map(|b| b.plain_text.as_str())
+        .collect::<Vec<&str>>()
+        .join("\n");
+
+    Ok(full_text)
+}
+
+/// Build a mapping from byte offset to char index for a string.
+fn build_byte_to_char_map(text: &str) -> Vec<usize> {
+    let mut map = vec![0usize; text.len() + 1];
+    let mut char_idx = 0;
+    for (byte_idx, _) in text.char_indices() {
+        map[byte_idx] = char_idx;
+        char_idx += 1;
+    }
+    map[text.len()] = char_idx;
+    map
+}
+
+/// Find all occurrences of the query in the text, respecting search options.
+/// All positions are in char indices (not byte offsets).
+fn find_all_matches(
+    full_text: &str,
+    query: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+    use_regex: bool,
+) -> Result<Vec<(usize, usize)>> {
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+
+    if use_regex {
+        let pattern = if case_sensitive {
+            query.to_string()
+        } else {
+            format!("(?i){}", query)
+        };
+        let re = Regex::new(&pattern)
+            .map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
+
+        let char_offsets = build_byte_to_char_map(full_text);
+        let text_chars: Vec<char> = full_text.chars().collect();
+
+        for mat in re.find_iter(full_text) {
+            let char_start = char_offsets[mat.start()];
+            let char_end = char_offsets[mat.end()];
+            let char_len = char_end - char_start;
+
+            if whole_word {
+                let before_ok = char_start == 0 || {
+                    let ch = text_chars[char_start - 1];
+                    !ch.is_alphanumeric() && ch != '_'
+                };
+                let after_ok = char_end >= text_chars.len() || {
+                    let ch = text_chars[char_end];
+                    !ch.is_alphanumeric() && ch != '_'
+                };
+                if before_ok && after_ok {
+                    results.push((char_start, char_len));
+                }
+            } else {
+                results.push((char_start, char_len));
+            }
+        }
+    } else {
+        let text_chars: Vec<char> = full_text.chars().collect();
+        let (search_chars, query_chars) = if case_sensitive {
+            (text_chars.clone(), query.chars().collect::<Vec<char>>())
+        } else {
+            (
+                text_chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect::<Vec<char>>(),
+                query.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect::<Vec<char>>(),
+            )
+        };
+
+        let query_char_len = query_chars.len();
+        let mut pos = 0;
+        while pos + query_char_len <= search_chars.len() {
+            if search_chars[pos..pos + query_char_len] == query_chars[..] {
+                if whole_word {
+                    let before_ok = pos == 0 || {
+                        let ch = text_chars[pos - 1];
+                        !ch.is_alphanumeric() && ch != '_'
+                    };
+                    let after_ok = pos + query_char_len >= text_chars.len() || {
+                        let ch = text_chars[pos + query_char_len];
+                        !ch.is_alphanumeric() && ch != '_'
+                    };
+                    if before_ok && after_ok {
+                        results.push((pos, query_char_len));
+                    }
+                } else {
+                    results.push((pos, query_char_len));
+                }
+                pos += 1;
+            } else {
+                pos += 1;
+            }
+        }
+    }
+
+    Ok(results)
+}
 
 pub struct FindAllUseCase {
     uow_factory: Box<dyn FindAllUnitOfWorkFactoryTrait>,
@@ -41,16 +165,29 @@ impl FindAllUseCase {
     }
 
     pub fn execute(&mut self, dto: &FindAllDto) -> Result<FindAllResultDto> {
-        let mut uow = self.uow_factory.create();
+        let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: FindAllUseCase to be implemented
-        unimplemented!("FindAllUseCase unimplemented");
+        let full_text = build_full_text(uow.as_ref())?;
+
+        let all_matches = find_all_matches(
+            &full_text,
+            &dto.query,
+            dto.case_sensitive,
+            dto.whole_word,
+            dto.use_regex,
+        )?;
+
         uow.end_transaction()?;
-        //Ok(FindAllResultDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        let positions: Vec<i64> = all_matches.iter().map(|(pos, _)| *pos as i64).collect();
+        let lengths: Vec<i64> = all_matches.iter().map(|(_, len)| *len as i64).collect();
+        let count = all_matches.len() as i64;
+
+        Ok(FindAllResultDto {
+            positions,
+            lengths,
+            count,
+        })
     }
 }

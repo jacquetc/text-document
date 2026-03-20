@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, InlineElement};
+use common::entities::{Block, Document, Frame, InlineElement, Root};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -82,30 +82,21 @@ impl CommandUnitOfWork for SetTextFormatUnitOfWork {
     }
 }
 
-//TODO: adapt entities and actions to real use :
-// Create, CreateMulti, Get, GetMulti, Update, UpdateMulti, remove,  removeMulti, GetRelationship,
-// GetRelationshipsFromRightIds, SetRelationship, SetRelationshipMulti, Snapshot, Restore
-//
-// You have here a read-write unit of work.
-//
-// RO means Read Only, so *RO actions should not used be here.
-// Don't forget to set thread_safe = true for long operation's unit of work.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../use_cases/set_text_format_uc.rs
-//
+#[macros::uow_action(entity = "Root", action = "Get")]
+#[macros::uow_action(entity = "Root", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Get")]
-#[macros::uow_action(entity = "Document", action = "GetMulti")]
+#[macros::uow_action(entity = "Document", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Snapshot")]
 #[macros::uow_action(entity = "Document", action = "Restore")]
+#[macros::uow_action(entity = "Frame", action = "Get")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "Get")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
-#[macros::uow_action(entity = "Block", action = "Snapshot")]
-#[macros::uow_action(entity = "Block", action = "Restore")]
+#[macros::uow_action(entity = "Block", action = "GetRelationship")]
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Snapshot")]
-#[macros::uow_action(entity = "InlineElement", action = "Restore")]
+#[macros::uow_action(entity = "InlineElement", action = "Update")]
+#[macros::uow_action(entity = "InlineElement", action = "Create")]
 impl SetTextFormatUnitOfWorkTrait for SetTextFormatUnitOfWork {}
 
 pub struct SetTextFormatUnitOfWorkFactory {

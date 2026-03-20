@@ -534,7 +534,7 @@ features:
               type: integer
             - name: anchor
               type: integer
-            - name: html_content
+            - name: fragment_data
               type: string
         dto_out:
           name: InsertFragmentResultDto
@@ -974,5 +974,23 @@ features:
             - name: block_number
               type: integer
 
+      - name: extract_fragment
+        undoable: false
+        read_only: true
+        entities: [Document, Frame, Block, InlineElement, List]
+        dto_in:
+          name: ExtractFragmentDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+        dto_out:
+          name: ExtractFragmentResultDto
+          fields:
+            - name: fragment_data
+              type: string
+            - name: plain_text
+              type: string
 ui:
   rust_cli: true

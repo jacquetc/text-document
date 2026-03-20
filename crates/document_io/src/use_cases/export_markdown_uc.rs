@@ -2,34 +2,23 @@
 use crate::ExportMarkdownDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, List};
+use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, ListStyle, Root};
 use common::types::EntityId;
 
 pub trait ExportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportMarkdownUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/export_markdown_uow.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRO")]
-#[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
+#[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
-#[macros::uow_action(entity = "List", action = "GetMultiRO")]
 pub trait ExportMarkdownUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct ExportMarkdownUseCase {
@@ -42,16 +31,140 @@ impl ExportMarkdownUseCase {
     }
 
     pub fn execute(&mut self) -> Result<ExportMarkdownDto> {
-        let mut uow = self.uow_factory.create();
+        let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: ExportMarkdownUseCase to be implemented
-        unimplemented!("ExportMarkdownUseCase unimplemented");
+        // Step 1: Get Root and Document
+        let root = uow
+            .get_root(&1u64)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+        let doc_ids = uow.get_root_relationship(
+            &root.id,
+            &common::direct_access::root::RootRelationshipField::Document,
+        )?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no associated Document"))?;
+
+        let frame_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Frames,
+        )?;
+
+        let mut output_parts: Vec<String> = Vec::new();
+
+        for frame_id in &frame_ids {
+            let block_ids = uow.get_frame_relationship(
+                frame_id,
+                &common::direct_access::frame::FrameRelationshipField::Blocks,
+            )?;
+
+            if block_ids.is_empty() {
+                continue;
+            }
+
+            let blocks_opt = uow.get_block_multi(&block_ids)?;
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            blocks.sort_by_key(|b| b.document_position);
+
+            let mut prev_was_list = false;
+
+            for block in &blocks {
+                // Get inline elements
+                let element_ids = uow.get_block_relationship(
+                    &block.id,
+                    &common::direct_access::block::BlockRelationshipField::Elements,
+                )?;
+
+                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+                let elements: Vec<InlineElement> =
+                    elements_opt.into_iter().filter_map(|e| e).collect();
+
+                // Check if block has a list
+                let list_ids = uow.get_block_relationship(
+                    &block.id,
+                    &common::direct_access::block::BlockRelationshipField::List,
+                )?;
+                let list = if let Some(list_id) = list_ids.first() {
+                    uow.get_list(list_id)?
+                } else {
+                    None
+                };
+
+                let is_list_item = list.is_some();
+
+                // Build inline markdown text
+                let mut inline_md = String::new();
+                for elem in &elements {
+                    let text = match &elem.content {
+                        InlineContent::Text(t) => t.clone(),
+                        InlineContent::Image { name, .. } => {
+                            format!("![{}]({})", name, name)
+                        }
+                        InlineContent::Empty => String::new(),
+                    };
+
+                    if text.is_empty() {
+                        continue;
+                    }
+
+                    let mut formatted = text.clone();
+
+                    // Apply formatting (innermost first)
+                    if elem.fmt_font_family.as_deref() == Some("monospace") {
+                        formatted = format!("`{}`", formatted);
+                    }
+                    if elem.fmt_font_strikeout == Some(true) {
+                        formatted = format!("~~{}~~", formatted);
+                    }
+                    if elem.fmt_font_bold == Some(true) && elem.fmt_font_italic == Some(true) {
+                        formatted = format!("***{}***", formatted);
+                    } else if elem.fmt_font_bold == Some(true) {
+                        formatted = format!("**{}**", formatted);
+                    } else if elem.fmt_font_italic == Some(true) {
+                        formatted = format!("*{}*", formatted);
+                    }
+                    if let Some(ref href) = elem.fmt_anchor_href {
+                        formatted = format!("[{}]({})", formatted, href);
+                    }
+
+                    inline_md.push_str(&formatted);
+                }
+
+                // Build the block line
+                let block_line = if let Some(level) = block.fmt_heading_level {
+                    let prefix = "#".repeat(level as usize);
+                    format!("{} {}", prefix, inline_md)
+                } else if let Some(ref list_entity) = list {
+                    match list_entity.style {
+                        ListStyle::Decimal | ListStyle::LowerAlpha | ListStyle::UpperAlpha
+                        | ListStyle::LowerRoman | ListStyle::UpperRoman => {
+                            format!("1. {}", inline_md)
+                        }
+                        _ => format!("- {}", inline_md),
+                    }
+                } else {
+                    inline_md
+                };
+
+                // Separator logic: blank line between paragraphs, single newline between list items
+                if !output_parts.is_empty() {
+                    if is_list_item && prev_was_list {
+                        output_parts.push("\n".to_string());
+                    } else {
+                        output_parts.push("\n\n".to_string());
+                    }
+                }
+                output_parts.push(block_line);
+                prev_was_list = is_list_item;
+            }
+        }
+
         uow.end_transaction()?;
-        //Ok(ExportMarkdownDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        let markdown_text = output_parts.concat();
+
+        Ok(ExportMarkdownDto { markdown_text })
     }
 }

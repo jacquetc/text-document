@@ -2,34 +2,26 @@
 use crate::DocumentStatsDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, List};
+use common::direct_access::block::block_repository::BlockRelationshipField;
+use common::direct_access::document::document_repository::DocumentRelationshipField;
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
+use common::direct_access::root::root_repository::RootRelationshipField;
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
 use common::types::EntityId;
 
 pub trait GetDocumentStatsUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn GetDocumentStatsUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/get_document_stats_uow.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Frame", action = "GetRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
+#[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
-#[macros::uow_action(entity = "List", action = "GetRO")]
-#[macros::uow_action(entity = "List", action = "GetMultiRO")]
 pub trait GetDocumentStatsUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct GetDocumentStatsUseCase {
@@ -42,16 +34,85 @@ impl GetDocumentStatsUseCase {
     }
 
     pub fn execute(&mut self) -> Result<DocumentStatsDto> {
-        let mut uow = self.uow_factory.create();
+        let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: GetDocumentStatsUseCase to be implemented
-        unimplemented!("GetDocumentStatsUseCase unimplemented");
+        // Get Root(1) -> Document
+        let root = uow
+            .get_root(&1)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+        let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no document"))?;
+
+        let document = uow
+            .get_document(&doc_id)?
+            .ok_or_else(|| anyhow!("Document not found"))?;
+
+        // Cached counts from Document
+        let character_count = document.character_count;
+        let block_count = document.block_count;
+
+        // Frame count from relationship
+        let frame_ids =
+            uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+        let frame_count = frame_ids.len() as i64;
+
+        // List count from relationship
+        let list_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Lists)?;
+        let list_count = list_ids.len() as i64;
+
+        // Get all frames to iterate blocks and elements
+        let frames_opt = uow.get_frame_multi(&frame_ids)?;
+        let frames: Vec<&Frame> = frames_opt.iter().filter_map(|f| f.as_ref()).collect();
+
+        // Collect all block IDs from all frames
+        let mut all_block_ids: Vec<EntityId> = Vec::new();
+        for frame in &frames {
+            let block_ids =
+                uow.get_frame_relationship(&frame.id, &FrameRelationshipField::Blocks)?;
+            all_block_ids.extend(block_ids);
+        }
+
+        // Get all blocks
+        let blocks_opt = uow.get_block_multi(&all_block_ids)?;
+        let blocks: Vec<&Block> = blocks_opt.iter().filter_map(|b| b.as_ref()).collect();
+
+        // Word count: iterate all blocks, split plain_text by whitespace
+        let mut word_count: i64 = 0;
+        for block in &blocks {
+            word_count += block.plain_text.split_whitespace().count() as i64;
+        }
+
+        // Image count: iterate all blocks -> get elements -> count Image variants
+        let mut all_element_ids: Vec<EntityId> = Vec::new();
+        for block in &blocks {
+            let element_ids =
+                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+            all_element_ids.extend(element_ids);
+        }
+
+        let elements_opt = uow.get_inline_element_multi(&all_element_ids)?;
+        let mut image_count: i64 = 0;
+        for elem_opt in &elements_opt {
+            if let Some(elem) = elem_opt {
+                if matches!(elem.content, InlineContent::Image { .. }) {
+                    image_count += 1;
+                }
+            }
+        }
+
         uow.end_transaction()?;
-        //Ok(DocumentStatsDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        Ok(DocumentStatsDto {
+            character_count,
+            word_count,
+            block_count,
+            frame_count,
+            image_count,
+            list_count,
+        })
     }
 }

@@ -17,8 +17,9 @@ serde_json = "1.0"
 chrono = { workspace = true }
 uuid = { workspace = true }
 
+[dev-dependencies]
+direct_access = { path = "../direct_access" }
+document_io = { path = "../document_io" }
+
 [lints]
 workspace = true
-
-
-

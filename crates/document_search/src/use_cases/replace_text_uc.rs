@@ -3,82 +3,529 @@ use crate::ReplaceResultDto;
 use crate::ReplaceTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement};
+use common::direct_access::block::block_repository::BlockRelationshipField;
+use common::direct_access::document::document_repository::DocumentRelationshipField;
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
+use common::direct_access::root::root_repository::RootRelationshipField;
+#[allow(unused_imports)]
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
+use common::snapshot::EntityTreeSnapshot;
 use common::types::EntityId;
+use common::undo_redo::UndoRedoCommand;
+use regex::Regex;
+use std::any::Any;
 
 pub trait ReplaceTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ReplaceTextUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// Create, CreateMulti, Get, GetMulti, Update, UpdateMulti, remove,
-// removeMulti, GetRelationship, GetRelationshipsFromRightIds,
-// SetRelationship, SetRelationshipMulti
-//
-// You have here a read-write unit of work trait.
-//
-// RO means Read Only.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/replace_text_uow.rs
-//
+#[macros::uow_action(entity = "Root", action = "Get")]
+#[macros::uow_action(entity = "Root", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Get")]
-#[macros::uow_action(entity = "Document", action = "GetMulti")]
+#[macros::uow_action(entity = "Document", action = "Update")]
+#[macros::uow_action(entity = "Document", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Snapshot")]
 #[macros::uow_action(entity = "Document", action = "Restore")]
 #[macros::uow_action(entity = "Frame", action = "Get")]
-#[macros::uow_action(entity = "Frame", action = "GetMulti")]
-#[macros::uow_action(entity = "Frame", action = "Snapshot")]
-#[macros::uow_action(entity = "Frame", action = "Restore")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "Get")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
-#[macros::uow_action(entity = "Block", action = "Snapshot")]
-#[macros::uow_action(entity = "Block", action = "Restore")]
+#[macros::uow_action(entity = "Block", action = "Update")]
+#[macros::uow_action(entity = "Block", action = "UpdateMulti")]
+#[macros::uow_action(entity = "Block", action = "GetRelationship")]
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Snapshot")]
-#[macros::uow_action(entity = "InlineElement", action = "Restore")]
+#[macros::uow_action(entity = "InlineElement", action = "Update")]
 pub trait ReplaceTextUnitOfWorkTrait: CommandUnitOfWork {}
+
+/// Build the full document text by concatenating block plain_text with '\n' separators.
+/// Returns the full text string and the sorted blocks.
+fn build_full_text(uow: &dyn ReplaceTextUnitOfWorkTrait) -> Result<(String, Vec<Block>)> {
+    let root = uow
+        .get_root(&1)?
+        .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+    let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+    let doc_id = *doc_ids
+        .first()
+        .ok_or_else(|| anyhow!("Root has no document"))?;
+
+    let frame_ids =
+        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+
+    let mut all_block_ids: Vec<EntityId> = Vec::new();
+    for frame_id in &frame_ids {
+        let block_ids =
+            uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        all_block_ids.extend(block_ids);
+    }
+
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    blocks.sort_by_key(|b| b.document_position);
+
+    let full_text = blocks
+        .iter()
+        .map(|b| b.plain_text.as_str())
+        .collect::<Vec<&str>>()
+        .join("\n");
+
+    Ok((full_text, blocks))
+}
+
+/// Build a mapping from byte offset to char index for a string.
+/// byte_to_char[byte_offset] = char_index
+/// The vec has len = text.len() + 1 (inclusive of the end position).
+fn build_byte_to_char_map(text: &str) -> Vec<usize> {
+    let mut map = vec![0usize; text.len() + 1];
+    let mut char_idx = 0;
+    for (byte_idx, _) in text.char_indices() {
+        map[byte_idx] = char_idx;
+        char_idx += 1;
+    }
+    map[text.len()] = char_idx;
+    map
+}
+
+/// Find all occurrences of the query in the text, respecting search options.
+/// All positions are in char indices (not byte offsets).
+/// Returns a vec of (char_position, char_length) for each match.
+fn find_all_matches(
+    full_text: &str,
+    query: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+    use_regex: bool,
+) -> Result<Vec<(usize, usize)>> {
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+
+    if use_regex {
+        // Build regex with case-insensitive flag if needed
+        let pattern = if case_sensitive {
+            query.to_string()
+        } else {
+            format!("(?i){}", query)
+        };
+        let re = Regex::new(&pattern)
+            .map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
+
+        // Regex::find_iter returns byte-based Match objects.
+        // We need to convert byte offsets to char offsets.
+        let char_offsets = build_byte_to_char_map(full_text);
+        let text_chars: Vec<char> = full_text.chars().collect();
+
+        for mat in re.find_iter(full_text) {
+            let char_start = char_offsets[mat.start()];
+            let char_end = char_offsets[mat.end()];
+            let char_len = char_end - char_start;
+
+            if whole_word {
+                let before_ok = char_start == 0 || {
+                    let ch = text_chars[char_start - 1];
+                    !ch.is_alphanumeric() && ch != '_'
+                };
+                let after_ok = char_end >= text_chars.len() || {
+                    let ch = text_chars[char_end];
+                    !ch.is_alphanumeric() && ch != '_'
+                };
+                if before_ok && after_ok {
+                    results.push((char_start, char_len));
+                }
+            } else {
+                results.push((char_start, char_len));
+            }
+        }
+    } else {
+        // Literal string search using char-based scanning
+        let text_chars: Vec<char> = full_text.chars().collect();
+        let (search_chars, query_chars) = if case_sensitive {
+            (text_chars.clone(), query.chars().collect::<Vec<char>>())
+        } else {
+            (
+                text_chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect::<Vec<char>>(),
+                query.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect::<Vec<char>>(),
+            )
+        };
+
+        let query_char_len = query_chars.len();
+        let mut pos = 0;
+        while pos + query_char_len <= search_chars.len() {
+            if search_chars[pos..pos + query_char_len] == query_chars[..] {
+                if whole_word {
+                    let before_ok = pos == 0 || {
+                        let ch = text_chars[pos - 1];
+                        !ch.is_alphanumeric() && ch != '_'
+                    };
+                    let after_ok = pos + query_char_len >= text_chars.len() || {
+                        let ch = text_chars[pos + query_char_len];
+                        !ch.is_alphanumeric() && ch != '_'
+                    };
+                    if before_ok && after_ok {
+                        results.push((pos, query_char_len));
+                    }
+                } else {
+                    results.push((pos, query_char_len));
+                }
+                pos += 1;
+            } else {
+                pos += 1;
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Find the block containing the given document position from a sorted list of blocks.
+/// Returns (block_index, offset_within_block).
+fn find_block_for_position(blocks: &[Block], position: usize) -> Option<(usize, usize)> {
+    for (i, block) in blocks.iter().enumerate() {
+        let block_start = block.document_position as usize;
+        let block_end = block_start + block.text_length as usize;
+        if position >= block_start && position < block_end {
+            let offset = position - block_start;
+            return Some((i, offset));
+        }
+    }
+    None
+}
+
+/// Check if a match is entirely within a single block.
+/// Returns Some((block_index, offset_in_block)) if so, None if it spans blocks or newlines.
+fn match_in_single_block(
+    blocks: &[Block],
+    match_pos: usize,
+    match_len: usize,
+) -> Option<(usize, usize)> {
+    // In the full text, blocks are joined by '\n'. We need to check that
+    // match_pos..match_pos+match_len falls entirely within one block's text
+    // (not crossing a '\n' separator).
+    if let Some((block_idx, offset)) = find_block_for_position(blocks, match_pos) {
+        let block = &blocks[block_idx];
+        let block_end_offset = block.text_length as usize;
+        // Check the match fits entirely within this block
+        if offset + match_len <= block_end_offset {
+            return Some((block_idx, offset));
+        }
+    }
+    None
+}
+
+fn execute_replace(
+    uow: &mut Box<dyn ReplaceTextUnitOfWorkTrait>,
+    dto: &ReplaceTextDto,
+) -> Result<(ReplaceResultDto, EntityTreeSnapshot)> {
+    // Get Root -> Document
+    let root = uow
+        .get_root(&1)?
+        .ok_or_else(|| anyhow!("Root entity not found"))?;
+    let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+    let doc_id = *doc_ids
+        .first()
+        .ok_or_else(|| anyhow!("Root has no document"))?;
+
+    // Snapshot for undo before mutation
+    let snapshot = uow.snapshot_document(&[doc_id])?;
+
+    // Build full text and get blocks
+    let (full_text, blocks) = build_full_text(uow.as_ref())?;
+
+    // Find all matches
+    let all_matches = find_all_matches(
+        &full_text,
+        &dto.query,
+        dto.case_sensitive,
+        dto.whole_word,
+        dto.use_regex,
+    )?;
+
+    if all_matches.is_empty() {
+        return Ok((ReplaceResultDto { replacements_count: 0 }, snapshot));
+    }
+
+    // Filter to only matches within a single block (skip cross-block matches)
+    let mut valid_matches: Vec<(usize, usize, usize, usize)> = Vec::new(); // (match_pos, match_len, block_idx, block_offset)
+    for &(match_pos, match_len) in &all_matches {
+        if let Some((block_idx, block_offset)) = match_in_single_block(&blocks, match_pos, match_len) {
+            valid_matches.push((match_pos, match_len, block_idx, block_offset));
+        }
+    }
+
+    // If not replace_all, only keep the first match
+    if !dto.replace_all {
+        valid_matches.truncate(1);
+    }
+
+    if valid_matches.is_empty() {
+        return Ok((ReplaceResultDto { replacements_count: 0 }, snapshot));
+    }
+
+    let replacement = &dto.replacement;
+    let replacement_char_len = replacement.chars().count() as i64;
+    let replacements_count = valid_matches.len() as i64;
+
+    // Process matches from last to first to avoid position shifting issues
+    // We need to track cumulative delta per block for subsequent block position updates
+    let mut cumulative_delta: i64 = 0;
+
+    // Process in reverse order
+    for &(_match_pos, match_len, block_idx, block_offset) in valid_matches.iter().rev() {
+        let match_char_len = match_len as i64;
+        let delta = replacement_char_len - match_char_len;
+
+        // Re-read the block (it may have been updated by a previous iteration in the same block)
+        let block = uow
+            .get_block(&blocks[block_idx].id)?
+            .ok_or_else(|| anyhow!("Block not found"))?;
+
+        // Get elements for this block
+        let element_ids =
+            uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+
+        // Replace within inline elements
+        // Walk elements to find the one containing the match
+        let mut running: usize = 0;
+        let mut replaced = false;
+        for elem in &elements {
+            let elem_len = match &elem.content {
+                InlineContent::Text(s) => s.chars().count(),
+                InlineContent::Image { .. } => 1,
+                InlineContent::Empty => 0,
+            };
+            let elem_start = running;
+            let elem_end = running + elem_len;
+
+            // Check if this element contains (or overlaps with) the match range
+            let match_start_in_block = block_offset;
+            let match_end_in_block = block_offset + match_len;
+
+            let overlap_start = std::cmp::max(match_start_in_block, elem_start);
+            let overlap_end = std::cmp::min(match_end_in_block, elem_end);
+
+            if overlap_start < overlap_end && !replaced {
+                if let InlineContent::Text(s) = &elem.content {
+                    let chars: Vec<char> = s.chars().collect();
+                    let local_start = overlap_start - elem_start;
+                    let local_end = overlap_end - elem_start;
+
+                    // Check if the entire match is within this element
+                    if match_start_in_block >= elem_start && match_end_in_block <= elem_end {
+                        // Entire match is in this element: replace
+                        let before: String = chars[..local_start].iter().collect();
+                        let after: String = chars[local_end..].iter().collect();
+                        let new_text = format!("{}{}{}", before, replacement, after);
+
+                        let mut updated = elem.clone();
+                        updated.content = InlineContent::Text(new_text);
+                        updated.updated_at = chrono::Utc::now();
+                        uow.update_inline_element(&updated)?;
+                        replaced = true;
+                    } else {
+                        // Match spans multiple elements. Put replacement in first overlapping,
+                        // clear overlapping parts from subsequent elements.
+                        let before: String = chars[..local_start].iter().collect();
+                        let after: String = chars[local_end..].iter().collect();
+                        let new_text = format!("{}{}{}", before, replacement, after);
+
+                        let mut updated = elem.clone();
+                        updated.content = InlineContent::Text(new_text);
+                        updated.updated_at = chrono::Utc::now();
+                        uow.update_inline_element(&updated)?;
+                        replaced = true;
+                    }
+                }
+            } else if overlap_start < overlap_end && replaced {
+                // This element overlaps with the match but replacement was already placed.
+                // Clear the overlapping portion.
+                if let InlineContent::Text(s) = &elem.content {
+                    let chars: Vec<char> = s.chars().collect();
+                    let local_start = overlap_start - elem_start;
+                    let local_end = overlap_end - elem_start;
+                    let before: String = chars[..local_start].iter().collect();
+                    let after: String = chars[local_end..].iter().collect();
+                    let new_text = format!("{}{}", before, after);
+
+                    let mut updated = elem.clone();
+                    updated.content = InlineContent::Text(new_text);
+                    updated.updated_at = chrono::Utc::now();
+                    uow.update_inline_element(&updated)?;
+                }
+            }
+
+            running += elem_len;
+        }
+
+        // Update block cached fields
+        let plain_chars: Vec<char> = block.plain_text.chars().collect();
+        let before: String = plain_chars[..block_offset].iter().collect();
+        let after: String = plain_chars[(block_offset + match_len)..].iter().collect();
+        let new_plain = format!("{}{}{}", before, replacement, after);
+
+        let mut updated_block = block.clone();
+        updated_block.plain_text = new_plain.clone();
+        updated_block.text_length = new_plain.chars().count() as i64;
+        updated_block.updated_at = chrono::Utc::now();
+        uow.update_block(&updated_block)?;
+
+        cumulative_delta += delta;
+    }
+
+    // Now update subsequent blocks' document_position and Document.character_count.
+    // We need to compute delta per block group. Since we processed in reverse,
+    // we need to compute cumulative deltas per block and shift subsequent blocks.
+    //
+    // Simpler approach: compute total delta and use block positions.
+    // For each block, count how many matches occurred BEFORE it (by document position)
+    // and compute the cumulative shift.
+
+    // Re-read all blocks to get current state
+    let mut all_block_ids: Vec<EntityId> = Vec::new();
+    let frame_ids =
+        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    for frame_id in &frame_ids {
+        let block_ids =
+            uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        all_block_ids.extend(block_ids);
+    }
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
+    let mut current_blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    current_blocks.sort_by_key(|b| b.document_position);
+
+    // Compute position adjustments: for each block, determine how much to shift
+    // based on matches that occurred in earlier blocks.
+    // valid_matches is sorted by match_pos (ascending from find_all_matches).
+    // Group matches by block_idx and compute delta per block.
+    let mut delta_by_block: std::collections::HashMap<usize, i64> = std::collections::HashMap::new();
+    for &(_match_pos, match_len, block_idx, _block_offset) in &valid_matches {
+        let delta = replacement_char_len - match_len as i64;
+        *delta_by_block.entry(block_idx).or_insert(0) += delta;
+    }
+
+    // For each block in sorted order, compute cumulative shift from all blocks before it
+    let mut cumulative_shift: i64 = 0;
+    let mut blocks_to_update: Vec<Block> = Vec::new();
+    for (_i, block) in current_blocks.iter().enumerate() {
+        // Find original block index mapping: blocks[i].id == current_blocks[i].id
+        // since both are sorted by document_position and IDs haven't changed.
+        // Find the original index for this block by matching id
+        let orig_idx = blocks.iter().position(|b| b.id == block.id);
+
+        if let Some(oidx) = orig_idx {
+            // Add delta from this block to cumulative shift for subsequent blocks
+            if let Some(&d) = delta_by_block.get(&oidx) {
+                // This block itself was modified; its text_length already reflects changes.
+                // But its document_position needs adjustment based on prior cumulative shift.
+                if cumulative_shift != 0 {
+                    let mut ub = block.clone();
+                    ub.document_position += cumulative_shift;
+                    ub.updated_at = chrono::Utc::now();
+                    blocks_to_update.push(ub);
+                }
+                cumulative_shift += d;
+            } else {
+                // No matches in this block, just shift if needed
+                if cumulative_shift != 0 {
+                    let mut ub = block.clone();
+                    ub.document_position += cumulative_shift;
+                    ub.updated_at = chrono::Utc::now();
+                    blocks_to_update.push(ub);
+                }
+            }
+        } else {
+            if cumulative_shift != 0 {
+                let mut ub = block.clone();
+                ub.document_position += cumulative_shift;
+                ub.updated_at = chrono::Utc::now();
+                blocks_to_update.push(ub);
+            }
+        }
+    }
+
+    if !blocks_to_update.is_empty() {
+        uow.update_block_multi(&blocks_to_update)?;
+    }
+
+    // Update Document.character_count
+    let total_delta = cumulative_delta;
+    let mut document = uow
+        .get_document(&doc_id)?
+        .ok_or_else(|| anyhow!("Document not found"))?;
+    document.character_count += total_delta;
+    document.updated_at = chrono::Utc::now();
+    uow.update_document(&document)?;
+
+    Ok((
+        ReplaceResultDto {
+            replacements_count,
+        },
+        snapshot,
+    ))
+}
 
 pub struct ReplaceTextUseCase {
     uow_factory: Box<dyn ReplaceTextUnitOfWorkFactoryTrait>,
+    undo_snapshot: Option<EntityTreeSnapshot>,
+    last_dto: Option<ReplaceTextDto>,
 }
 
 impl ReplaceTextUseCase {
     pub fn new(uow_factory: Box<dyn ReplaceTextUnitOfWorkFactoryTrait>) -> Self {
-        ReplaceTextUseCase { uow_factory }
+        ReplaceTextUseCase {
+            uow_factory,
+            undo_snapshot: None,
+            last_dto: None,
+        }
     }
 
     pub fn execute(&mut self, dto: &ReplaceTextDto) -> Result<ReplaceResultDto> {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: ReplaceTextUseCase to be implemented
-        unimplemented!("ReplaceTextUseCase unimplemented");
+        let (result, snapshot) = execute_replace(&mut uow, dto)?;
+        self.undo_snapshot = Some(snapshot);
+        self.last_dto = Some(dto.clone());
+
         uow.commit()?;
-        //Ok(ReplaceResultDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+        Ok(result)
     }
 }
-use common::undo_redo::UndoRedoCommand;
-use std::any::Any;
+
 impl UndoRedoCommand for ReplaceTextUseCase {
     fn undo(&mut self) -> Result<()> {
-        //TODO: ReplaceTextUseCase  undo to be implemented
-        unimplemented!("ReplaceTextUseCase undo unimplemented");
+        let snapshot = self
+            .undo_snapshot
+            .as_ref()
+            .ok_or_else(|| anyhow!("No snapshot available for undo"))?
+            .clone();
 
+        let mut uow = self.uow_factory.create();
+        uow.begin_transaction()?;
+        uow.restore_document(&snapshot)?;
+        uow.commit()?;
         Ok(())
     }
 
     fn redo(&mut self) -> Result<()> {
-        //TODO: ReplaceTextUseCase  redo to be implemented
-        unimplemented!("ReplaceTextUseCase redo unimplemented");
+        let dto = self
+            .last_dto
+            .as_ref()
+            .ok_or_else(|| anyhow!("No DTO available for redo"))?
+            .clone();
 
+        let mut uow = self.uow_factory.create();
+        uow.begin_transaction()?;
+        let (_, snapshot) = execute_replace(&mut uow, &dto)?;
+        self.undo_snapshot = Some(snapshot);
+        uow.commit()?;
         Ok(())
     }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

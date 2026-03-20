@@ -3,32 +3,23 @@ use crate::BlockInfoDto;
 use crate::GetBlockAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement};
+use common::direct_access::document::document_repository::DocumentRelationshipField;
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
+use common::direct_access::root::root_repository::RootRelationshipField;
+use common::entities::{Block, Document, Frame, Root};
 use common::types::EntityId;
 
 pub trait GetBlockAtPositionUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn GetBlockAtPositionUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/get_block_at_position_uow.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Frame", action = "GetRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 pub trait GetBlockAtPositionUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct GetBlockAtPositionUseCase {
@@ -41,16 +32,76 @@ impl GetBlockAtPositionUseCase {
     }
 
     pub fn execute(&mut self, dto: &GetBlockAtPositionDto) -> Result<BlockInfoDto> {
-        let mut uow = self.uow_factory.create();
+        let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: GetBlockAtPositionUseCase to be implemented
-        unimplemented!("GetBlockAtPositionUseCase unimplemented");
+        let position = dto.position;
+
+        // Get Root(1) -> Document -> Frames -> Blocks
+        let root = uow
+            .get_root(&1)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+        let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no document"))?;
+
+        let frame_ids =
+            uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+
+        // Get all frames
+        let frames_opt = uow.get_frame_multi(&frame_ids)?;
+
+        // Collect all block IDs from all frames
+        let mut all_block_ids: Vec<EntityId> = Vec::new();
+        for frame_opt in &frames_opt {
+            if let Some(frame) = frame_opt {
+                let block_ids =
+                    uow.get_frame_relationship(&frame.id, &FrameRelationshipField::Blocks)?;
+                all_block_ids.extend(block_ids);
+            }
+        }
+
+        // Get all blocks and sort by document_position
+        let blocks_opt = uow.get_block_multi(&all_block_ids)?;
+        let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+        blocks.sort_by_key(|b| b.document_position);
+
+        // Binary search for the block containing the position
+        let result = blocks.binary_search_by(|b| {
+            if position < b.document_position {
+                std::cmp::Ordering::Greater
+            } else if position >= b.document_position + b.text_length {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+
+        let block_index = match result {
+            Ok(idx) => idx,
+            Err(idx) => {
+                // Position is between blocks (at a block separator), return the next block
+                if idx < blocks.len() {
+                    idx
+                } else if !blocks.is_empty() {
+                    blocks.len() - 1
+                } else {
+                    return Err(anyhow!("No blocks found in document"));
+                }
+            }
+        };
+
+        let block = &blocks[block_index];
+
         uow.end_transaction()?;
-        //Ok(BlockInfoDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        Ok(BlockInfoDto {
+            block_id: block.id as i64,
+            block_start: block.document_position,
+            block_length: block.text_length,
+            block_number: block_index as i64,
+        })
     }
 }

@@ -8,4 +8,5 @@ pub mod event;
 pub mod long_operation;
 pub mod snapshot;
 pub mod types;
+pub mod parser_tools;
 pub mod undo_redo;

@@ -2,32 +2,20 @@
 use crate::ExportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement};
+use common::entities::{Block, Document, Frame, Root};
 use common::types::EntityId;
 
 pub trait ExportPlainTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportPlainTextUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/export_plain_text_uow.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRO")]
-#[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 pub trait ExportPlainTextUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct ExportPlainTextUseCase {
@@ -40,16 +28,56 @@ impl ExportPlainTextUseCase {
     }
 
     pub fn execute(&mut self) -> Result<ExportPlainTextDto> {
-        let mut uow = self.uow_factory.create();
+        let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: ExportPlainTextUseCase to be implemented
-        unimplemented!("ExportPlainTextUseCase unimplemented");
+        // Step 1: Get Root (id=1) and its Document via relationship
+        let root = uow
+            .get_root(&1u64)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+        let doc_ids = uow.get_root_relationship(
+            &root.id,
+            &common::direct_access::root::RootRelationshipField::Document,
+        )?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no associated Document"))?;
+
+        // Step 2: Get all Frame IDs from Document.Frames relationship
+        let frame_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Frames,
+        )?;
+
+        // Step 3: Collect all block plain_text from all frames
+        let mut all_plain_texts: Vec<String> = Vec::new();
+
+        for frame_id in &frame_ids {
+            // Get Block IDs from the Frame.Blocks relationship
+            let block_ids = uow.get_frame_relationship(
+                frame_id,
+                &common::direct_access::frame::FrameRelationshipField::Blocks,
+            )?;
+
+            if block_ids.is_empty() {
+                continue;
+            }
+
+            // Get all blocks in batch and sort by document_position
+            let blocks_opt = uow.get_block_multi(&block_ids)?;
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            blocks.sort_by_key(|b| b.document_position);
+
+            for block in &blocks {
+                all_plain_texts.push(block.plain_text.clone());
+            }
+        }
+
+        let plain_text = all_plain_texts.join("\n");
+
         uow.end_transaction()?;
-        //Ok(ExportPlainTextDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        Ok(ExportPlainTextDto { plain_text })
     }
 }

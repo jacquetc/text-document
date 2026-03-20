@@ -3,7 +3,7 @@ use crate::ExportDocxDto;
 use crate::ExportDocxResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, List, Resource};
+use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, Root};
 use common::long_operation::LongOperation;
 use common::types::EntityId;
 use std::sync::Arc;
@@ -11,29 +11,17 @@ use std::sync::Arc;
 pub trait ExportDocxUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportDocxUnitOfWorkTrait>;
 }
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/export_docx_uow.rs
-//
-#[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Frame", action = "GetRO")]
-#[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
-#[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
-#[macros::uow_action(entity = "List", action = "GetRO")]
-#[macros::uow_action(entity = "List", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Resource", action = "GetRO")]
-#[macros::uow_action(entity = "Resource", action = "GetMultiRO")]
+
+#[macros::uow_action(entity = "Root", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO", thread_safe = true)]
+#[macros::uow_action(entity = "Document", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO", thread_safe = true)]
+#[macros::uow_action(entity = "Block", action = "GetMultiRO", thread_safe = true)]
+#[macros::uow_action(entity = "Block", action = "GetRelationshipRO", thread_safe = true)]
+#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO", thread_safe = true)]
+#[macros::uow_action(entity = "List", action = "GetRO", thread_safe = true)]
 pub trait ExportDocxUnitOfWorkTrait: QueryUnitOfWork + Send + Sync {}
 
 pub struct ExportDocxUseCase {
@@ -52,6 +40,7 @@ impl ExportDocxUseCase {
         }
     }
 }
+
 impl LongOperation for ExportDocxUseCase {
     type Output = ExportDocxResultDto;
 
@@ -60,34 +49,155 @@ impl LongOperation for ExportDocxUseCase {
         progress_callback: Box<dyn Fn(common::long_operation::OperationProgress) + Send>,
         cancel_flag: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Self::Output> {
+        use docx_rs::*;
         use std::sync::atomic::Ordering;
 
         progress_callback(common::long_operation::OperationProgress::new(
             0.0,
-            Some("Starting...".to_string()),
+            Some("Starting DOCX export...".to_string()),
         ));
 
         let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: ExportDocxUseCase to be implemented
-        unimplemented!("ExportDocxUseCase unimplemented");
+        // Step 1: Get Root and Document
+        let root = uow
+            .get_root(&1u64)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
 
-        if cancel_flag.load(Ordering::Relaxed) {
-            uow.end_transaction()?;
-            return Err(anyhow!("Operation was cancelled"));
+        let doc_ids = uow.get_root_relationship(
+            &root.id,
+            &common::direct_access::root::RootRelationshipField::Document,
+        )?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no associated Document"))?;
+
+        let frame_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Frames,
+        )?;
+
+        let mut docx = Docx::new();
+        let mut paragraph_count: i64 = 0;
+
+        progress_callback(common::long_operation::OperationProgress::new(
+            10.0,
+            Some("Walking document tree...".to_string()),
+        ));
+
+        for frame_id in &frame_ids {
+            if cancel_flag.load(Ordering::Relaxed) {
+                uow.end_transaction()?;
+                return Err(anyhow!("Operation was cancelled"));
+            }
+
+            let block_ids = uow.get_frame_relationship(
+                frame_id,
+                &common::direct_access::frame::FrameRelationshipField::Blocks,
+            )?;
+
+            if block_ids.is_empty() {
+                continue;
+            }
+
+            let blocks_opt = uow.get_block_multi(&block_ids)?;
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            blocks.sort_by_key(|b| b.document_position);
+            let total = blocks.len();
+
+            for (idx, block) in blocks.iter().enumerate() {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    uow.end_transaction()?;
+                    return Err(anyhow!("Operation was cancelled"));
+                }
+
+                let element_ids = uow.get_block_relationship(
+                    &block.id,
+                    &common::direct_access::block::BlockRelationshipField::Elements,
+                )?;
+
+                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+                let elements: Vec<InlineElement> =
+                    elements_opt.into_iter().filter_map(|e| e).collect();
+
+                let mut paragraph = Paragraph::new();
+
+                // Apply heading style
+                if let Some(level) = block.fmt_heading_level {
+                    let style_name = format!("Heading{}", level.min(6).max(1));
+                    paragraph = paragraph.style(&style_name);
+                }
+
+                for elem in &elements {
+                    let text = match &elem.content {
+                        InlineContent::Text(t) => t.clone(),
+                        InlineContent::Image { name, .. } => {
+                            format!("[Image: {}]", name)
+                        }
+                        InlineContent::Empty => String::new(),
+                    };
+
+                    if text.is_empty() {
+                        continue;
+                    }
+
+                    let mut run = Run::new().add_text(text);
+
+                    if elem.fmt_font_bold == Some(true) {
+                        run = run.bold();
+                    }
+                    if elem.fmt_font_italic == Some(true) {
+                        run = run.italic();
+                    }
+                    if elem.fmt_font_underline == Some(true) {
+                        run = run.underline("single");
+                    }
+                    if elem.fmt_font_strikeout == Some(true) {
+                        run = run.strike();
+                    }
+                    if elem.fmt_font_family.as_deref() == Some("monospace") {
+                        run = run.fonts(RunFonts::new().ascii("Courier New"));
+                    }
+
+                    paragraph = paragraph.add_run(run);
+                }
+
+                docx = docx.add_paragraph(paragraph);
+                paragraph_count += 1;
+
+                if idx % 10 == 0 {
+                    let pct = 10.0 + (idx as f32 / total as f32) * 80.0;
+                    progress_callback(common::long_operation::OperationProgress::new(
+                        pct,
+                        Some(format!("Processing paragraph {}/{}", idx + 1, total)),
+                    ));
+                }
+            }
         }
+
         uow.end_transaction()?;
 
-        // Final progress
+        progress_callback(common::long_operation::OperationProgress::new(
+            90.0,
+            Some("Writing DOCX file...".to_string()),
+        ));
+
+        // Write to file
+        let file = std::fs::File::create(&self.dto.output_path)
+            .map_err(|e| anyhow!("Failed to create output file: {}", e))?;
+        docx.build()
+            .pack(file)
+            .map_err(|e| anyhow!("Failed to write DOCX: {}", e))?;
+
         progress_callback(common::long_operation::OperationProgress::new(
             100.0,
             Some("completed".to_string()),
         ));
-        //Ok(ExportDocxResultDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        Ok(ExportDocxResultDto {
+            file_path: self.dto.output_path.clone(),
+            paragraph_count,
+        })
     }
 }

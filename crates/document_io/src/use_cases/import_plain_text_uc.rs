@@ -2,45 +2,27 @@
 use crate::ImportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, Root};
+use common::entities::{Block, Document, Frame, InlineElement, InlineContent, Root};
 use common::types::EntityId;
 
 pub trait ImportPlainTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ImportPlainTextUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// Create, CreateMulti, Get, GetMulti, Update, UpdateMulti, remove,
-// removeMulti, GetRelationship, GetRelationshipsFromRightIds,
-// SetRelationship, SetRelationshipMulti
-//
-// You have here a read-write unit of work trait.
-//
-// RO means Read Only.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/import_plain_text_uow.rs
-//
 #[macros::uow_action(entity = "Root", action = "Get")]
-#[macros::uow_action(entity = "Root", action = "GetMulti")]
-#[macros::uow_action(entity = "Root", action = "Snapshot")]
-#[macros::uow_action(entity = "Root", action = "Restore")]
+#[macros::uow_action(entity = "Root", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Get")]
-#[macros::uow_action(entity = "Document", action = "GetMulti")]
-#[macros::uow_action(entity = "Document", action = "Snapshot")]
-#[macros::uow_action(entity = "Document", action = "Restore")]
+#[macros::uow_action(entity = "Document", action = "Update")]
+#[macros::uow_action(entity = "Document", action = "GetRelationship")]
 #[macros::uow_action(entity = "Frame", action = "Get")]
-#[macros::uow_action(entity = "Frame", action = "GetMulti")]
-#[macros::uow_action(entity = "Frame", action = "Snapshot")]
-#[macros::uow_action(entity = "Frame", action = "Restore")]
-#[macros::uow_action(entity = "Block", action = "Get")]
-#[macros::uow_action(entity = "Block", action = "GetMulti")]
-#[macros::uow_action(entity = "Block", action = "Snapshot")]
-#[macros::uow_action(entity = "Block", action = "Restore")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Snapshot")]
-#[macros::uow_action(entity = "InlineElement", action = "Restore")]
+#[macros::uow_action(entity = "Frame", action = "Create")]
+#[macros::uow_action(entity = "Frame", action = "Update")]
+#[macros::uow_action(entity = "Frame", action = "Remove")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationship")]
+#[macros::uow_action(entity = "Block", action = "Create")]
+#[macros::uow_action(entity = "Block", action = "CreateMulti")]
+#[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "InlineElement", action = "CreateMulti")]
 pub trait ImportPlainTextUnitOfWorkTrait: CommandUnitOfWork {}
 
 pub struct ImportPlainTextUseCase {
@@ -56,8 +38,81 @@ impl ImportPlainTextUseCase {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: ImportPlainTextUseCase to be implemented
-        unimplemented!("ImportPlainTextUseCase unimplemented");
+        // Step 1: Get Root (id=1) and its Document via relationship
+        let root = uow
+            .get_root(&1u64)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+        let doc_ids = uow.get_root_relationship(
+            &root.id,
+            &common::direct_access::root::RootRelationshipField::Document,
+        )?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no associated Document"))?;
+
+        // Step 2: Remove all existing frames (cascade deletes blocks and elements)
+        let frame_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Frames,
+        )?;
+        for frame_id in &frame_ids {
+            uow.remove_frame(frame_id)?;
+        }
+
+        // Step 3: Create a new root Frame owned by the Document
+        let new_frame = Frame::default();
+        let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
+
+        // Step 4: Split input text into lines and create blocks with inline elements
+        let lines: Vec<&str> = dto.plain_text.split('\n').collect();
+        let num_blocks = lines.len() as i64;
+        let mut total_chars: i64 = 0;
+        let mut document_position: i64 = 0;
+        let mut block_ids: Vec<i64> = Vec::new();
+
+        for (i, line) in lines.iter().enumerate() {
+            let line_len = line.chars().count() as i64;
+
+            // Create a Block owned by the Frame
+            let mut block = Block::default();
+            block.plain_text = line.to_string();
+            block.text_length = line_len;
+            block.document_position = document_position;
+
+            let created_block = uow.create_block(&block, created_frame.id, -1)?;
+
+            // Create an InlineElement owned by the Block
+            let mut element = InlineElement::default();
+            element.content = InlineContent::Text(line.to_string());
+
+            uow.create_inline_element(&element, created_block.id, -1)?;
+
+            block_ids.push(created_block.id as i64);
+            total_chars += line_len;
+
+            // Update document_position: each block is separated by 1 (block separator)
+            document_position += line_len;
+            if i < lines.len() - 1 {
+                document_position += 1; // block separator
+            }
+        }
+
+        // Step 5: Update Frame child_order
+        let mut updated_frame = uow
+            .get_frame(&created_frame.id)?
+            .ok_or_else(|| anyhow!("Created frame not found"))?;
+        updated_frame.child_order = block_ids;
+        uow.update_frame(&updated_frame)?;
+
+        // Step 6: Update Document cached fields
+        let mut updated_doc = uow
+            .get_document(&doc_id)?
+            .ok_or_else(|| anyhow!("Document not found after import"))?;
+        updated_doc.character_count = total_chars;
+        updated_doc.block_count = num_blocks;
+        uow.update_document(&updated_doc)?;
+
         uow.commit()?;
         Ok(())
     }

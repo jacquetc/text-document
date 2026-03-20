@@ -85,42 +85,20 @@ impl CommandUnitOfWork for ImportMarkdownUnitOfWork {
         Ok(())
     }
 }
-//TODO: adapt entities and actions to real use :
-// Create, CreateMulti, Get, GetMulti, Update, UpdateMulti, remove,  removeMulti, GetRelationship,
-// GetRelationshipsFromRightIds, SetRelationship, SetRelationshipMulti, Snapshot, Restore
-//
-// You have here a long operation read-write unit of work.
-//
-// RO means Read Only, so *RO actions should not used be here.
-// Don't forget to set thread_safe = true for long operation's unit of work.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../use_cases/import_markdown_uc.rs
-//
 #[macros::uow_action(entity = "Root", action = "Get", thread_safe = true)]
-#[macros::uow_action(entity = "Root", action = "GetMulti", thread_safe = true)]
-#[macros::uow_action(entity = "Root", action = "Snapshot", thread_safe = true)]
-#[macros::uow_action(entity = "Root", action = "Restore", thread_safe = true)]
+#[macros::uow_action(entity = "Root", action = "GetRelationship", thread_safe = true)]
 #[macros::uow_action(entity = "Document", action = "Get", thread_safe = true)]
-#[macros::uow_action(entity = "Document", action = "GetMulti", thread_safe = true)]
-#[macros::uow_action(entity = "Document", action = "Snapshot", thread_safe = true)]
-#[macros::uow_action(entity = "Document", action = "Restore", thread_safe = true)]
+#[macros::uow_action(entity = "Document", action = "Update", thread_safe = true)]
+#[macros::uow_action(entity = "Document", action = "GetRelationship", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Get", thread_safe = true)]
-#[macros::uow_action(entity = "Frame", action = "GetMulti", thread_safe = true)]
-#[macros::uow_action(entity = "Frame", action = "Snapshot", thread_safe = true)]
-#[macros::uow_action(entity = "Frame", action = "Restore", thread_safe = true)]
-#[macros::uow_action(entity = "Block", action = "Get", thread_safe = true)]
-#[macros::uow_action(entity = "Block", action = "GetMulti", thread_safe = true)]
-#[macros::uow_action(entity = "Block", action = "Snapshot", thread_safe = true)]
-#[macros::uow_action(entity = "Block", action = "Restore", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "Get", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "Snapshot", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "Restore", thread_safe = true)]
-#[macros::uow_action(entity = "List", action = "Get", thread_safe = true)]
-#[macros::uow_action(entity = "List", action = "GetMulti", thread_safe = true)]
-#[macros::uow_action(entity = "List", action = "Snapshot", thread_safe = true)]
-#[macros::uow_action(entity = "List", action = "Restore", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "Create", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "Update", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "Remove", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "GetRelationship", thread_safe = true)]
+#[macros::uow_action(entity = "Block", action = "Create", thread_safe = true)]
+#[macros::uow_action(entity = "Block", action = "SetRelationship", thread_safe = true)]
+#[macros::uow_action(entity = "InlineElement", action = "Create", thread_safe = true)]
+#[macros::uow_action(entity = "List", action = "Create", thread_safe = true)]
 impl ImportMarkdownUnitOfWorkTrait for ImportMarkdownUnitOfWork {}
 
 pub struct ImportMarkdownUnitOfWorkFactory {

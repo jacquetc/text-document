@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Resource};
+use common::entities::{Block, Document, Frame, InlineElement, List, Resource, Root};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]
@@ -43,28 +43,16 @@ impl QueryUnitOfWork for ExportHtmlUnitOfWork {
     }
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationshipRO, GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../use_cases/export_html_uc.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRO")]
-#[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
+#[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
-#[macros::uow_action(entity = "List", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Resource", action = "GetRO")]
-#[macros::uow_action(entity = "Resource", action = "GetMultiRO")]
 impl ExportHtmlUnitOfWorkTrait for ExportHtmlUnitOfWork {}
 
 pub struct ExportHtmlUnitOfWorkFactory {

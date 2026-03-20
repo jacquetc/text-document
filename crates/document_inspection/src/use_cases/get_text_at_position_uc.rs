@@ -3,31 +3,25 @@ use crate::GetTextAtPositionDto;
 use crate::TextAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement};
+use common::direct_access::block::block_repository::BlockRelationshipField;
+use common::direct_access::document::document_repository::DocumentRelationshipField;
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
+use common::direct_access::root::root_repository::RootRelationshipField;
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
 use common::types::EntityId;
 
 pub trait GetTextAtPositionUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn GetTextAtPositionUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/get_text_at_position_uow.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Frame", action = "GetRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
+#[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 pub trait GetTextAtPositionUnitOfWorkTrait: QueryUnitOfWork {}
 
@@ -41,16 +35,134 @@ impl GetTextAtPositionUseCase {
     }
 
     pub fn execute(&mut self, dto: &GetTextAtPositionDto) -> Result<TextAtPositionDto> {
-        let mut uow = self.uow_factory.create();
+        let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: GetTextAtPositionUseCase to be implemented
-        unimplemented!("GetTextAtPositionUseCase unimplemented");
+        let position = dto.position;
+        let length = dto.length;
+
+        // Get Root(1) -> Document -> Frames -> Blocks
+        let root = uow
+            .get_root(&1)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+        let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no document"))?;
+
+        let frame_ids =
+            uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+
+        let frames_opt = uow.get_frame_multi(&frame_ids)?;
+
+        let mut all_block_ids: Vec<EntityId> = Vec::new();
+        for frame_opt in &frames_opt {
+            if let Some(frame) = frame_opt {
+                let block_ids =
+                    uow.get_frame_relationship(&frame.id, &FrameRelationshipField::Blocks)?;
+                all_block_ids.extend(block_ids);
+            }
+        }
+
+        let blocks_opt = uow.get_block_multi(&all_block_ids)?;
+        let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+        blocks.sort_by_key(|b| b.document_position);
+
+        // Find the block containing the requested position.
+        // Use <= on the upper bound so that a position at the very end of a block is valid.
+        let first_block_idx = blocks
+            .iter()
+            .position(|b| {
+                position >= b.document_position && position <= b.document_position + b.text_length
+            })
+            .ok_or_else(|| anyhow!("Position {} is out of document range", position))?;
+
+        let first_block = &blocks[first_block_idx];
+        let offset_in_first_block = (position - first_block.document_position) as usize;
+
+        // Collect text spanning across blocks if needed
+        let mut collected_text = String::new();
+        let mut remaining = length as usize;
+        let mut first_element_id: EntityId = 0;
+        let mut found_first_element = false;
+
+        for block_idx in first_block_idx..blocks.len() {
+            if remaining == 0 {
+                break;
+            }
+
+            let block = &blocks[block_idx];
+            let block_offset = if block_idx == first_block_idx {
+                offset_in_first_block
+            } else {
+                // Add block separator between blocks
+                if remaining > 0 {
+                    collected_text.push('\n');
+                    remaining = remaining.saturating_sub(1);
+                }
+                0
+            };
+
+            if remaining == 0 {
+                break;
+            }
+
+            // Get this block's elements to find the first element ID and extract text
+            let element_ids =
+                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+            let elements: Vec<&InlineElement> =
+                elements_opt.iter().filter_map(|e| e.as_ref()).collect();
+
+            let mut current_char_offset: usize = 0;
+
+            for elem in &elements {
+                if remaining == 0 {
+                    break;
+                }
+
+                let elem_text = match &elem.content {
+                    InlineContent::Text(s) => s.clone(),
+                    InlineContent::Image { .. } => "\u{FFFC}".to_string(),
+                    InlineContent::Empty => String::new(),
+                };
+
+                let elem_char_len = elem_text.chars().count();
+                let elem_chars: Vec<char> = elem_text.chars().collect();
+
+                if current_char_offset + elem_char_len > block_offset {
+                    // This element overlaps with our read range
+                    let start_in_elem = if current_char_offset < block_offset {
+                        block_offset - current_char_offset
+                    } else {
+                        0
+                    };
+                    let available = elem_char_len - start_in_elem;
+                    let take = available.min(remaining);
+
+                    let slice: String = elem_chars[start_in_elem..start_in_elem + take]
+                        .iter()
+                        .collect();
+                    collected_text.push_str(&slice);
+                    remaining -= take;
+
+                    if !found_first_element {
+                        first_element_id = elem.id;
+                        found_first_element = true;
+                    }
+                }
+
+                current_char_offset += elem_char_len;
+            }
+        }
+
         uow.end_transaction()?;
-        //Ok(TextAtPositionDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        Ok(TextAtPositionDto {
+            text: collected_text,
+            block_id: blocks[first_block_idx].id as i64,
+            element_id: first_element_id as i64,
+        })
     }
 }

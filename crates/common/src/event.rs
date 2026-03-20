@@ -98,6 +98,7 @@ pub enum DocumentInspectionEvent {
     GetDocumentStats,
     GetTextAtPosition,
     GetBlockAtPosition,
+    ExtractFragment,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]

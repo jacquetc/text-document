@@ -2,36 +2,23 @@
 use crate::ExportHtmlDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, List, Resource};
+use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, ListStyle, Root};
 use common::types::EntityId;
 
 pub trait ExportHtmlUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportHtmlUnitOfWorkTrait>;
 }
 
-//TODO: adapt entities and actions to real use :
-// GetRO, GetMultiRO, GetRelationship, GetRelationshipRO,
-// GetRelationshipsFromRightIdsRO
-//
-// You have here a read-only unit of work trait.
-//
-// RO means Read Only, so *RO actions should be used here.
-// Do not mix read-only and write actions in the same unit of work.
-//
-// Exactly the same macros must be set in the use case uow trait file in ../units_of_work/export_html_uow.rs
-//
+#[macros::uow_action(entity = "Root", action = "GetRO")]
+#[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
-#[macros::uow_action(entity = "Document", action = "GetMultiRO")]
+#[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRO")]
-#[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Block", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetRO")]
+#[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
-#[macros::uow_action(entity = "List", action = "GetMultiRO")]
-#[macros::uow_action(entity = "Resource", action = "GetRO")]
-#[macros::uow_action(entity = "Resource", action = "GetMultiRO")]
 pub trait ExportHtmlUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct ExportHtmlUseCase {
@@ -44,16 +31,183 @@ impl ExportHtmlUseCase {
     }
 
     pub fn execute(&mut self) -> Result<ExportHtmlDto> {
-        let mut uow = self.uow_factory.create();
+        let uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        //TODO: ExportHtmlUseCase to be implemented
-        unimplemented!("ExportHtmlUseCase unimplemented");
+        // Step 1: Get Root and Document
+        let root = uow
+            .get_root(&1u64)?
+            .ok_or_else(|| anyhow!("Root entity not found"))?;
+
+        let doc_ids = uow.get_root_relationship(
+            &root.id,
+            &common::direct_access::root::RootRelationshipField::Document,
+        )?;
+        let doc_id = *doc_ids
+            .first()
+            .ok_or_else(|| anyhow!("Root has no associated Document"))?;
+
+        let frame_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Frames,
+        )?;
+
+        let mut body_parts: Vec<String> = Vec::new();
+
+        for frame_id in &frame_ids {
+            let block_ids = uow.get_frame_relationship(
+                frame_id,
+                &common::direct_access::frame::FrameRelationshipField::Blocks,
+            )?;
+
+            if block_ids.is_empty() {
+                continue;
+            }
+
+            let blocks_opt = uow.get_block_multi(&block_ids)?;
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            blocks.sort_by_key(|b| b.document_position);
+
+            // Group consecutive list items
+            let mut i = 0;
+            while i < blocks.len() {
+                let block = &blocks[i];
+
+                // Check if block has a list
+                let list_ids = uow.get_block_relationship(
+                    &block.id,
+                    &common::direct_access::block::BlockRelationshipField::List,
+                )?;
+                let list = if let Some(list_id) = list_ids.first() {
+                    uow.get_list(list_id)?
+                } else {
+                    None
+                };
+
+                if let Some(ref list_entity) = list {
+                    // Start a list group
+                    let is_ordered = matches!(
+                        list_entity.style,
+                        ListStyle::Decimal | ListStyle::LowerAlpha | ListStyle::UpperAlpha
+                        | ListStyle::LowerRoman | ListStyle::UpperRoman
+                    );
+                    let list_tag = if is_ordered { "ol" } else { "ul" };
+                    let mut list_items = Vec::new();
+
+                    // Collect consecutive list items
+                    while i < blocks.len() {
+                        let b = &blocks[i];
+                        let b_list_ids = uow.get_block_relationship(
+                            &b.id,
+                            &common::direct_access::block::BlockRelationshipField::List,
+                        )?;
+                        let b_list = if let Some(lid) = b_list_ids.first() {
+                            uow.get_list(lid)?
+                        } else {
+                            None
+                        };
+
+                        if b_list.is_some() {
+                            let inline_html = self.render_inline_html(&uow, b)?;
+                            list_items.push(format!("<li>{}</li>", inline_html));
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    body_parts.push(format!(
+                        "<{}>{}</{}>",
+                        list_tag,
+                        list_items.join(""),
+                        list_tag
+                    ));
+                } else {
+                    let inline_html = self.render_inline_html(&uow, block)?;
+
+                    if let Some(level) = block.fmt_heading_level {
+                        let level = level.min(6).max(1);
+                        body_parts.push(format!("<h{}>{}</h{}>", level, inline_html, level));
+                    } else {
+                        body_parts.push(format!("<p>{}</p>", inline_html));
+                    }
+                    i += 1;
+                }
+            }
+        }
+
         uow.end_transaction()?;
-        //Ok(ExportHtmlDto {
-        //
-        //})
-        // placeholder to allow compilation
-        Err(anyhow!("Not implemented"))
+
+        let html_text = format!("<html><body>{}</body></html>", body_parts.join(""));
+
+        Ok(ExportHtmlDto { html_text })
     }
+
+    fn render_inline_html(
+        &self,
+        uow: &Box<dyn ExportHtmlUnitOfWorkTrait>,
+        block: &Block,
+    ) -> Result<String> {
+        let element_ids = uow.get_block_relationship(
+            &block.id,
+            &common::direct_access::block::BlockRelationshipField::Elements,
+        )?;
+
+        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+
+        let mut html = String::new();
+
+        for elem in &elements {
+            let text = match &elem.content {
+                InlineContent::Text(t) => escape_html(t),
+                InlineContent::Image { name, width, height, .. } => {
+                    format!("<img src=\"{}\" width=\"{}\" height=\"{}\" />", escape_html(name), width, height)
+                }
+                InlineContent::Empty => String::new(),
+            };
+
+            if text.is_empty() {
+                continue;
+            }
+
+            // Check if this is an image tag (already formatted)
+            if text.starts_with("<img ") {
+                html.push_str(&text);
+                continue;
+            }
+
+            let mut formatted = text;
+
+            if elem.fmt_font_family.as_deref() == Some("monospace") {
+                formatted = format!("<code>{}</code>", formatted);
+            }
+            if elem.fmt_font_bold == Some(true) {
+                formatted = format!("<strong>{}</strong>", formatted);
+            }
+            if elem.fmt_font_italic == Some(true) {
+                formatted = format!("<em>{}</em>", formatted);
+            }
+            if elem.fmt_font_underline == Some(true) {
+                formatted = format!("<u>{}</u>", formatted);
+            }
+            if elem.fmt_font_strikeout == Some(true) {
+                formatted = format!("<s>{}</s>", formatted);
+            }
+            if let Some(ref href) = elem.fmt_anchor_href {
+                formatted = format!("<a href=\"{}\">{}</a>", escape_html(href), formatted);
+            }
+
+            html.push_str(&formatted);
+        }
+
+        Ok(html)
+    }
+}
+
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }

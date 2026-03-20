@@ -2,18 +2,23 @@
 
 use crate::BlockInfoDto;
 use crate::DocumentStatsDto;
+use crate::ExtractFragmentDto;
+use crate::ExtractFragmentResultDto;
 use crate::GetBlockAtPositionDto;
 use crate::GetTextAtPositionDto;
 use crate::TextAtPositionDto;
+use crate::units_of_work::extract_fragment_uow::ExtractFragmentUnitOfWorkFactory;
 use crate::units_of_work::get_block_at_position_uow::GetBlockAtPositionUnitOfWorkFactory;
 use crate::units_of_work::get_document_stats_uow::GetDocumentStatsUnitOfWorkFactory;
 use crate::units_of_work::get_text_at_position_uow::GetTextAtPositionUnitOfWorkFactory;
+use crate::use_cases::extract_fragment_uc::ExtractFragmentUseCase;
 use crate::use_cases::get_block_at_position_uc::GetBlockAtPositionUseCase;
 use crate::use_cases::get_document_stats_uc::GetDocumentStatsUseCase;
 use crate::use_cases::get_text_at_position_uc::GetTextAtPositionUseCase;
 use anyhow::Result;
 use common::event::{Event, Origin};
 
+use common::event::DocumentInspectionEvent::ExtractFragment;
 use common::event::DocumentInspectionEvent::GetBlockAtPosition;
 use common::event::DocumentInspectionEvent::GetDocumentStats;
 use common::event::DocumentInspectionEvent::GetTextAtPosition;
@@ -65,6 +70,22 @@ pub fn get_block_at_position(
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
         origin: Origin::DocumentInspection(GetBlockAtPosition),
+        ids: vec![],
+        data: None,
+    });
+    Ok(return_dto)
+}
+
+pub fn extract_fragment(
+    db_context: &DbContext,
+    event_hub: &Arc<EventHub>,
+    dto: &ExtractFragmentDto,
+) -> Result<ExtractFragmentResultDto> {
+    let uow_context = ExtractFragmentUnitOfWorkFactory::new(db_context);
+    let mut uc = ExtractFragmentUseCase::new(Box::new(uow_context));
+    let return_dto = uc.execute(dto)?;
+    event_hub.send_event(Event {
+        origin: Origin::DocumentInspection(ExtractFragment),
         ids: vec![],
         data: None,
     });
