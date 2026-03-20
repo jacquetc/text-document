@@ -800,10 +800,10 @@ impl TextCursor {
                     document_inspection_commands::get_block_at_position(&inner.ctx, &dto)
                         .map(|info| to_usize(info.block_start))
                         .unwrap_or(pos);
-                if block_start > 0 {
-                    // Move to previous block
+                if block_start >= 2 {
+                    // Skip past the block separator (which maps to the current block)
                     let prev_dto = frontend::document_inspection::GetBlockAtPositionDto {
-                        position: to_i64(block_start.saturating_sub(1)),
+                        position: to_i64(block_start - 2),
                     };
                     document_inspection_commands::get_block_at_position(&inner.ctx, &prev_dto)
                         .map(|info| to_usize(info.block_start))

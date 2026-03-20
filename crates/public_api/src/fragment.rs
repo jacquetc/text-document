@@ -22,11 +22,56 @@ impl DocumentFragment {
 
     /// Create a fragment from plain text.
     ///
-    /// Stores the text for later insertion. The backend's `insert_fragment`
-    /// use case handles the conversion to blocks and inline elements.
+    /// Builds valid fragment data so the fragment can be inserted via
+    /// [`TextCursor::insert_fragment`](crate::TextCursor::insert_fragment).
     pub fn from_plain_text(text: &str) -> Self {
+        use frontend::common::entities::InlineContent;
+        use frontend::common::parser_tools::fragment_schema::{
+            FragmentBlock, FragmentData, FragmentElement,
+        };
+
+        let blocks: Vec<FragmentBlock> = text
+            .split('\n')
+            .map(|line| FragmentBlock {
+                plain_text: line.to_string(),
+                elements: vec![FragmentElement {
+                    content: InlineContent::Text(line.to_string()),
+                    fmt_font_family: None,
+                    fmt_font_point_size: None,
+                    fmt_font_weight: None,
+                    fmt_font_bold: None,
+                    fmt_font_italic: None,
+                    fmt_font_underline: None,
+                    fmt_font_overline: None,
+                    fmt_font_strikeout: None,
+                    fmt_letter_spacing: None,
+                    fmt_word_spacing: None,
+                    fmt_anchor_href: None,
+                    fmt_anchor_names: vec![],
+                    fmt_is_anchor: None,
+                    fmt_tooltip: None,
+                    fmt_underline_style: None,
+                    fmt_vertical_alignment: None,
+                }],
+                heading_level: None,
+                list: None,
+                alignment: None,
+                indent: None,
+                text_indent: None,
+                marker: None,
+                top_margin: None,
+                bottom_margin: None,
+                left_margin: None,
+                right_margin: None,
+                tab_positions: vec![],
+            })
+            .collect();
+
+        let data = serde_json::to_string(&FragmentData { blocks })
+            .expect("fragment serialization should not fail");
+
         Self {
-            data: String::new(),
+            data,
             plain_text: text.to_string(),
         }
     }

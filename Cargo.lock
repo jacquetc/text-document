@@ -1300,6 +1300,7 @@ dependencies = [
  "base64",
  "frontend",
  "log",
+ "serde_json",
 ]
 
 [[package]]
