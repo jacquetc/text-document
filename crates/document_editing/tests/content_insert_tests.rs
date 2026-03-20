@@ -10,19 +10,17 @@ use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
 use direct_access::block::block_controller;
-use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::frame::frame_controller;
 use direct_access::inline_element::inline_element_controller;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
 
 use document_editing::document_editing_controller;
-use document_editing::{
-    InsertFragmentDto, InsertHtmlAtPositionDto, InsertMarkdownAtPositionDto,
-};
-use document_io::document_io_controller;
+use document_editing::{InsertFragmentDto, InsertHtmlAtPositionDto, InsertMarkdownAtPositionDto};
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 /// Set up an in-memory database with Root, Document, and imported text content.
 fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
@@ -30,11 +28,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -74,11 +68,8 @@ fn get_block_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
         &DocumentRelationshipField::Frames,
     )?;
     let frame_id = frame_ids[0];
-    let block_ids = frame_controller::get_relationship(
-        db_context,
-        &frame_id,
-        &FrameRelationshipField::Blocks,
-    )?;
+    let block_ids =
+        frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)?;
     Ok(block_ids)
 }
 
@@ -218,7 +209,10 @@ fn test_insert_markdown_list() -> Result<()> {
             }
         }
     }
-    assert!(list_blocks >= 2, "Should have at least 2 blocks with list associations");
+    assert!(
+        list_blocks >= 2,
+        "Should have at least 2 blocks with list associations"
+    );
 
     Ok(())
 }
@@ -390,7 +384,8 @@ fn make_bold_fragment(text: &str) -> String {
             "right_margin": null,
             "tab_positions": []
         }]
-    }).to_string()
+    })
+    .to_string()
 }
 
 #[test]

@@ -11,21 +11,21 @@ use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
 use direct_access::block::block_controller;
-use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::frame::frame_controller;
 use direct_access::inline_element::inline_element_controller;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
 
-use document_editing::document_editing_controller;
 use document_editing::InsertFragmentDto;
+use document_editing::document_editing_controller;
 
-use document_inspection::document_inspection_controller;
 use document_inspection::ExtractFragmentDto;
+use document_inspection::document_inspection_controller;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 /// Set up an in-memory database with Root, Document, and imported text content.
 fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
@@ -33,11 +33,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -77,11 +73,8 @@ fn get_block_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
         &DocumentRelationshipField::Frames,
     )?;
     let frame_id = frame_ids[0];
-    let block_ids = frame_controller::get_relationship(
-        db_context,
-        &frame_id,
-        &FrameRelationshipField::Blocks,
-    )?;
+    let block_ids =
+        frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)?;
     Ok(block_ids)
 }
 
@@ -190,8 +183,7 @@ fn test_extract_fragment_empty_range() -> Result<()> {
 #[test]
 fn test_insert_fragment_roundtrip() -> Result<()> {
     // Set up source document
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("Hello World")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello World")?;
 
     // Extract "World" (positions 6-11)
     let extract_result = document_inspection_controller::extract_fragment(
@@ -222,7 +214,11 @@ fn test_insert_fragment_roundtrip() -> Result<()> {
     assert!(insert_result.blocks_added >= 1);
 
     let text = export_text(&db_context, &event_hub)?;
-    assert!(text.contains("World"), "Inserted text should contain 'World', got: {}", text);
+    assert!(
+        text.contains("World"),
+        "Inserted text should contain 'World', got: {}",
+        text
+    );
 
     Ok(())
 }
@@ -265,10 +261,14 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
 
     // Verify the fragment contains bold formatting
     let fragment: FragmentData = serde_json::from_str(&extract_result.fragment_data)?;
-    let has_bold = fragment.blocks.iter().any(|b| {
-        b.elements.iter().any(|e| e.fmt_font_bold == Some(true))
-    });
-    assert!(has_bold, "Extracted fragment should contain bold formatting");
+    let has_bold = fragment
+        .blocks
+        .iter()
+        .any(|b| b.elements.iter().any(|e| e.fmt_font_bold == Some(true)));
+    assert!(
+        has_bold,
+        "Extracted fragment should contain bold formatting"
+    );
 
     // Now insert this bold fragment at the end of the document
     let current_text = export_text(&db_context, &event_hub)?;
@@ -313,7 +313,11 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
         }
     }
     // Should have at least 2 bold elements (original + inserted copy)
-    assert!(bold_count >= 2, "Should have at least 2 bold elements (original + copy), got {}", bold_count);
+    assert!(
+        bold_count >= 2,
+        "Should have at least 2 bold elements (original + copy), got {}",
+        bold_count
+    );
 
     Ok(())
 }
@@ -347,13 +351,19 @@ fn test_insert_fragment_undo() -> Result<()> {
     )?;
 
     let after_insert = export_text(&db_context, &event_hub)?;
-    assert_ne!(after_insert, original_text, "Text should have changed after insert");
+    assert_ne!(
+        after_insert, original_text,
+        "Text should have changed after insert"
+    );
 
     // Undo
     undo_redo_manager.undo(None)?;
 
     let after_undo = export_text(&db_context, &event_hub)?;
-    assert_eq!(after_undo, original_text, "Text should be restored after undo");
+    assert_eq!(
+        after_undo, original_text,
+        "Text should be restored after undo"
+    );
 
     Ok(())
 }
@@ -386,7 +396,10 @@ fn test_extract_insert_with_list() -> Result<()> {
             }
         }
     }
-    assert!(list_block_positions.len() >= 2, "Should have at least 2 list blocks");
+    assert!(
+        list_block_positions.len() >= 2,
+        "Should have at least 2 list blocks"
+    );
 
     // Extract the range covering the list items
     let first_pos = list_block_positions[0].0;
@@ -409,8 +422,8 @@ fn test_extract_insert_with_list() -> Result<()> {
 
     // Insert the fragment at the very end
     let all_block_ids = get_block_ids(&db_context)?;
-    let last_block = block_controller::get(&db_context, all_block_ids.last().unwrap())?
-        .expect("last block");
+    let last_block =
+        block_controller::get(&db_context, all_block_ids.last().unwrap())?.expect("last block");
     let insert_pos = last_block.document_position + last_block.text_length;
 
     document_editing_controller::insert_fragment(
@@ -508,9 +521,9 @@ fn test_extract_insert_fragment_with_image() -> Result<()> {
     let fragment: common::parser_tools::fragment_schema::FragmentData =
         serde_json::from_str(&extract_result.fragment_data)?;
     let has_image = fragment.blocks.iter().any(|b| {
-        b.elements.iter().any(|e| {
-            matches!(e.content, common::entities::InlineContent::Image { .. })
-        })
+        b.elements
+            .iter()
+            .any(|e| matches!(e.content, common::entities::InlineContent::Image { .. }))
     });
     assert!(has_image, "Fragment should contain an image element");
 
@@ -538,7 +551,7 @@ fn test_extract_fragment_multiple_formats() -> Result<()> {
 
     // Apply bold to "Hel" and italic to "lo"
     use document_formatting::document_formatting_controller;
-    use document_formatting::{SetTextFormatDto, UnderlineStyle, CharVerticalAlignment};
+    use document_formatting::{CharVerticalAlignment, SetTextFormatDto, UnderlineStyle};
 
     document_formatting_controller::set_text_format(
         &db_context,
@@ -636,11 +649,8 @@ fn test_extract_fragment_multiple_formats() -> Result<()> {
     let mut found_bold = false;
     let mut found_italic = false;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db2,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
+        let elem_ids =
+            block_controller::get_relationship(&db2, block_id, &BlockRelationshipField::Elements)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db2, elem_id)?.unwrap();
             if elem.fmt_font_bold == Some(true) {
@@ -651,8 +661,14 @@ fn test_extract_fragment_multiple_formats() -> Result<()> {
             }
         }
     }
-    assert!(found_bold, "Target should have bold element after fragment insert");
-    assert!(found_italic, "Target should have italic element after fragment insert");
+    assert!(
+        found_bold,
+        "Target should have bold element after fragment insert"
+    );
+    assert!(
+        found_italic,
+        "Target should have italic element after fragment insert"
+    );
 
     Ok(())
 }

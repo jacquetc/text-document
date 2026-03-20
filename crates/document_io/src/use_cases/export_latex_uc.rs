@@ -3,7 +3,9 @@ use crate::ExportLatexDto;
 use crate::ExportLatexResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, ListStyle, Root};
+use common::entities::{
+    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
+};
 use common::types::EntityId;
 
 pub trait ExportLatexUnitOfWorkFactoryTrait: Send + Sync {
@@ -88,8 +90,11 @@ impl ExportLatexUseCase {
                     // Collect consecutive list items
                     let is_ordered = matches!(
                         list_entity.style,
-                        ListStyle::Decimal | ListStyle::LowerAlpha | ListStyle::UpperAlpha
-                        | ListStyle::LowerRoman | ListStyle::UpperRoman
+                        ListStyle::Decimal
+                            | ListStyle::LowerAlpha
+                            | ListStyle::UpperAlpha
+                            | ListStyle::LowerRoman
+                            | ListStyle::UpperRoman
                     );
                     let env = if is_ordered { "enumerate" } else { "itemize" };
                     let mut items = Vec::new();

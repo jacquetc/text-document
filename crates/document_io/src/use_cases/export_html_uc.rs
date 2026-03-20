@@ -2,7 +2,9 @@
 use crate::ExportHtmlDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, ListStyle, Root};
+use common::entities::{
+    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
+};
 use common::types::EntityId;
 
 pub trait ExportHtmlUnitOfWorkFactoryTrait: Send + Sync {
@@ -88,8 +90,11 @@ impl ExportHtmlUseCase {
                     // Start a list group
                     let is_ordered = matches!(
                         list_entity.style,
-                        ListStyle::Decimal | ListStyle::LowerAlpha | ListStyle::UpperAlpha
-                        | ListStyle::LowerRoman | ListStyle::UpperRoman
+                        ListStyle::Decimal
+                            | ListStyle::LowerAlpha
+                            | ListStyle::UpperAlpha
+                            | ListStyle::LowerRoman
+                            | ListStyle::UpperRoman
                     );
                     let list_tag = if is_ordered { "ol" } else { "ul" };
                     let mut list_items = Vec::new();
@@ -161,8 +166,18 @@ impl ExportHtmlUseCase {
         for elem in &elements {
             let text = match &elem.content {
                 InlineContent::Text(t) => escape_html(t),
-                InlineContent::Image { name, width, height, .. } => {
-                    format!("<img src=\"{}\" width=\"{}\" height=\"{}\" />", escape_html(name), width, height)
+                InlineContent::Image {
+                    name,
+                    width,
+                    height,
+                    ..
+                } => {
+                    format!(
+                        "<img src=\"{}\" width=\"{}\" height=\"{}\" />",
+                        escape_html(name),
+                        width,
+                        height
+                    )
                 }
                 InlineContent::Empty => String::new(),
             };

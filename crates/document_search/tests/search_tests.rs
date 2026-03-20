@@ -4,13 +4,13 @@ use common::event::EventHub;
 use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
+use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::document::document_controller;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 use document_search::document_search_controller;
 use document_search::{FindAllDto, FindTextDto};
@@ -21,11 +21,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -135,8 +131,7 @@ fn test_find_text_case_insensitive() -> Result<()> {
 
 #[test]
 fn test_find_text_backward() -> Result<()> {
-    let (db_context, event_hub, _undo_redo_manager) =
-        setup_with_text("abc abc abc")?;
+    let (db_context, event_hub, _undo_redo_manager) = setup_with_text("abc abc abc")?;
 
     // Search backward from position 10, should find the second "abc" at position 4
     let result = document_search_controller::find_text(
@@ -204,8 +199,7 @@ fn test_find_all_no_matches() -> Result<()> {
 
 #[test]
 fn test_find_all_across_blocks() -> Result<()> {
-    let (db_context, event_hub, _undo_redo_manager) =
-        setup_with_text("hello there\nhello again")?;
+    let (db_context, event_hub, _undo_redo_manager) = setup_with_text("hello there\nhello again")?;
 
     let result = document_search_controller::find_all(
         &db_context,
@@ -293,7 +287,7 @@ fn test_find_text_unicode() -> Result<()> {
 
     assert!(result.found);
     assert_eq!(result.position, 5); // "café " is 5 chars, so "résumé" starts at char 5
-    assert_eq!(result.length, 6);   // "résumé" is 6 chars
+    assert_eq!(result.length, 6); // "résumé" is 6 chars
 
     Ok(())
 }

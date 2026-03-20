@@ -4,13 +4,13 @@ use common::event::EventHub;
 use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
+use direct_access::block::block_controller;
+use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
+use direct_access::frame::frame_controller;
+use direct_access::inline_element::inline_element_controller;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::document::document_controller;
-use direct_access::block::block_controller;
-use direct_access::inline_element::inline_element_controller;
-use direct_access::frame::frame_controller;
 
 use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
@@ -18,8 +18,8 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::types::EntityId;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 use document_editing::document_editing_controller;
 use document_editing::*;
@@ -30,11 +30,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -66,11 +62,8 @@ fn export_text(db_context: &DbContext, event_hub: &Arc<EventHub>) -> Result<Stri
 /// Get the first block's element IDs via the entity tree traversal.
 fn get_first_block_element_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
     let root = root_controller::get(db_context, &1)?.expect("Root not found");
-    let doc_ids = root_controller::get_relationship(
-        db_context,
-        &root.id,
-        &RootRelationshipField::Document,
-    )?;
+    let doc_ids =
+        root_controller::get_relationship(db_context, &root.id, &RootRelationshipField::Document)?;
     let frame_ids = document_controller::get_relationship(
         db_context,
         &doc_ids[0],
@@ -92,11 +85,8 @@ fn get_first_block_element_ids(db_context: &DbContext) -> Result<Vec<EntityId>> 
 /// Get the first block DTO.
 fn get_first_block(db_context: &DbContext) -> Result<direct_access::block::dtos::BlockDto> {
     let root = root_controller::get(db_context, &1)?.expect("Root not found");
-    let doc_ids = root_controller::get_relationship(
-        db_context,
-        &root.id,
-        &RootRelationshipField::Document,
-    )?;
+    let doc_ids =
+        root_controller::get_relationship(db_context, &root.id, &RootRelationshipField::Document)?;
     let frame_ids = document_controller::get_relationship(
         db_context,
         &doc_ids[0],
@@ -144,8 +134,8 @@ fn test_insert_formatted_text() -> Result<()> {
     let elem_ids = get_first_block_element_ids(&db_context)?;
     let mut found_bold = false;
     for elem_id in &elem_ids {
-        let elem = inline_element_controller::get(&db_context, elem_id)?
-            .expect("Element not found");
+        let elem =
+            inline_element_controller::get(&db_context, elem_id)?.expect("Element not found");
         if elem.fmt_font_bold == Some(true) {
             found_bold = true;
             assert_eq!(elem.fmt_font_family, Some("Arial".to_string()));
@@ -308,7 +298,10 @@ fn test_create_list_undo() -> Result<()> {
     undo_redo_manager.undo(None)?;
 
     let block = get_first_block(&db_context)?;
-    assert!(block.list.is_none(), "Block should not have a list after undo");
+    assert!(
+        block.list.is_none(),
+        "Block should not have a list after undo"
+    );
 
     Ok(())
 }
@@ -362,11 +355,8 @@ fn test_insert_frame() -> Result<()> {
 
     // Verify the document now has 2 frames
     let root = root_controller::get(&db_context, &1)?.expect("Root not found");
-    let doc_ids = root_controller::get_relationship(
-        &db_context,
-        &root.id,
-        &RootRelationshipField::Document,
-    )?;
+    let doc_ids =
+        root_controller::get_relationship(&db_context, &root.id, &RootRelationshipField::Document)?;
     let frame_ids = document_controller::get_relationship(
         &db_context,
         &doc_ids[0],
@@ -385,8 +375,8 @@ fn test_insert_frame() -> Result<()> {
     );
 
     // Verify the parent frame's child_order contains the new frame (as negative ID)
-    let parent_frame = frame_controller::get(&db_context, &root_frame_id)?
-        .expect("Parent frame not found");
+    let parent_frame =
+        frame_controller::get(&db_context, &root_frame_id)?.expect("Parent frame not found");
     assert!(
         parent_frame.child_order.contains(&-(result.frame_id)),
         "Parent frame's child_order should contain -(new_frame_id)"
@@ -412,11 +402,8 @@ fn test_insert_frame_undo() -> Result<()> {
 
     // Verify 2 frames
     let root = root_controller::get(&db_context, &1)?.expect("Root not found");
-    let doc_ids = root_controller::get_relationship(
-        &db_context,
-        &root.id,
-        &RootRelationshipField::Document,
-    )?;
+    let doc_ids =
+        root_controller::get_relationship(&db_context, &root.id, &RootRelationshipField::Document)?;
     let frame_ids = document_controller::get_relationship(
         &db_context,
         &doc_ids[0],

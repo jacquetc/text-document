@@ -1,6 +1,5 @@
 use crate::InsertHtmlAtPositionDto;
 use crate::InsertHtmlAtPositionResultDto;
-use common::parser_tools::content_parser;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::direct_access::block::block_repository::BlockRelationshipField;
@@ -8,6 +7,7 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
+use common::parser_tools::content_parser;
 use common::snapshot::EntityTreeSnapshot;
 use common::types::EntityId;
 use common::undo_redo::UndoRedoCommand;
@@ -52,8 +52,7 @@ macro_rules! impl_content_insert {
             let root = uow
                 .get_root(&1)?
                 .ok_or_else(|| anyhow!("Root entity not found"))?;
-            let doc_ids =
-                uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+            let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
             let doc_id = *doc_ids
                 .first()
                 .ok_or_else(|| anyhow!("Root has no document"))?;
@@ -87,16 +86,12 @@ macro_rules! impl_content_insert {
             let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
             blocks.sort_by_key(|b| b.document_position);
 
-            let (current_block, block_idx, offset) =
-                find_block_at_position(&blocks, position)?;
+            let (current_block, block_idx, offset) = find_block_at_position(&blocks, position)?;
 
-            let element_ids = uow.get_block_relationship(
-                &current_block.id,
-                &BlockRelationshipField::Elements,
-            )?;
+            let element_ids =
+                uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
             let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> =
-                elements_opt.into_iter().filter_map(|e| e).collect();
+            let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
 
             let plain_chars: Vec<char> = current_block.plain_text.chars().collect();
             let split_pos = (offset as usize).min(plain_chars.len());
@@ -127,10 +122,8 @@ macro_rules! impl_content_insert {
                     match &elem.content {
                         InlineContent::Text(s) => {
                             let chars: Vec<char> = s.chars().collect();
-                            let before_text: String =
-                                chars[..local_split].iter().collect();
-                            let after_text: String =
-                                chars[local_split..].iter().collect();
+                            let before_text: String = chars[..local_split].iter().collect();
+                            let after_text: String = chars[local_split..].iter().collect();
 
                             let mut updated = elem.clone();
                             updated.content = InlineContent::Text(before_text);
@@ -201,11 +194,7 @@ macro_rules! impl_content_insert {
                 current_block.document_position + updated_current.text_length + 1;
 
             for parsed in parsed_blocks {
-                let block_plain: String = parsed
-                    .spans
-                    .iter()
-                    .map(|s| s.text.as_str())
-                    .collect();
+                let block_plain: String = parsed.spans.iter().map(|s| s.text.as_str()).collect();
                 let block_text_len = block_plain.chars().count() as i64;
 
                 // Create list entity before the block so the block can reference it
@@ -219,8 +208,7 @@ macro_rules! impl_content_insert {
                         prefix: String::new(),
                         suffix: String::new(),
                     };
-                    let created_list =
-                        uow.create_list(&list, doc_id, -1)?;
+                    let created_list = uow.create_list(&list, doc_id, -1)?;
                     Some(created_list.id)
                 } else {
                     None
@@ -248,8 +236,7 @@ macro_rules! impl_content_insert {
                 };
 
                 let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
-                let created_block =
-                    uow.create_block(&new_block, frame_id, insert_index)?;
+                let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
 
                 for span in &parsed.spans {
                     if span.text.is_empty() {
@@ -266,21 +253,9 @@ macro_rules! impl_content_insert {
                             None
                         },
                         fmt_font_bold: if span.bold { Some(true) } else { None },
-                        fmt_font_italic: if span.italic {
-                            Some(true)
-                        } else {
-                            None
-                        },
-                        fmt_font_underline: if span.underline {
-                            Some(true)
-                        } else {
-                            None
-                        },
-                        fmt_font_strikeout: if span.strikeout {
-                            Some(true)
-                        } else {
-                            None
-                        },
+                        fmt_font_italic: if span.italic { Some(true) } else { None },
+                        fmt_font_underline: if span.underline { Some(true) } else { None },
+                        fmt_font_strikeout: if span.strikeout { Some(true) } else { None },
                         fmt_anchor_href: span.link_href.clone(),
                         fmt_is_anchor: if span.link_href.is_some() {
                             Some(true)
@@ -292,9 +267,7 @@ macro_rules! impl_content_insert {
                     uow.create_inline_element(&elem, created_block.id, -1)?;
                 }
 
-                if parsed.spans.is_empty()
-                    || parsed.spans.iter().all(|s| s.text.is_empty())
-                {
+                if parsed.spans.is_empty() || parsed.spans.iter().all(|s| s.text.is_empty()) {
                     let elem = InlineElement {
                         id: 0,
                         created_at: now,
@@ -331,22 +304,16 @@ macro_rules! impl_content_insert {
                 fmt_tab_positions: current_block.fmt_tab_positions.clone(),
             };
 
-            let tail_insert_index =
-                (block_idx + 1 + new_block_ids.len()) as i32;
-            let created_tail =
-                uow.create_block(&tail_block, frame_id, tail_insert_index)?;
+            let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
+            let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
 
             for after_elem in &after_elements {
                 uow.create_inline_element(after_elem, created_tail.id, -1)?;
             }
 
             let mut updated_frame = frame.clone();
-            let child_order_insert_pos =
-                (block_idx + 1).min(updated_frame.child_order.len());
-            let mut new_child_ids: Vec<i64> = new_block_ids
-                .iter()
-                .map(|id| *id as i64)
-                .collect();
+            let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
+            let mut new_child_ids: Vec<i64> = new_block_ids.iter().map(|id| *id as i64).collect();
             new_child_ids.push(created_tail.id as i64);
 
             for (i, id) in new_child_ids.iter().enumerate() {
@@ -355,17 +322,13 @@ macro_rules! impl_content_insert {
                     .insert(child_order_insert_pos + i, *id);
             }
             updated_frame.updated_at = now;
-            updated_frame.blocks = uow.get_frame_relationship(
-                &frame_id,
-                &FrameRelationshipField::Blocks,
-            )?;
+            updated_frame.blocks =
+                uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
             uow.update_frame(&updated_frame)?;
 
             let blocks_added = parsed_blocks.len() as i64 + 1;
-            let original_next_pos =
-                current_block.document_position + current_block.text_length + 1;
-            let new_next_pos =
-                running_position + created_tail.text_length + 1;
+            let original_next_pos = current_block.document_position + current_block.text_length + 1;
+            let new_next_pos = running_position + created_tail.text_length + 1;
             let pos_shift = new_next_pos - original_next_pos;
 
             let mut blocks_to_update: Vec<Block> = Vec::new();

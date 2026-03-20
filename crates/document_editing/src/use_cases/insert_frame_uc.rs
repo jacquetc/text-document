@@ -50,8 +50,7 @@ fn find_frame_at_position(
             Some(f) => f,
             None => continue,
         };
-        let block_ids =
-            uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        let block_ids = uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
         if block_ids.is_empty() {
             continue;
         }
@@ -102,8 +101,7 @@ fn execute_insert_frame(
     let now = chrono::Utc::now();
 
     // Determine the parent frame from the position
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
     let (parent_frame_id, child_order_insert_idx) =
         match find_frame_at_position(uow, &frame_ids, dto.position)? {

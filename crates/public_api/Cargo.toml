@@ -17,10 +17,10 @@ publish = true
 [dependencies]
 log = "0.4"
 anyhow = { workspace = true }
+base64 = "0.22"
 
-# Backend crates
+# Backend (frontend re-exports all backend crates)
 frontend = { path = "../frontend" }
-common = { path = "../common" }
 
 [lints]
 workspace = true

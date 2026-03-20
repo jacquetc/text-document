@@ -50,13 +50,11 @@ fn build_full_text(uow: &dyn ReplaceTextUnitOfWorkTrait) -> Result<(String, Vec<
         .first()
         .ok_or_else(|| anyhow!("Root has no document"))?;
 
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
     let mut all_block_ids: Vec<EntityId> = Vec::new();
     for frame_id in &frame_ids {
-        let block_ids =
-            uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        let block_ids = uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
         all_block_ids.extend(block_ids);
     }
 
@@ -110,8 +108,7 @@ fn find_all_matches(
         } else {
             format!("(?i){}", query)
         };
-        let re = Regex::new(&pattern)
-            .map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
+        let re = Regex::new(&pattern).map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
 
         // Regex::find_iter returns byte-based Match objects.
         // We need to convert byte offsets to char offsets.
@@ -146,8 +143,14 @@ fn find_all_matches(
             (text_chars.clone(), query.chars().collect::<Vec<char>>())
         } else {
             (
-                text_chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect::<Vec<char>>(),
-                query.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect::<Vec<char>>(),
+                text_chars
+                    .iter()
+                    .map(|c| c.to_lowercase().next().unwrap_or(*c))
+                    .collect::<Vec<char>>(),
+                query
+                    .chars()
+                    .map(|c| c.to_lowercase().next().unwrap_or(c))
+                    .collect::<Vec<char>>(),
             )
         };
 
@@ -244,13 +247,20 @@ fn execute_replace(
     )?;
 
     if all_matches.is_empty() {
-        return Ok((ReplaceResultDto { replacements_count: 0 }, snapshot));
+        return Ok((
+            ReplaceResultDto {
+                replacements_count: 0,
+            },
+            snapshot,
+        ));
     }
 
     // Filter to only matches within a single block (skip cross-block matches)
     let mut valid_matches: Vec<(usize, usize, usize, usize)> = Vec::new(); // (match_pos, match_len, block_idx, block_offset)
     for &(match_pos, match_len) in &all_matches {
-        if let Some((block_idx, block_offset)) = match_in_single_block(&blocks, match_pos, match_len) {
+        if let Some((block_idx, block_offset)) =
+            match_in_single_block(&blocks, match_pos, match_len)
+        {
             valid_matches.push((match_pos, match_len, block_idx, block_offset));
         }
     }
@@ -261,7 +271,12 @@ fn execute_replace(
     }
 
     if valid_matches.is_empty() {
-        return Ok((ReplaceResultDto { replacements_count: 0 }, snapshot));
+        return Ok((
+            ReplaceResultDto {
+                replacements_count: 0,
+            },
+            snapshot,
+        ));
     }
 
     let replacement = &dto.replacement;
@@ -386,11 +401,9 @@ fn execute_replace(
 
     // Re-read all blocks to get current state
     let mut all_block_ids: Vec<EntityId> = Vec::new();
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     for frame_id in &frame_ids {
-        let block_ids =
-            uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        let block_ids = uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
         all_block_ids.extend(block_ids);
     }
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
@@ -401,7 +414,8 @@ fn execute_replace(
     // based on matches that occurred in earlier blocks.
     // valid_matches is sorted by match_pos (ascending from find_all_matches).
     // Group matches by block_idx and compute delta per block.
-    let mut delta_by_block: std::collections::HashMap<usize, i64> = std::collections::HashMap::new();
+    let mut delta_by_block: std::collections::HashMap<usize, i64> =
+        std::collections::HashMap::new();
     for &(_match_pos, match_len, block_idx, _block_offset) in &valid_matches {
         let delta = replacement_char_len - match_len as i64;
         *delta_by_block.entry(block_idx).or_insert(0) += delta;
@@ -460,12 +474,7 @@ fn execute_replace(
     document.updated_at = chrono::Utc::now();
     uow.update_document(&document)?;
 
-    Ok((
-        ReplaceResultDto {
-            replacements_count,
-        },
-        snapshot,
-    ))
+    Ok((ReplaceResultDto { replacements_count }, snapshot))
 }
 
 pub struct ReplaceTextUseCase {

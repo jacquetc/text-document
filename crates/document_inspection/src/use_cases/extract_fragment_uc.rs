@@ -7,7 +7,9 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, InlineContent, InlineElement, List, Root};
-use common::parser_tools::fragment_schema::{FragmentBlock, FragmentData, FragmentElement, FragmentList};
+use common::parser_tools::fragment_schema::{
+    FragmentBlock, FragmentData, FragmentElement, FragmentList,
+};
 use common::types::EntityId;
 
 pub trait ExtractFragmentUnitOfWorkFactoryTrait: Send + Sync {
@@ -54,8 +56,7 @@ impl ExtractFragmentUseCase {
         let root = uow
             .get_root(&1)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
-        let doc_ids =
-            uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+        let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
         let doc_id = *doc_ids
             .first()
             .ok_or_else(|| anyhow!("Root has no document"))?;
@@ -66,8 +67,7 @@ impl ExtractFragmentUseCase {
             .first()
             .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-        let block_ids =
-            uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+        let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
         let blocks_opt = uow.get_block_multi(&block_ids)?;
         let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
         blocks.sort_by_key(|b| b.document_position);
@@ -97,13 +97,10 @@ impl ExtractFragmentUseCase {
             };
 
             // Get elements
-            let element_ids = uow.get_block_relationship(
-                &block.id,
-                &BlockRelationshipField::Elements,
-            )?;
+            let element_ids =
+                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
             let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> =
-                elements_opt.into_iter().filter_map(|e| e).collect();
+            let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
 
             // Get list if any
             let list = if let Some(list_id) = block.list {
@@ -121,17 +118,61 @@ impl ExtractFragmentUseCase {
             let fragment_block = FragmentBlock {
                 plain_text: extracted_text.clone(),
                 elements: extracted_elements,
-                heading_level: if is_full_block { block.fmt_heading_level } else { None },
-                list: if is_full_block { list.as_ref().map(FragmentList::from_entity) } else { None },
-                alignment: if is_full_block { block.fmt_alignment.clone() } else { None },
-                indent: if is_full_block { block.fmt_indent } else { None },
-                text_indent: if is_full_block { block.fmt_text_indent } else { None },
-                marker: if is_full_block { block.fmt_marker.clone() } else { None },
-                top_margin: if is_full_block { block.fmt_top_margin } else { None },
-                bottom_margin: if is_full_block { block.fmt_bottom_margin } else { None },
-                left_margin: if is_full_block { block.fmt_left_margin } else { None },
-                right_margin: if is_full_block { block.fmt_right_margin } else { None },
-                tab_positions: if is_full_block { block.fmt_tab_positions.clone() } else { vec![] },
+                heading_level: if is_full_block {
+                    block.fmt_heading_level
+                } else {
+                    None
+                },
+                list: if is_full_block {
+                    list.as_ref().map(FragmentList::from_entity)
+                } else {
+                    None
+                },
+                alignment: if is_full_block {
+                    block.fmt_alignment.clone()
+                } else {
+                    None
+                },
+                indent: if is_full_block {
+                    block.fmt_indent
+                } else {
+                    None
+                },
+                text_indent: if is_full_block {
+                    block.fmt_text_indent
+                } else {
+                    None
+                },
+                marker: if is_full_block {
+                    block.fmt_marker.clone()
+                } else {
+                    None
+                },
+                top_margin: if is_full_block {
+                    block.fmt_top_margin
+                } else {
+                    None
+                },
+                bottom_margin: if is_full_block {
+                    block.fmt_bottom_margin
+                } else {
+                    None
+                },
+                left_margin: if is_full_block {
+                    block.fmt_left_margin
+                } else {
+                    None
+                },
+                right_margin: if is_full_block {
+                    block.fmt_right_margin
+                } else {
+                    None
+                },
+                tab_positions: if is_full_block {
+                    block.fmt_tab_positions.clone()
+                } else {
+                    vec![]
+                },
             };
 
             plain_texts.push(extracted_text);

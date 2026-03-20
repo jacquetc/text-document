@@ -117,8 +117,7 @@ fn execute_delete(
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
     // Get frames
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
@@ -128,8 +127,7 @@ fn execute_delete(
         .ok_or_else(|| anyhow!("Frame not found"))?;
 
     // Get block IDs from frame
-    let block_ids =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
@@ -137,8 +135,7 @@ fn execute_delete(
     blocks.sort_by_key(|b| b.document_position);
 
     // Find start and end blocks
-    let (start_block, start_block_idx, start_offset) =
-        find_block_at_position(&blocks, start)?;
+    let (start_block, start_block_idx, start_offset) = find_block_at_position(&blocks, start)?;
     let (end_block, end_block_idx, end_offset) = find_block_at_position(&blocks, end)?;
 
     let delete_len = end - start;
@@ -155,10 +152,7 @@ fn execute_delete(
         let plain_chars: Vec<char> = start_block.plain_text.chars().collect();
         let so = start_offset as usize;
         let eo = end_offset as usize;
-        let deleted_text: String = plain_chars
-            [so..eo.min(plain_chars.len())]
-            .iter()
-            .collect();
+        let deleted_text: String = plain_chars[so..eo.min(plain_chars.len())].iter().collect();
 
         // Now update inline elements by removing text in range
         let mut running_offset: i64 = 0;
@@ -201,8 +195,7 @@ fn execute_delete(
 
         // Update block
         let mut updated_block = start_block.clone();
-        let (new_plain, _) =
-            remove_char_range(&updated_block.plain_text, start_offset, end_offset);
+        let (new_plain, _) = remove_char_range(&updated_block.plain_text, start_offset, end_offset);
         updated_block.plain_text = new_plain;
         updated_block.text_length -= delete_len;
         updated_block.updated_at = chrono::Utc::now();
@@ -380,8 +373,7 @@ fn execute_delete(
         uow.update_block(&updated_start)?;
 
         // Remove intermediate and end blocks
-        let blocks_to_remove: Vec<EntityId> = blocks
-            [(start_block_idx + 1)..=end_block_idx]
+        let blocks_to_remove: Vec<EntityId> = blocks[(start_block_idx + 1)..=end_block_idx]
             .iter()
             .map(|b| b.id)
             .collect();
@@ -393,9 +385,9 @@ fn execute_delete(
 
         // Update frame's child_order
         let mut updated_frame = frame.clone();
-        updated_frame.child_order.retain(|id| {
-            !blocks_to_remove.contains(&(*id as EntityId))
-        });
+        updated_frame
+            .child_order
+            .retain(|id| !blocks_to_remove.contains(&(*id as EntityId)));
         updated_frame.updated_at = chrono::Utc::now();
         uow.update_frame(&updated_frame)?;
 

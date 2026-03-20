@@ -26,9 +26,8 @@ pub struct ParsedBlock {
 pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
     use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
-    let options = Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TABLES
-        | Options::ENABLE_TASKLISTS;
+    let options =
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(markdown, options);
 
     let mut blocks: Vec<ParsedBlock> = Vec::new();
@@ -474,13 +473,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         walk_node(child, &new_state, blocks, current_list_style);
                     } else {
                         // Inline element: recurse
-                        collect_inline_spans(
-                            child,
-                            &new_state,
-                            spans,
-                            current_list_style,
-                            blocks,
-                        );
+                        collect_inline_spans(child, &new_state, spans, current_list_style, blocks);
                     }
                 }
                 _ => {}
@@ -519,7 +512,11 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].spans.len() >= 2);
         // "Hello " is plain, "world" is bold
-        let plain_span = blocks[0].spans.iter().find(|s| s.text.contains("Hello")).unwrap();
+        let plain_span = blocks[0]
+            .spans
+            .iter()
+            .find(|s| s.text.contains("Hello"))
+            .unwrap();
         assert!(!plain_span.bold);
         let bold_span = blocks[0].spans.iter().find(|s| s.text == "world").unwrap();
         assert!(bold_span.bold);

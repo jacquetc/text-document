@@ -33,13 +33,11 @@ fn build_full_text(uow: &dyn FindTextUnitOfWorkTrait) -> Result<String> {
         .first()
         .ok_or_else(|| anyhow!("Root has no document"))?;
 
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
     let mut all_block_ids: Vec<EntityId> = Vec::new();
     for frame_id in &frame_ids {
-        let block_ids =
-            uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        let block_ids = uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
         all_block_ids.extend(block_ids);
     }
 
@@ -90,8 +88,7 @@ fn find_all_matches(
         } else {
             format!("(?i){}", query)
         };
-        let re = Regex::new(&pattern)
-            .map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
+        let re = Regex::new(&pattern).map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
 
         // Regex::find_iter returns byte-based Match objects.
         // We need to convert byte offsets to char offsets.
@@ -103,8 +100,7 @@ fn find_all_matches(
             let char_len = char_end - char_start;
 
             if whole_word {
-                if is_word_boundary(full_text, char_start)
-                    && is_word_boundary(full_text, char_end)
+                if is_word_boundary(full_text, char_start) && is_word_boundary(full_text, char_end)
                 {
                     results.push((char_start, char_len));
                 }
@@ -119,8 +115,14 @@ fn find_all_matches(
             (text_chars.clone(), query.chars().collect::<Vec<char>>())
         } else {
             (
-                text_chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect::<Vec<char>>(),
-                query.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect::<Vec<char>>(),
+                text_chars
+                    .iter()
+                    .map(|c| c.to_lowercase().next().unwrap_or(*c))
+                    .collect::<Vec<char>>(),
+                query
+                    .chars()
+                    .map(|c| c.to_lowercase().next().unwrap_or(c))
+                    .collect::<Vec<char>>(),
             )
         };
 

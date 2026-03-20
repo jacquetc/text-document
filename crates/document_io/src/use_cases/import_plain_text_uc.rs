@@ -2,7 +2,7 @@
 use crate::ImportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, InlineContent, Root};
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
 use common::types::EntityId;
 
 pub trait ImportPlainTextUnitOfWorkFactoryTrait: Send + Sync {

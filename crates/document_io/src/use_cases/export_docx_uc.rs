@@ -3,7 +3,7 @@ use crate::ExportDocxDto;
 use crate::ExportDocxResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, Root};
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
 use common::long_operation::LongOperation;
 use common::types::EntityId;
 use std::sync::Arc;

@@ -653,12 +653,16 @@ features:
               type: integer
             - name: font_family
               type: string
+              optional: true
             - name: font_bold
               type: boolean
+              optional: true
             - name: font_italic
               type: boolean
+              optional: true
             - name: font_underline
               type: boolean
+              optional: true
 
       - name: set_block_format
         undoable: true

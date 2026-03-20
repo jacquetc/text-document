@@ -4,16 +4,16 @@ use common::event::EventHub;
 use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
-use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
-use document_search::document_search_controller;
 use document_search::ReplaceTextDto;
+use document_search::document_search_controller;
 
 /// Set up an in-memory database with Root, Document, and imported text content.
 fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
@@ -21,11 +21,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -55,8 +51,7 @@ fn export_text(db_context: &DbContext, event_hub: &Arc<EventHub>) -> Result<Stri
 
 #[test]
 fn test_replace_single() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("hello world hello")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("hello world hello")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -82,8 +77,7 @@ fn test_replace_single() -> Result<()> {
 
 #[test]
 fn test_replace_all() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("hello world hello")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("hello world hello")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -109,8 +103,7 @@ fn test_replace_all() -> Result<()> {
 
 #[test]
 fn test_replace_case_insensitive() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("Hello HELLO hello")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello HELLO hello")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -136,8 +129,7 @@ fn test_replace_case_insensitive() -> Result<()> {
 
 #[test]
 fn test_replace_regex() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("abc 123 def 456")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("abc 123 def 456")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -163,8 +155,7 @@ fn test_replace_regex() -> Result<()> {
 
 #[test]
 fn test_replace_not_found() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("hello world")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("hello world")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -190,8 +181,7 @@ fn test_replace_not_found() -> Result<()> {
 
 #[test]
 fn test_replace_empty_query() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("hello world")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("hello world")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -217,8 +207,7 @@ fn test_replace_empty_query() -> Result<()> {
 
 #[test]
 fn test_replace_undo() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("hello world hello")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("hello world hello")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -276,8 +265,7 @@ fn test_replace_all_across_blocks() -> Result<()> {
 
 #[test]
 fn test_replace_redo() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("hello world")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("hello world")?;
 
     document_search_controller::replace_text(
         &db_context,
@@ -307,8 +295,7 @@ fn test_replace_redo() -> Result<()> {
 
 #[test]
 fn test_replace_with_empty_deletes() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("hello beautiful world")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("hello beautiful world")?;
 
     let result = document_search_controller::replace_text(
         &db_context,
@@ -333,8 +320,7 @@ fn test_replace_with_empty_deletes() -> Result<()> {
 
 #[test]
 fn test_replace_with_longer_text() -> Result<()> {
-    let (db_context, event_hub, mut undo_redo_manager) =
-        setup_with_text("a b a")?;
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("a b a")?;
 
     let result = document_search_controller::replace_text(
         &db_context,

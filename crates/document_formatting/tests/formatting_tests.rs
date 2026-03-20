@@ -17,8 +17,8 @@ use direct_access::block::block_controller;
 use direct_access::frame::frame_controller;
 use direct_access::inline_element::inline_element_controller;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 use document_formatting::document_formatting_controller;
 use document_formatting::{
@@ -32,11 +32,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -71,18 +67,13 @@ fn get_first_block_id(db_context: &DbContext) -> Result<common::types::EntityId>
         &DocumentRelationshipField::Frames,
     )?;
     let frame_id = frame_ids[0];
-    let block_ids = frame_controller::get_relationship(
-        db_context,
-        &frame_id,
-        &FrameRelationshipField::Blocks,
-    )?;
+    let block_ids =
+        frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)?;
     Ok(block_ids[0])
 }
 
 /// Get all block IDs from the document.
-fn get_all_block_ids(
-    db_context: &DbContext,
-) -> Result<Vec<common::types::EntityId>> {
+fn get_all_block_ids(db_context: &DbContext) -> Result<Vec<common::types::EntityId>> {
     let root = root_controller::get(db_context, &1)?.unwrap();
     let doc_ids =
         root_controller::get_relationship(db_context, &root.id, &RootRelationshipField::Document)?;
@@ -93,11 +84,8 @@ fn get_all_block_ids(
         &DocumentRelationshipField::Frames,
     )?;
     let frame_id = frame_ids[0];
-    let block_ids = frame_controller::get_relationship(
-        db_context,
-        &frame_id,
-        &FrameRelationshipField::Blocks,
-    )?;
+    let block_ids =
+        frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)?;
     Ok(block_ids)
 }
 
@@ -433,7 +421,10 @@ fn test_set_text_format_partial() -> Result<()> {
             found_formatted = true;
         }
     }
-    assert!(found_formatted, "Should find at least one formatted element");
+    assert!(
+        found_formatted,
+        "Should find at least one formatted element"
+    );
 
     Ok(())
 }
@@ -477,10 +468,10 @@ fn test_merge_text_format_preserves_other_fields() -> Result<()> {
         &MergeTextFormatDto {
             position: 0,
             anchor: 5,
-            font_family: "".to_string(), // empty = don't change
-            font_bold: false,
-            font_italic: true,
-            font_underline: true,
+            font_family: None, // None = don't change
+            font_bold: Some(false),
+            font_italic: Some(true),
+            font_underline: Some(true),
         },
     )?;
 
@@ -558,10 +549,10 @@ fn test_merge_text_format_undo() -> Result<()> {
         &MergeTextFormatDto {
             position: 0,
             anchor: 5,
-            font_family: "".to_string(),
-            font_bold: true,
-            font_italic: true,
-            font_underline: false,
+            font_family: None,
+            font_bold: Some(true),
+            font_italic: Some(true),
+            font_underline: Some(false),
         },
     )?;
 
@@ -585,8 +576,7 @@ fn test_merge_text_format_undo() -> Result<()> {
         &block_id,
         &BlockRelationshipField::Elements,
     )?;
-    let elem_after =
-        inline_element_controller::get(&db_context, &element_ids_after[0])?.unwrap();
+    let elem_after = inline_element_controller::get(&db_context, &element_ids_after[0])?.unwrap();
     assert_eq!(elem_after.fmt_font_bold, Some(false));
     assert_eq!(elem_after.fmt_font_italic, Some(false));
     // Font family should still be from the set_text_format call
@@ -600,8 +590,11 @@ fn test_set_text_format_undo() -> Result<()> {
     let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
 
     let block_id = get_first_block_id(&db_context)?;
-    let elem_ids_before =
-        block_controller::get_relationship(&db_context, &block_id, &BlockRelationshipField::Elements)?;
+    let elem_ids_before = block_controller::get_relationship(
+        &db_context,
+        &block_id,
+        &BlockRelationshipField::Elements,
+    )?;
     let elem_before = inline_element_controller::get(&db_context, &elem_ids_before[0])?.unwrap();
     assert_eq!(elem_before.fmt_font_bold, None);
 
@@ -628,15 +621,21 @@ fn test_set_text_format_undo() -> Result<()> {
         },
     )?;
 
-    let elem_ids =
-        block_controller::get_relationship(&db_context, &block_id, &BlockRelationshipField::Elements)?;
+    let elem_ids = block_controller::get_relationship(
+        &db_context,
+        &block_id,
+        &BlockRelationshipField::Elements,
+    )?;
     let elem = inline_element_controller::get(&db_context, &elem_ids[0])?.unwrap();
     assert_eq!(elem.fmt_font_bold, Some(true));
 
     undo_redo_manager.undo(None)?;
 
-    let elem_ids_after =
-        block_controller::get_relationship(&db_context, &block_id, &BlockRelationshipField::Elements)?;
+    let elem_ids_after = block_controller::get_relationship(
+        &db_context,
+        &block_id,
+        &BlockRelationshipField::Elements,
+    )?;
     let elem_after = inline_element_controller::get(&db_context, &elem_ids_after[0])?.unwrap();
     assert_eq!(elem_after.fmt_font_bold, None);
 
@@ -673,13 +672,21 @@ fn test_set_text_format_cross_block() -> Result<()> {
 
     let block_ids = get_all_block_ids(&db_context)?;
     for block_id in &block_ids {
-        let elem_ids =
-            block_controller::get_relationship(&db_context, block_id, &BlockRelationshipField::Elements)?;
+        let elem_ids = block_controller::get_relationship(
+            &db_context,
+            block_id,
+            &BlockRelationshipField::Elements,
+        )?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
             if let common::entities::InlineContent::Text(ref t) = elem.content {
                 if !t.is_empty() {
-                    assert_eq!(elem.fmt_font_bold, Some(true), "Element in block {:?} should be bold", block_id);
+                    assert_eq!(
+                        elem.fmt_font_bold,
+                        Some(true),
+                        "Element in block {:?} should be bold",
+                        block_id
+                    );
                     assert_eq!(elem.fmt_font_italic, Some(true));
                 }
             }
@@ -711,7 +718,10 @@ fn test_set_block_format_empty_range() -> Result<()> {
 
     let block_id = get_first_block_id(&db_context)?;
     let block = block_controller::get(&db_context, &block_id)?.unwrap();
-    assert_eq!(block.fmt_alignment, Some(common::entities::Alignment::Center));
+    assert_eq!(
+        block.fmt_alignment,
+        Some(common::entities::Alignment::Center)
+    );
     assert_eq!(block.fmt_heading_level, Some(1));
 
     Ok(())

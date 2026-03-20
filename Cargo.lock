@@ -393,6 +393,7 @@ dependencies = [
  "document_io",
  "docx-rs",
  "macros",
+ "regex",
  "serde",
  "serde_json",
  "uuid",
@@ -1296,7 +1297,7 @@ name = "text-document"
 version = "0.0.5"
 dependencies = [
  "anyhow",
- "common",
+ "base64",
  "frontend",
  "log",
 ]
@@ -1307,7 +1308,7 @@ version = "0.0.5"
 dependencies = [
  "anyhow",
  "clap",
- "frontend",
+ "text-document",
 ]
 
 [[package]]

@@ -32,13 +32,9 @@ pub trait SetTextFormatUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
 pub trait SetTextFormatUnitOfWorkTrait: CommandUnitOfWork {}
 
-fn underline_style_to_entity(
-    s: &crate::dtos::UnderlineStyle,
-) -> common::entities::UnderlineStyle {
+fn underline_style_to_entity(s: &crate::dtos::UnderlineStyle) -> common::entities::UnderlineStyle {
     match s {
-        crate::dtos::UnderlineStyle::NoUnderline => {
-            common::entities::UnderlineStyle::NoUnderline
-        }
+        crate::dtos::UnderlineStyle::NoUnderline => common::entities::UnderlineStyle::NoUnderline,
         crate::dtos::UnderlineStyle::SingleUnderline => {
             common::entities::UnderlineStyle::SingleUnderline
         }
@@ -46,9 +42,7 @@ fn underline_style_to_entity(
             common::entities::UnderlineStyle::DashUnderline
         }
         crate::dtos::UnderlineStyle::DotLine => common::entities::UnderlineStyle::DotLine,
-        crate::dtos::UnderlineStyle::DashDotLine => {
-            common::entities::UnderlineStyle::DashDotLine
-        }
+        crate::dtos::UnderlineStyle::DashDotLine => common::entities::UnderlineStyle::DashDotLine,
         crate::dtos::UnderlineStyle::DashDotDotLine => {
             common::entities::UnderlineStyle::DashDotDotLine
         }
@@ -80,9 +74,7 @@ fn vertical_alignment_to_entity(
         crate::dtos::CharVerticalAlignment::Bottom => {
             common::entities::CharVerticalAlignment::Bottom
         }
-        crate::dtos::CharVerticalAlignment::Top => {
-            common::entities::CharVerticalAlignment::Top
-        }
+        crate::dtos::CharVerticalAlignment::Top => common::entities::CharVerticalAlignment::Top,
         crate::dtos::CharVerticalAlignment::Baseline => {
             common::entities::CharVerticalAlignment::Baseline
         }
@@ -136,15 +128,13 @@ fn execute_set_text_format(
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
     // Get frames
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
     // Get block IDs from frame
-    let block_ids =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
@@ -173,8 +163,7 @@ fn execute_set_text_format(
         let element_ids =
             uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> =
-            elements_opt.into_iter().filter_map(|e| e).collect();
+        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
 
         let mut elem_doc_pos = block_start;
 
@@ -197,17 +186,14 @@ fn execute_set_text_format(
             }
             // Element needs splitting
             else if let InlineContent::Text(ref text) = elem.content {
-                let local_start =
-                    std::cmp::max(0, range_start - elem_start) as usize;
-                let local_end =
-                    std::cmp::min(elem_len, range_end - elem_start) as usize;
+                let local_start = std::cmp::max(0, range_start - elem_start) as usize;
+                let local_end = std::cmp::min(elem_len, range_end - elem_start) as usize;
                 let chars: Vec<char> = text.chars().collect();
 
                 if local_start > 0 && local_end < chars.len() {
                     // Split into three parts: before, middle (formatted), after
                     let before_text: String = chars[..local_start].iter().collect();
-                    let middle_text: String =
-                        chars[local_start..local_end].iter().collect();
+                    let middle_text: String = chars[local_start..local_end].iter().collect();
                     let after_text: String = chars[local_end..].iter().collect();
 
                     // Update the original element to keep only the "before" text
@@ -246,8 +232,7 @@ fn execute_set_text_format(
                     uow.create_inline_element(&new_elem, block.id, -1)?;
                 } else {
                     // local_start == 0, split into: formatted part, rest
-                    let formatted_text: String =
-                        chars[..local_end].iter().collect();
+                    let formatted_text: String = chars[..local_end].iter().collect();
                     let rest_text: String = chars[local_end..].iter().collect();
 
                     let mut updated_orig = elem.clone();

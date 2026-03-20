@@ -70,8 +70,7 @@ fn execute_insert_fragment(
     let root = uow
         .get_root(&1)?
         .ok_or_else(|| anyhow!("Root entity not found"))?;
-    let doc_ids =
-        uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+    let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
     let doc_id = *doc_ids
         .first()
         .ok_or_else(|| anyhow!("Root has no document"))?;
@@ -88,8 +87,7 @@ fn execute_insert_fragment(
         ));
     }
 
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
@@ -98,23 +96,18 @@ fn execute_insert_fragment(
         .get_frame(&frame_id)?
         .ok_or_else(|| anyhow!("Frame not found"))?;
 
-    let block_ids =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
     let blocks_opt = uow.get_block_multi(&block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    let (current_block, block_idx, offset) =
-        find_block_at_position(&blocks, dto.position)?;
+    let (current_block, block_idx, offset) = find_block_at_position(&blocks, dto.position)?;
 
     // Get current block's elements for splitting
-    let element_ids = uow.get_block_relationship(
-        &current_block.id,
-        &BlockRelationshipField::Elements,
-    )?;
+    let element_ids =
+        uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-    let elements: Vec<InlineElement> =
-        elements_opt.into_iter().filter_map(|e| e).collect();
+    let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
 
     let plain_chars: Vec<char> = current_block.plain_text.chars().collect();
     let split_pos = (offset as usize).min(plain_chars.len());
@@ -146,10 +139,8 @@ fn execute_insert_fragment(
             match &elem.content {
                 InlineContent::Text(s) => {
                     let chars: Vec<char> = s.chars().collect();
-                    let before_text: String =
-                        chars[..local_split].iter().collect();
-                    let after_text: String =
-                        chars[local_split..].iter().collect();
+                    let before_text: String = chars[..local_split].iter().collect();
+                    let after_text: String = chars[local_split..].iter().collect();
 
                     let mut updated = elem.clone();
                     updated.content = InlineContent::Text(before_text);
@@ -218,8 +209,7 @@ fn execute_insert_fragment(
     // Create new blocks from fragment data
     let mut new_block_ids: Vec<EntityId> = Vec::new();
     let mut total_new_chars: i64 = 0;
-    let mut running_position =
-        current_block.document_position + updated_current.text_length + 1;
+    let mut running_position = current_block.document_position + updated_current.text_length + 1;
 
     for frag_block in &fragment_data.blocks {
         let block_text_len = frag_block.plain_text.chars().count() as i64;
@@ -255,8 +245,7 @@ fn execute_insert_fragment(
         };
 
         let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
-        let created_block =
-            uow.create_block(&new_block, frame_id, insert_index)?;
+        let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
 
         // Create inline elements from fragment
         for frag_elem in &frag_block.elements {
@@ -303,10 +292,8 @@ fn execute_insert_fragment(
         fmt_tab_positions: current_block.fmt_tab_positions.clone(),
     };
 
-    let tail_insert_index =
-        (block_idx + 1 + new_block_ids.len()) as i32;
-    let created_tail =
-        uow.create_block(&tail_block, frame_id, tail_insert_index)?;
+    let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
+    let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
 
     for after_elem in &after_elements {
         uow.create_inline_element(after_elem, created_tail.id, -1)?;
@@ -314,12 +301,8 @@ fn execute_insert_fragment(
 
     // Update frame child_order
     let mut updated_frame = frame.clone();
-    let child_order_insert_pos =
-        (block_idx + 1).min(updated_frame.child_order.len());
-    let mut new_child_ids: Vec<i64> = new_block_ids
-        .iter()
-        .map(|id| *id as i64)
-        .collect();
+    let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
+    let mut new_child_ids: Vec<i64> = new_block_ids.iter().map(|id| *id as i64).collect();
     new_child_ids.push(created_tail.id as i64);
 
     for (i, id) in new_child_ids.iter().enumerate() {
@@ -328,18 +311,14 @@ fn execute_insert_fragment(
             .insert(child_order_insert_pos + i, *id);
     }
     updated_frame.updated_at = now;
-    updated_frame.blocks = uow.get_frame_relationship(
-        &frame_id,
-        &FrameRelationshipField::Blocks,
-    )?;
+    updated_frame.blocks =
+        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
     uow.update_frame(&updated_frame)?;
 
     // Update subsequent block positions
     let blocks_added = fragment_data.blocks.len() as i64 + 1;
-    let original_next_pos =
-        current_block.document_position + current_block.text_length + 1;
-    let new_next_pos =
-        running_position + created_tail.text_length + 1;
+    let original_next_pos = current_block.document_position + current_block.text_length + 1;
+    let new_next_pos = running_position + created_tail.text_length + 1;
     let pos_shift = new_next_pos - original_next_pos;
 
     let mut blocks_to_update: Vec<Block> = Vec::new();

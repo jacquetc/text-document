@@ -100,8 +100,7 @@ fn delete_range_in_block(
     start_offset: i64,
     end_offset: i64,
 ) -> Result<i64> {
-    let element_ids =
-        uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+    let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
     let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
 
@@ -177,15 +176,13 @@ fn execute_insert(
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
     // Get frames
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
     // Get block IDs from frame
-    let block_ids =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
@@ -201,8 +198,7 @@ fn execute_insert(
 
         let (sel_block, sel_block_idx, sel_start_offset) =
             find_block_at_position(&blocks, sel_start)?;
-        let (_, sel_end_block_idx, sel_end_offset) =
-            find_block_at_position(&blocks, sel_end)?;
+        let (_, sel_end_block_idx, sel_end_offset) = find_block_at_position(&blocks, sel_end)?;
 
         if sel_block_idx != sel_end_block_idx {
             return Err(anyhow!(
@@ -247,8 +243,7 @@ fn execute_insert(
     let (block, block_idx, offset) = find_block_at_position(&blocks, position)?;
 
     // Get elements for this block
-    let element_ids =
-        uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+    let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
     let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
 

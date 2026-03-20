@@ -2,7 +2,9 @@
 use crate::ExportMarkdownDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, ListStyle, Root};
+use common::entities::{
+    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
+};
 use common::types::EntityId;
 
 pub trait ExportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
@@ -138,8 +140,11 @@ impl ExportMarkdownUseCase {
                     format!("{} {}", prefix, inline_md)
                 } else if let Some(ref list_entity) = list {
                     match list_entity.style {
-                        ListStyle::Decimal | ListStyle::LowerAlpha | ListStyle::UpperAlpha
-                        | ListStyle::LowerRoman | ListStyle::UpperRoman => {
+                        ListStyle::Decimal
+                        | ListStyle::LowerAlpha
+                        | ListStyle::UpperAlpha
+                        | ListStyle::LowerRoman
+                        | ListStyle::UpperRoman => {
                             format!("1. {}", inline_md)
                         }
                         _ => format!("- {}", inline_md),

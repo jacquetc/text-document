@@ -4,13 +4,13 @@ use common::event::EventHub;
 use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
+use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::document::document_controller;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 use document_inspection::document_inspection_controller;
 use document_inspection::{GetBlockAtPositionDto, GetTextAtPositionDto};
@@ -21,11 +21,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -52,8 +48,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
 fn test_get_document_stats_empty() -> Result<()> {
     let (db_context, event_hub, _undo_redo_manager) = setup_with_text("")?;
 
-    let stats =
-        document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
+    let stats = document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
 
     assert_eq!(stats.block_count, 1); // Even empty text creates one block
     assert_eq!(stats.character_count, 0);
@@ -70,8 +65,7 @@ fn test_get_document_stats_after_import() -> Result<()> {
     let (db_context, event_hub, _undo_redo_manager) =
         setup_with_text("Hello World\nSecond line\nThird line")?;
 
-    let stats =
-        document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
+    let stats = document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
 
     assert_eq!(stats.block_count, 3);
     // character_count = 11 + 11 + 10 = 32
@@ -125,8 +119,7 @@ fn test_get_text_at_position_middle() -> Result<()> {
 
 #[test]
 fn test_get_block_at_position_first_block() -> Result<()> {
-    let (db_context, event_hub, _undo_redo_manager) =
-        setup_with_text("First\nSecond\nThird")?;
+    let (db_context, event_hub, _undo_redo_manager) = setup_with_text("First\nSecond\nThird")?;
 
     let result = document_inspection_controller::get_block_at_position(
         &db_context,
@@ -144,8 +137,7 @@ fn test_get_block_at_position_first_block() -> Result<()> {
 
 #[test]
 fn test_get_block_at_position_second_block() -> Result<()> {
-    let (db_context, event_hub, _undo_redo_manager) =
-        setup_with_text("First\nSecond\nThird")?;
+    let (db_context, event_hub, _undo_redo_manager) = setup_with_text("First\nSecond\nThird")?;
 
     // "First" is positions 0-4, block separator at 5, "Second" starts at 6
     let result = document_inspection_controller::get_block_at_position(

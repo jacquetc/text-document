@@ -3,9 +3,11 @@ use crate::ImportHtmlDto;
 use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, Resource, Root};
+use common::entities::{
+    Block, Document, Frame, InlineContent, InlineElement, List, Resource, Root,
+};
 use common::long_operation::LongOperation;
-use common::parser_tools::content_parser::{parse_html, ParsedSpan};
+use common::parser_tools::content_parser::{ParsedSpan, parse_html};
 use common::types::EntityId;
 use std::sync::Arc;
 

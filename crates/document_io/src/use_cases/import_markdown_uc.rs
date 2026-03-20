@@ -3,9 +3,9 @@ use crate::ImportMarkdownDto;
 use crate::ImportMarkdownResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineElement, InlineContent, List, Root};
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
 use common::long_operation::LongOperation;
-use common::parser_tools::content_parser::{parse_markdown, ParsedBlock, ParsedSpan};
+use common::parser_tools::content_parser::{ParsedBlock, ParsedSpan, parse_markdown};
 use common::types::EntityId;
 use std::sync::Arc;
 
@@ -224,7 +224,8 @@ impl LongOperation for ImportMarkdownUseCase {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        let result = import_parsed_blocks(&mut uow, &parsed_blocks, &*progress_callback, &cancel_flag);
+        let result =
+            import_parsed_blocks(&mut uow, &parsed_blocks, &*progress_callback, &cancel_flag);
 
         match result {
             Ok(block_count) => {

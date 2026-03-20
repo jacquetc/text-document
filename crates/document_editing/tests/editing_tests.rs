@@ -4,13 +4,13 @@ use common::event::EventHub;
 use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
+use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::document::document_controller;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 use document_editing::document_editing_controller;
 use document_editing::{DeleteTextDto, InsertBlockDto, InsertTextDto};
@@ -21,11 +21,7 @@ fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoMana
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -199,8 +195,7 @@ fn test_insert_block_creates_new_block() -> Result<()> {
 
     // Verify via document stats that block count increased from 1 to 2
     use document_inspection::document_inspection_controller;
-    let stats =
-        document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
+    let stats = document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
     assert_eq!(stats.block_count, 2);
 
     // Verify content via export

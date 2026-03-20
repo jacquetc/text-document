@@ -4,13 +4,13 @@ use common::event::EventHub;
 use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
+use direct_access::document::document_controller;
+use direct_access::document::dtos::CreateDocumentDto;
 use direct_access::root::dtos::CreateRootDto;
 use direct_access::root::root_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::document::document_controller;
 
-use document_io::document_io_controller;
 use document_io::ImportPlainTextDto;
+use document_io::document_io_controller;
 
 /// Set up an in-memory database with Root(id=1) and a Document owned by it.
 fn setup() -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
@@ -19,11 +19,7 @@ fn setup() -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
     let mut undo_redo_manager = UndoRedoManager::new();
 
     // Create Root (non-undoable)
-    let root = root_controller::create_orphan(
-        &db_context,
-        &event_hub,
-        &CreateRootDto::default(),
-    )?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     // Create Document owned by Root
     let _doc = document_controller::create(

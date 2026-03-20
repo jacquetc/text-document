@@ -42,15 +42,23 @@ fn element_char_len(elem: &InlineElement) -> i64 {
 }
 
 /// Apply merge format fields to an inline element.
-/// Only sets font_family (if non-empty), font_bold, font_italic, font_underline.
-/// All other format fields are left unchanged.
+/// Only overwrites fields that are `Some(...)` in the DTO.
+/// `None` fields are left unchanged — this is the "merge" semantics.
 fn apply_merge_format(elem: &mut InlineElement, dto: &MergeTextFormatDto) {
-    if !dto.font_family.is_empty() {
-        elem.fmt_font_family = Some(dto.font_family.clone());
+    if let Some(ref family) = dto.font_family {
+        if !family.is_empty() {
+            elem.fmt_font_family = Some(family.clone());
+        }
     }
-    elem.fmt_font_bold = Some(dto.font_bold);
-    elem.fmt_font_italic = Some(dto.font_italic);
-    elem.fmt_font_underline = Some(dto.font_underline);
+    if let Some(bold) = dto.font_bold {
+        elem.fmt_font_bold = Some(bold);
+    }
+    if let Some(italic) = dto.font_italic {
+        elem.fmt_font_italic = Some(italic);
+    }
+    if let Some(underline) = dto.font_underline {
+        elem.fmt_font_underline = Some(underline);
+    }
     elem.updated_at = chrono::Utc::now();
 }
 
@@ -75,15 +83,13 @@ fn execute_merge_text_format(
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
     // Get frames
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
     // Get block IDs from frame
-    let block_ids =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
@@ -112,8 +118,7 @@ fn execute_merge_text_format(
         let element_ids =
             uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> =
-            elements_opt.into_iter().filter_map(|e| e).collect();
+        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
 
         let mut elem_doc_pos = block_start;
 
@@ -136,17 +141,14 @@ fn execute_merge_text_format(
             }
             // Element needs splitting
             else if let InlineContent::Text(ref text) = elem.content {
-                let local_start =
-                    std::cmp::max(0, range_start - elem_start) as usize;
-                let local_end =
-                    std::cmp::min(elem_len, range_end - elem_start) as usize;
+                let local_start = std::cmp::max(0, range_start - elem_start) as usize;
+                let local_end = std::cmp::min(elem_len, range_end - elem_start) as usize;
                 let chars: Vec<char> = text.chars().collect();
 
                 if local_start > 0 && local_end < chars.len() {
                     // Split into three parts: before, middle (merge formatted), after
                     let before_text: String = chars[..local_start].iter().collect();
-                    let middle_text: String =
-                        chars[local_start..local_end].iter().collect();
+                    let middle_text: String = chars[local_start..local_end].iter().collect();
                     let after_text: String = chars[local_end..].iter().collect();
 
                     // Update original to keep only "before" text
@@ -185,8 +187,7 @@ fn execute_merge_text_format(
                     uow.create_inline_element(&new_elem, block.id, -1)?;
                 } else {
                     // local_start == 0, split into: merge formatted part, rest
-                    let formatted_text: String =
-                        chars[..local_end].iter().collect();
+                    let formatted_text: String = chars[..local_end].iter().collect();
                     let rest_text: String = chars[local_end..].iter().collect();
 
                     let mut updated_orig = elem.clone();

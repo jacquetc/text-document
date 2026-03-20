@@ -66,15 +66,13 @@ fn execute_set_block_format(
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
     // Get frames
-    let frame_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
     // Get block IDs from frame
-    let block_ids =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;

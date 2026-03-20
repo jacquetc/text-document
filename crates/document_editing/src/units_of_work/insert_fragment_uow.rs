@@ -105,7 +105,6 @@ impl CommandUnitOfWork for InsertFragmentUnitOfWork {
 #[macros::uow_action(entity = "List", action = "Create")]
 impl InsertFragmentUnitOfWorkTrait for InsertFragmentUnitOfWork {}
 
-
 pub struct InsertFragmentUnitOfWorkFactory {
     context: DbContext,
     event_hub: Arc<EventHub>,
