@@ -1,6 +1,6 @@
 [![crates.io](https://img.shields.io/crates/v/text-document?style=flat-square&logo=rust)](https://crates.io/crates/text-document)
 [![API](https://docs.rs/text-document/badge.svg)](https://docs.rs/text-document)
-[![build status](https://img.shields.io/github/workflow/status/jacquetc/text-document/CI/main?style=flat-square&logo=github)](https://github.com/jacquetc/text-document/actions/workflows/ci.yml)
+![quality](https://img.shields.io/github/actions/workflow/status/jacquetc/text-document/ci.yml)
 [![codecov](https://codecov.io/gh/jacquetc/text-document/branch/main/graph/badge.svg?token=S4M513A2XR)](https://codecov.io/gh/jacquetc/text-document)
 [![license](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue?style=flat-square)](#license)
 
