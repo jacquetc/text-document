@@ -13,6 +13,7 @@ members = [
     "crates/document_inspection",
     "crates/frontend",
     "crates/cli",
+    "crates/public_api",
     ]
 default-members = [
     "crates/cli",
@@ -21,7 +22,7 @@ default-members = [
 resolver = "3"
 
 [workspace.package]
-authors = ["Cyril Jacquet <cyril.jacquet@skribisto.eu>"]
+authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]
 homepage = "https://github.com/jacquetc/text-document"
 repository = "https://github.com/jacquetc/text-document"
 documentation = "https://docs.rs/text-document/"

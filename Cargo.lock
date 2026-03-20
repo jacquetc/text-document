@@ -1292,6 +1292,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "text-document"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "common",
+ "frontend",
+ "log",
+]
+
+[[package]]
 name = "text-document-cli"
 version = "0.0.5"
 dependencies = [
