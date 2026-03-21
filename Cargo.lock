@@ -225,25 +225,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
-name = "common"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "ego-tree",
- "flume",
- "log",
- "postcard",
- "pulldown-cmark",
- "redb",
- "scraper",
- "serde",
- "serde_json",
- "thiserror",
- "uuid",
-]
-
-[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -318,101 +299,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn",
-]
-
-[[package]]
-name = "direct_access"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "common",
- "macros",
- "serde",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "document_editing"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "common",
- "direct_access",
- "document_inspection",
- "document_io",
- "macros",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "document_formatting"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "common",
- "direct_access",
- "document_io",
- "macros",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "document_inspection"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "common",
- "direct_access",
- "document_editing",
- "document_formatting",
- "document_io",
- "macros",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "document_io"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "common",
- "direct_access",
- "document_inspection",
- "document_io",
- "docx-rs",
- "macros",
- "regex",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "document_search"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "common",
- "direct_access",
- "document_io",
- "macros",
- "regex",
- "serde",
- "serde_json",
- "uuid",
 ]
 
 [[package]]
@@ -540,23 +426,6 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
-
-[[package]]
-name = "frontend"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "chrono",
- "common",
- "direct_access",
- "document_editing",
- "document_formatting",
- "document_inspection",
- "document_io",
- "document_search",
- "flume",
- "log",
-]
 
 [[package]]
 name = "futures-core"
@@ -788,16 +657,6 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
-
-[[package]]
-name = "macros"
-version = "0.0.5"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "markup5ever"
@@ -1298,9 +1157,9 @@ version = "0.0.5"
 dependencies = [
  "anyhow",
  "base64",
- "frontend",
  "log",
  "serde_json",
+ "text-document-frontend",
 ]
 
 [[package]]
@@ -1310,6 +1169,147 @@ dependencies = [
  "anyhow",
  "clap",
  "text-document",
+]
+
+[[package]]
+name = "text-document-common"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ego-tree",
+ "flume",
+ "log",
+ "postcard",
+ "pulldown-cmark",
+ "redb",
+ "scraper",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "text-document-direct-access"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "text-document-common",
+ "text-document-macros",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "text-document-editing"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "text-document-common",
+ "text-document-direct-access",
+ "text-document-inspection",
+ "text-document-io",
+ "text-document-macros",
+ "uuid",
+]
+
+[[package]]
+name = "text-document-formatting"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "text-document-common",
+ "text-document-direct-access",
+ "text-document-io",
+ "text-document-macros",
+ "uuid",
+]
+
+[[package]]
+name = "text-document-frontend"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "flume",
+ "log",
+ "text-document-common",
+ "text-document-direct-access",
+ "text-document-editing",
+ "text-document-formatting",
+ "text-document-inspection",
+ "text-document-io",
+ "text-document-search",
+]
+
+[[package]]
+name = "text-document-inspection"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "text-document-common",
+ "text-document-direct-access",
+ "text-document-editing",
+ "text-document-formatting",
+ "text-document-io",
+ "text-document-macros",
+ "uuid",
+]
+
+[[package]]
+name = "text-document-io"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "docx-rs",
+ "regex",
+ "serde",
+ "serde_json",
+ "text-document-common",
+ "text-document-direct-access",
+ "text-document-inspection",
+ "text-document-io",
+ "text-document-macros",
+ "uuid",
+]
+
+[[package]]
+name = "text-document-macros"
+version = "0.0.5"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "text-document-search"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "regex",
+ "serde",
+ "serde_json",
+ "text-document-common",
+ "text-document-direct-access",
+ "text-document-io",
+ "text-document-macros",
+ "uuid",
 ]
 
 [[package]]

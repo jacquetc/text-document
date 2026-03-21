@@ -2,7 +2,7 @@
 
 
 [package]
-name = "direct_access"
+name = "text-document-direct-access"
 version.workspace = true
 edition.workspace = true
 homepage.workspace = true
@@ -12,10 +12,10 @@ publish = false
 
 [dependencies]
 thiserror = { workspace = true }
-common = { path = "../common" }
+common = { path = "../common", version = "0.0.5", package = "text-document-common" }
 anyhow = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-macros = { path = "../macros" }
+macros = { path = "../macros", version = "0.0.5", package = "text-document-macros" }
 chrono = { workspace = true }
 uuid = { workspace = true }
 
