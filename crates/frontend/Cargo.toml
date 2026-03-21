@@ -2,6 +2,11 @@
 
 [package]
 name = "text-document-frontend"
+authors.workspace = true
+documentation.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
 version.workspace = true
 edition.workspace = true
 homepage.workspace = true
