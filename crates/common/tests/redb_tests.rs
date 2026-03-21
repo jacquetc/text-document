@@ -3,6 +3,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+extern crate text_document_common as common;
+
 use anyhow::Result;
 use common::database::{db_context::DbContext, transactions::Transaction};
 use common::types::Savepoint;
@@ -68,8 +70,8 @@ fn test_restore_savepoint() -> Result<()> {
 
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(TEST_TABLE)?;
-    assert_eq!(table.get("key1")?.map(|v| v.value()), Some(100));
-    assert_eq!(table.get("key3")?.map(|v| v.value()), Some(3));
+    assert_eq!(table.get("key1")?.map(|v: redb::AccessGuard<'_, u64>| v.value()), Some(100));
+    assert_eq!(table.get("key3")?.map(|v: redb::AccessGuard<'_, u64>| v.value()), Some(3));
     drop(read_txn);
 
     let mut write_txn = db.begin_write()?;
@@ -135,9 +137,9 @@ fn test_get_persistent_savepoint() -> Result<()> {
     {
         let read_txn = db.begin_read()?;
         let table = read_txn.open_table(TEST_TABLE)?;
-        assert_eq!(table.get("key1")?.map(|v| v.value()), Some(1));
-        assert_eq!(table.get("key2")?.map(|v| v.value()), Some(2));
-        assert_eq!(table.get("key3")?.map(|v| v.value()), Some(3));
+        assert_eq!(table.get("key1")?.map(|v: redb::AccessGuard<'_, u64>| v.value()), Some(1));
+        assert_eq!(table.get("key2")?.map(|v: redb::AccessGuard<'_, u64>| v.value()), Some(2));
+        assert_eq!(table.get("key3")?.map(|v: redb::AccessGuard<'_, u64>| v.value()), Some(3));
         drop(read_txn);
     }
 

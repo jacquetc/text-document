@@ -3,6 +3,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+extern crate text_document_common as common;
+
 use common::snapshot::{EntityTreeSnapshot, JunctionSnapshot, TableLevelSnapshot, TableSnapshot};
 use common::types::EntityId;
 

@@ -3,6 +3,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+extern crate text_document_common as common;
+
 use anyhow::Result;
 use common::undo_redo::{CompositeCommand, UndoRedoCommand, UndoRedoManager};
 use std::any::Any;

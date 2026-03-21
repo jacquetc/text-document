@@ -1281,7 +1281,6 @@ dependencies = [
  "text-document-common",
  "text-document-direct-access",
  "text-document-inspection",
- "text-document-io",
  "text-document-macros",
  "uuid",
 ]

@@ -1,3 +1,4 @@
+extern crate text_document_io as document_io;
 use anyhow::Result;
 use common::database::db_context::DbContext;
 use common::event::EventHub;

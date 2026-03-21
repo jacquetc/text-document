@@ -21,7 +21,6 @@ docx-rs = "0.4"
 
 [dev-dependencies]
 direct_access = { path = "../direct_access", version = "0.0.5", package = "text-document-direct-access" }
-document_io = { path = ".", version = "0.0.5", package = "text-document-io" }
 document_inspection = { path = "../document_inspection", version = "0.0.5", package = "text-document-inspection" }
 
 [lints]

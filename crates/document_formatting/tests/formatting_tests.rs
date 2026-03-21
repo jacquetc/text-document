@@ -1,3 +1,4 @@
+extern crate text_document_formatting as document_formatting;
 use anyhow::Result;
 use common::database::db_context::DbContext;
 use common::direct_access::block::BlockRelationshipField;

@@ -17,6 +17,7 @@ members = [
     ]
 default-members = [
     "crates/cli",
+    "crates/public_api",
 ]
 
 resolver = "3"

@@ -1,3 +1,4 @@
+extern crate text_document_search as document_search;
 use anyhow::Result;
 use common::database::db_context::DbContext;
 use common::event::EventHub;

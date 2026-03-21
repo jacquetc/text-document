@@ -1,3 +1,4 @@
+extern crate text_document_editing as document_editing;
 use anyhow::Result;
 use common::database::db_context::DbContext;
 use common::event::EventHub;

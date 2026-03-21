@@ -1,3 +1,4 @@
+extern crate text_document_inspection as document_inspection;
 use anyhow::Result;
 use common::database::db_context::DbContext;
 use common::event::EventHub;

@@ -18,8 +18,8 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-direct_access = { path = "../direct_access", version = "0.0.5", package = "text-document-direct-access" }
-document_io = { path = "../document_io", version = "0.0.5", package = "text-document-io" }
+direct_access = { path = "../direct_access", package = "text-document-direct-access" }
+document_io = { path = "../document_io", package = "text-document-io" }
 
 [lints]
 workspace = true
