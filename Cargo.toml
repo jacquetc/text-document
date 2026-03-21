@@ -4,8 +4,8 @@
 
 members = [
     "crates/common",
-    "crates/direct_access",
     "crates/macros",
+    "crates/direct_access",
     "crates/document_editing",
     "crates/document_formatting",
     "crates/document_io",
