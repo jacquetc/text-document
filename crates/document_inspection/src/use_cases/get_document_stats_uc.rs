@@ -7,7 +7,7 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait GetDocumentStatsUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn GetDocumentStatsUnitOfWorkTrait>;
@@ -39,7 +39,7 @@ impl GetDocumentStatsUseCase {
 
         // Get Root(1) -> Document
         let root = uow
-            .get_root(&1)?
+            .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
 
         let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;

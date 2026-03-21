@@ -6,7 +6,7 @@ use common::database::CommandUnitOfWork;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
 use common::long_operation::LongOperation;
 use common::parser_tools::content_parser::{ParsedBlock, ParsedSpan, parse_markdown};
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::sync::Arc;
 
 pub trait ImportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
@@ -88,7 +88,7 @@ fn import_parsed_blocks(
 
     // Step 1: Get Root and Document
     let root = uow
-        .get_root(&1u64)?
+        .get_root(&ROOT_ENTITY_ID)?
         .ok_or_else(|| anyhow!("Root entity not found"))?;
 
     let doc_ids = uow.get_root_relationship(

@@ -10,7 +10,7 @@ use common::entities::{Block, InlineContent, InlineElement, List, Root};
 use common::parser_tools::fragment_schema::{
     FragmentBlock, FragmentData, FragmentElement, FragmentList,
 };
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait ExtractFragmentUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExtractFragmentUnitOfWorkTrait>;
@@ -54,7 +54,7 @@ impl ExtractFragmentUseCase {
 
         // Get Root -> Document -> Frames -> Blocks
         let root = uow
-            .get_root(&1)?
+            .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
         let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
         let doc_id = *doc_ids

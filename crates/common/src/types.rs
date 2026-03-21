@@ -3,6 +3,9 @@
 pub type Savepoint = u64;
 pub type EntityId = u64;
 
+/// The well-known ID of the single root entity created at database init time.
+pub const ROOT_ENTITY_ID: EntityId = 1;
+
 pub trait HasId {
     fn id(&self) -> EntityId;
 }

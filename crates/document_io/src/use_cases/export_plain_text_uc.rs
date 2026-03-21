@@ -3,7 +3,7 @@ use crate::ExportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{Block, Document, Frame, Root};
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait ExportPlainTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportPlainTextUnitOfWorkTrait>;
@@ -33,7 +33,7 @@ impl ExportPlainTextUseCase {
 
         // Step 1: Get Root (id=1) and its Document via relationship
         let root = uow
-            .get_root(&1u64)?
+            .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
 
         let doc_ids = uow.get_root_relationship(

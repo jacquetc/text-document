@@ -6,7 +6,7 @@ use common::database::QueryUnitOfWork;
 use common::entities::{
     Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
 };
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait ExportLatexUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportLatexUnitOfWorkTrait>;
@@ -39,7 +39,7 @@ impl ExportLatexUseCase {
 
         // Step 1: Get Root and Document
         let root = uow
-            .get_root(&1u64)?
+            .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
 
         let doc_ids = uow.get_root_relationship(

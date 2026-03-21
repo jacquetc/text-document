@@ -3,9 +3,9 @@ use crate::ExportHtmlDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
+    Alignment, Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
 };
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait ExportHtmlUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportHtmlUnitOfWorkTrait>;
@@ -38,7 +38,7 @@ impl ExportHtmlUseCase {
 
         // Step 1: Get Root and Document
         let root = uow
-            .get_root(&1u64)?
+            .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
 
         let doc_ids = uow.get_root_relationship(
@@ -130,11 +130,19 @@ impl ExportHtmlUseCase {
                 } else {
                     let inline_html = self.render_inline_html(&uow, block)?;
 
+                    let style_attr = match block.fmt_alignment {
+                        Some(Alignment::Left) => " style=\"text-align: left\"",
+                        Some(Alignment::Right) => " style=\"text-align: right\"",
+                        Some(Alignment::Center) => " style=\"text-align: center\"",
+                        Some(Alignment::Justify) => " style=\"text-align: justify\"",
+                        None => "",
+                    };
+
                     if let Some(level) = block.fmt_heading_level {
                         let level = level.min(6).max(1);
-                        body_parts.push(format!("<h{}>{}</h{}>", level, inline_html, level));
+                        body_parts.push(format!("<h{}{}>{}</h{}>", level, style_attr, inline_html, level));
                     } else {
-                        body_parts.push(format!("<p>{}</p>", inline_html));
+                        body_parts.push(format!("<p{}>{}</p>", style_attr, inline_html));
                     }
                     i += 1;
                 }
@@ -143,7 +151,7 @@ impl ExportHtmlUseCase {
 
         uow.end_transaction()?;
 
-        let html_text = format!("<html><body>{}</body></html>", body_parts.join(""));
+        let html_text = format!("<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>", body_parts.join(""));
 
         Ok(ExportHtmlDto { html_text })
     }
@@ -225,4 +233,5 @@ fn escape_html(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
 }

@@ -5,7 +5,7 @@ use common::database::QueryUnitOfWork;
 use common::entities::{
     Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
 };
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait ExportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportMarkdownUnitOfWorkTrait>;
@@ -38,7 +38,7 @@ impl ExportMarkdownUseCase {
 
         // Step 1: Get Root and Document
         let root = uow
-            .get_root(&1u64)?
+            .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
 
         let doc_ids = uow.get_root_relationship(
@@ -71,6 +71,8 @@ impl ExportMarkdownUseCase {
             blocks.sort_by_key(|b| b.document_position);
 
             let mut prev_was_list = false;
+            let mut ordered_list_counter: i64 = 0;
+            let mut current_list_id: Option<EntityId> = None;
 
             for block in &blocks {
                 // Get inline elements
@@ -99,8 +101,15 @@ impl ExportMarkdownUseCase {
                 // Build inline markdown text
                 let mut inline_md = String::new();
                 for elem in &elements {
+                    let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
                     let text = match &elem.content {
-                        InlineContent::Text(t) => t.clone(),
+                        InlineContent::Text(t) => {
+                            if is_code {
+                                t.clone()
+                            } else {
+                                escape_markdown(t)
+                            }
+                        }
                         InlineContent::Image { name, .. } => {
                             format!("![{}]({})", name, name)
                         }
@@ -145,11 +154,20 @@ impl ExportMarkdownUseCase {
                         | ListStyle::UpperAlpha
                         | ListStyle::LowerRoman
                         | ListStyle::UpperRoman => {
-                            format!("1. {}", inline_md)
+                            let this_list_id = list_ids.first().copied();
+                            if this_list_id != current_list_id {
+                                ordered_list_counter = 1;
+                                current_list_id = this_list_id;
+                            } else {
+                                ordered_list_counter += 1;
+                            }
+                            format!("{}. {}", ordered_list_counter, inline_md)
                         }
                         _ => format!("- {}", inline_md),
                     }
                 } else {
+                    current_list_id = None;
+                    ordered_list_counter = 0;
                     inline_md
                 };
 
@@ -172,4 +190,19 @@ impl ExportMarkdownUseCase {
 
         Ok(ExportMarkdownDto { markdown_text })
     }
+}
+
+fn escape_markdown(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' | '*' | '_' | '{' | '}' | '[' | ']' | '(' | ')' | '#' | '+' | '-' | '.'
+            | '!' | '|' | '~' | '>' => {
+                result.push('\\');
+                result.push(c);
+            }
+            _ => result.push(c),
+        }
+    }
+    result
 }

@@ -3,7 +3,7 @@ use crate::ImportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait ImportPlainTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ImportPlainTextUnitOfWorkTrait>;
@@ -40,7 +40,7 @@ impl ImportPlainTextUseCase {
 
         // Step 1: Get Root (id=1) and its Document via relationship
         let root = uow
-            .get_root(&1u64)?
+            .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
 
         let doc_ids = uow.get_root_relationship(
