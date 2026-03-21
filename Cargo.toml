@@ -42,6 +42,18 @@ flume = "0.12"
 chrono = { version = "0.4" , features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# Internal crates (keys match the alias used in each crate's Cargo.toml)
+common = { version = "0.0.5", path = "crates/common", package = "text-document-common" }
+macros = { version = "0.0.5", path = "crates/macros", package = "text-document-macros" }
+direct_access = { version = "0.0.5", path = "crates/direct_access", package = "text-document-direct-access" }
+document_editing = { version = "0.0.5", path = "crates/document_editing", package = "text-document-editing" }
+document_formatting = { version = "0.0.5", path = "crates/document_formatting", package = "text-document-formatting" }
+document_inspection = { version = "0.0.5", path = "crates/document_inspection", package = "text-document-inspection" }
+document_io = { version = "0.0.5", path = "crates/document_io", package = "text-document-io" }
+document_search = { version = "0.0.5", path = "crates/document_search", package = "text-document-search" }
+frontend = { version = "0.0.5", path = "crates/frontend", package = "text-document-frontend" }
+text-document = { version = "0.0.5", path = "crates/public_api" }
+
 [profile.release]
 lto = "fat"
 panic = "abort"

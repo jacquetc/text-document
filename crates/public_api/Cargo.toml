@@ -21,7 +21,7 @@ base64 = "0.22"
 serde_json = "1.0"
 
 # Backend (frontend re-exports all backend crates)
-frontend = { path = "../frontend", version = "0.0.5", package = "text-document-frontend" }
+frontend = { workspace = true }
 
 [lints]
 workspace = true

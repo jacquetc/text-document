@@ -16,13 +16,13 @@ chrono = { workspace = true }
 flume = { workspace = true }
 
 # Backend crates
-common = { path = "../common", version = "0.0.5", package = "text-document-common" }
-direct_access = { path = "../direct_access", version = "0.0.5", package = "text-document-direct-access" }
-document_editing = { path = "../document_editing", version = "0.0.5", package = "text-document-editing" }
-document_formatting = { path = "../document_formatting", version = "0.0.5", package = "text-document-formatting" }
-document_io = { path = "../document_io", version = "0.0.5", package = "text-document-io" }
-document_search = { path = "../document_search", version = "0.0.5", package = "text-document-search" }
-document_inspection = { path = "../document_inspection", version = "0.0.5", package = "text-document-inspection" }
+common = { workspace = true }
+direct_access = { workspace = true }
+document_editing = { workspace = true }
+document_formatting = { workspace = true }
+document_io = { workspace = true }
+document_search = { workspace = true }
+document_inspection = { workspace = true }
 
 [lints]
 workspace = true

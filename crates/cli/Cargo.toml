@@ -21,4 +21,4 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 anyhow = { workspace = true }
-text-document = { version = "0.0.5",  path = "../public_api" }
+text-document = { workspace = true }

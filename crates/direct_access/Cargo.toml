@@ -12,10 +12,10 @@ publish = false
 
 [dependencies]
 thiserror = { workspace = true }
-common = { path = "../common", version = "0.0.5", package = "text-document-common" }
+common = { workspace = true }
 anyhow = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-macros = { path = "../macros", version = "0.0.5", package = "text-document-macros" }
+macros = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 

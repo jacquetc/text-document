@@ -10,17 +10,17 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
-common = { path = "../common", version = "0.0.5", package = "text-document-common" }
-macros = { path = "../macros", version = "0.0.5", package = "text-document-macros" }
+common = { workspace = true }
+macros = { workspace = true }
 serde = "1.0"
 serde_json = "1.0"
 chrono = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-direct_access = { path = "../direct_access", version = "0.0.5", package = "text-document-direct-access" }
-document_io = { path = "../document_io", version = "0.0.5", package = "text-document-io" }
-document_inspection = { path = "../document_inspection", version = "0.0.5", package = "text-document-inspection" }
+direct_access = { workspace = true }
+document_io = { workspace = true }
+document_inspection = { workspace = true }
 
 [lints]
 workspace = true
