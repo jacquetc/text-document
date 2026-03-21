@@ -1,6 +1,8 @@
 //! TextCursor implementation — Qt-style multi-cursor with automatic position adjustment.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use anyhow::Result;
 
@@ -9,26 +11,14 @@ use frontend::commands::{
     inline_element_commands, undo_redo_commands,
 };
 use frontend::common::entities::ListStyle;
-use frontend::document_editing::dtos as edit_dtos;
+
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::convert::{to_i64, to_usize};
 use crate::events::DocumentEvent;
 use crate::fragment::DocumentFragment;
 use crate::inner::{CursorData, TextDocumentInner};
 use crate::{BlockFormat, FrameFormat, MoveMode, MoveOperation, SelectionType, TextFormat};
-
-fn to_edit_list_style(v: &ListStyle) -> edit_dtos::ListStyle {
-    match v {
-        ListStyle::Disc => edit_dtos::ListStyle::Disc,
-        ListStyle::Circle => edit_dtos::ListStyle::Circle,
-        ListStyle::Square => edit_dtos::ListStyle::Square,
-        ListStyle::Decimal => edit_dtos::ListStyle::Decimal,
-        ListStyle::LowerAlpha => edit_dtos::ListStyle::LowerAlpha,
-        ListStyle::UpperAlpha => edit_dtos::ListStyle::UpperAlpha,
-        ListStyle::LowerRoman => edit_dtos::ListStyle::LowerRoman,
-        ListStyle::UpperRoman => edit_dtos::ListStyle::UpperRoman,
-    }
-}
 
 /// A cursor into a [`TextDocument`](crate::TextDocument).
 ///
@@ -45,11 +35,11 @@ pub struct TextCursor {
 impl Clone for TextCursor {
     fn clone(&self) -> Self {
         let (position, anchor) = {
-            let d = self.data.lock().unwrap();
+            let d = self.data.lock();
             (d.position, d.anchor)
         };
         let data = {
-            let mut inner = self.doc.lock().unwrap();
+            let mut inner = self.doc.lock();
             let data = Arc::new(Mutex::new(CursorData { position, anchor }));
             inner.cursors.push(Arc::downgrade(&data));
             data
@@ -65,7 +55,7 @@ impl TextCursor {
     // ── Helpers (called while doc lock is NOT held) ──────────
 
     fn read_cursor(&self) -> (usize, usize) {
-        let d = self.data.lock().unwrap();
+        let d = self.data.lock();
         (d.position, d.anchor)
     }
 
@@ -73,29 +63,29 @@ impl TextCursor {
 
     /// Current cursor position (between characters).
     pub fn position(&self) -> usize {
-        self.data.lock().unwrap().position
+        self.data.lock().position
     }
 
     /// Anchor position. Equal to `position()` when no selection.
     pub fn anchor(&self) -> usize {
-        self.data.lock().unwrap().anchor
+        self.data.lock().anchor
     }
 
     /// Returns true if there is a selection.
     pub fn has_selection(&self) -> bool {
-        let d = self.data.lock().unwrap();
+        let d = self.data.lock();
         d.position != d.anchor
     }
 
     /// Start of the selection (min of position and anchor).
     pub fn selection_start(&self) -> usize {
-        let d = self.data.lock().unwrap();
+        let d = self.data.lock();
         d.position.min(d.anchor)
     }
 
     /// End of the selection (max of position and anchor).
     pub fn selection_end(&self) -> usize {
-        let d = self.data.lock().unwrap();
+        let d = self.data.lock();
         d.position.max(d.anchor)
     }
 
@@ -107,7 +97,7 @@ impl TextCursor {
         }
         let start = pos.min(anchor);
         let len = pos.max(anchor) - start;
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::GetTextAtPositionDto {
             position: to_i64(start),
             length: to_i64(len),
@@ -118,7 +108,7 @@ impl TextCursor {
 
     /// Collapse the selection by moving anchor to position.
     pub fn clear_selection(&self) {
-        let mut d = self.data.lock().unwrap();
+        let mut d = self.data.lock();
         d.anchor = d.position;
     }
 
@@ -127,7 +117,7 @@ impl TextCursor {
     /// True if the cursor is at the start of a block.
     pub fn at_block_start(&self) -> bool {
         let pos = self.position();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
         };
@@ -141,7 +131,7 @@ impl TextCursor {
     /// True if the cursor is at the end of a block.
     pub fn at_block_end(&self) -> bool {
         let pos = self.position();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
         };
@@ -154,13 +144,13 @@ impl TextCursor {
 
     /// True if the cursor is at position 0.
     pub fn at_start(&self) -> bool {
-        self.data.lock().unwrap().position == 0
+        self.data.lock().position == 0
     }
 
     /// True if the cursor is at the very end of the document.
     pub fn at_end(&self) -> bool {
         let pos = self.position();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let stats =
             document_inspection_commands::get_document_stats(&inner.ctx).unwrap_or_else(|_| {
                 frontend::document_inspection::DocumentStatsDto {
@@ -178,7 +168,7 @@ impl TextCursor {
     /// The block number (0-indexed) containing the cursor.
     pub fn block_number(&self) -> usize {
         let pos = self.position();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
         };
@@ -190,7 +180,7 @@ impl TextCursor {
     /// The cursor's column within the current block (0-indexed).
     pub fn position_in_block(&self) -> usize {
         let pos = self.position();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
         };
@@ -205,13 +195,13 @@ impl TextCursor {
     pub fn set_position(&self, position: usize, mode: MoveMode) {
         // Clamp to document length
         let end = {
-            let inner = self.doc.lock().unwrap();
+            let inner = self.doc.lock();
             document_inspection_commands::get_document_stats(&inner.ctx)
                 .map(|s| to_usize(s.character_count))
                 .unwrap_or(0)
         };
         let pos = position.min(end);
-        let mut d = self.data.lock().unwrap();
+        let mut d = self.data.lock();
         d.position = pos;
         if mode == MoveMode::MoveAnchor {
             d.anchor = pos;
@@ -235,18 +225,18 @@ impl TextCursor {
         match selection {
             SelectionType::Document => {
                 let end = {
-                    let inner = self.doc.lock().unwrap();
+                    let inner = self.doc.lock();
                     document_inspection_commands::get_document_stats(&inner.ctx)
                         .map(|s| to_usize(s.character_count))
                         .unwrap_or(0)
                 };
-                let mut d = self.data.lock().unwrap();
+                let mut d = self.data.lock();
                 d.anchor = 0;
                 d.position = end;
             }
             SelectionType::BlockUnderCursor | SelectionType::LineUnderCursor => {
                 let pos = self.position();
-                let inner = self.doc.lock().unwrap();
+                let inner = self.doc.lock();
                 let dto = frontend::document_inspection::GetBlockAtPositionDto {
                     position: to_i64(pos),
                 };
@@ -256,7 +246,7 @@ impl TextCursor {
                     let start = to_usize(info.block_start);
                     let end = start + to_usize(info.block_length);
                     drop(inner);
-                    let mut d = self.data.lock().unwrap();
+                    let mut d = self.data.lock();
                     d.anchor = start;
                     d.position = end;
                 }
@@ -264,7 +254,7 @@ impl TextCursor {
             SelectionType::WordUnderCursor => {
                 let pos = self.position();
                 let (word_start, word_end) = self.find_word_boundaries(pos);
-                let mut d = self.data.lock().unwrap();
+                let mut d = self.data.lock();
                 d.anchor = word_start;
                 d.position = word_end;
             }
@@ -276,200 +266,263 @@ impl TextCursor {
     /// Insert plain text at the cursor. Replaces selection if any.
     pub fn insert_text(&self, text: &str) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
+
+        // Try direct insert first (handles same-block selection and no-selection cases)
         let dto = frontend::document_editing::InsertTextDto {
             position: to_i64(pos),
             anchor: to_i64(anchor),
             text: text.into(),
         };
-        let result =
-            document_editing_commands::insert_text(&inner.ctx, Some(inner.stack_id), &dto)?;
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let added = to_usize(result.new_position) - edit_pos;
-        // Adjust all cursors first (including this one), then override this cursor
-        inner.adjust_cursors(edit_pos, removed, added);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = to_usize(result.new_position);
-            d.anchor = d.position;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: added,
-            blocks_affected: to_usize(result.blocks_affected),
-        });
+
+        let queued = {
+            let mut inner = self.doc.lock();
+            let result = match document_editing_commands::insert_text(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            ) {
+                Ok(r) => r,
+                Err(_) if pos != anchor => {
+                    // Cross-block selection: compose delete + insert as a single undo unit
+                    undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
+
+                    let del_dto = frontend::document_editing::DeleteTextDto {
+                        position: to_i64(pos),
+                        anchor: to_i64(anchor),
+                    };
+                    let del_result = document_editing_commands::delete_text(
+                        &inner.ctx,
+                        Some(inner.stack_id),
+                        &del_dto,
+                    )?;
+                    let del_pos = to_usize(del_result.new_position);
+
+                    let ins_dto = frontend::document_editing::InsertTextDto {
+                        position: to_i64(del_pos),
+                        anchor: to_i64(del_pos),
+                        text: text.into(),
+                    };
+                    let ins_result = document_editing_commands::insert_text(
+                        &inner.ctx,
+                        Some(inner.stack_id),
+                        &ins_dto,
+                    )?;
+
+                    undo_redo_commands::end_composite(&inner.ctx);
+                    ins_result
+                }
+                Err(e) => return Err(e),
+            };
+
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let added = to_usize(result.new_position) - edit_pos;
+            // Adjust all cursors first (including this one), then override this cursor
+            inner.adjust_cursors(edit_pos, removed, added);
+            {
+                let mut d = self.data.lock();
+                d.position = to_usize(result.new_position);
+                d.anchor = d.position;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: added,
+                blocks_affected: to_usize(result.blocks_affected),
+            });
+            inner.take_queued_events()
+        };
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Insert text with a specific character format. Replaces selection if any.
     pub fn insert_formatted_text(&self, text: &str, format: &TextFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
-        let dto = frontend::document_editing::InsertFormattedTextDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
-            text: text.into(),
-            font_family: format.font_family.clone().unwrap_or_default(),
-            font_point_size: format.font_point_size.map(|v| v as i64).unwrap_or(0),
-            font_bold: format.font_bold.unwrap_or(false),
-            font_italic: format.font_italic.unwrap_or(false),
-            font_underline: format.font_underline.unwrap_or(false),
-            font_strikeout: format.font_strikeout.unwrap_or(false),
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertFormattedTextDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+                text: text.into(),
+                font_family: format.font_family.clone().unwrap_or_default(),
+                font_point_size: format.font_point_size.map(|v| v as i64).unwrap_or(0),
+                font_bold: format.font_bold.unwrap_or(false),
+                font_italic: format.font_italic.unwrap_or(false),
+                font_underline: format.font_underline.unwrap_or(false),
+                font_strikeout: format.font_strikeout.unwrap_or(false),
+            };
+            let result = document_editing_commands::insert_formatted_text(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let new_pos = to_usize(result.new_position);
+            let added = new_pos - edit_pos;
+            inner.adjust_cursors(edit_pos, removed, added);
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: added,
+                blocks_affected: 1,
+            });
+            inner.take_queued_events()
         };
-        let result = document_editing_commands::insert_formatted_text(
-            &inner.ctx,
-            Some(inner.stack_id),
-            &dto,
-        )?;
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let new_pos = to_usize(result.new_position);
-        let added = new_pos - edit_pos;
-        inner.adjust_cursors(edit_pos, removed, added);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = new_pos;
-            d.anchor = new_pos;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: added,
-            blocks_affected: 1,
-        });
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Insert a block break (new paragraph). Replaces selection if any.
     pub fn insert_block(&self) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
-        let dto = frontend::document_editing::InsertBlockDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertBlockDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+            };
+            let result =
+                document_editing_commands::insert_block(&inner.ctx, Some(inner.stack_id), &dto)?;
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let new_pos = to_usize(result.new_position);
+            let added = new_pos - edit_pos;
+            inner.adjust_cursors(edit_pos, removed, added);
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: added,
+                blocks_affected: 2,
+            });
+            inner.take_queued_events()
         };
-        let result =
-            document_editing_commands::insert_block(&inner.ctx, Some(inner.stack_id), &dto)?;
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let new_pos = to_usize(result.new_position);
-        let added = new_pos - edit_pos;
-        inner.adjust_cursors(edit_pos, removed, added);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = new_pos;
-            d.anchor = new_pos;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: added,
-            blocks_affected: 2,
-        });
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Insert an HTML fragment at the cursor position. Replaces selection if any.
     pub fn insert_html(&self, html: &str) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
-        let dto = frontend::document_editing::InsertHtmlAtPositionDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
-            html: html.into(),
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertHtmlAtPositionDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+                html: html.into(),
+            };
+            let result = document_editing_commands::insert_html_at_position(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let new_pos = to_usize(result.new_position);
+            let added = new_pos - edit_pos;
+            inner.adjust_cursors(edit_pos, removed, added);
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: added,
+                blocks_affected: 1,
+            });
+            inner.take_queued_events()
         };
-        let result = document_editing_commands::insert_html_at_position(
-            &inner.ctx,
-            Some(inner.stack_id),
-            &dto,
-        )?;
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let new_pos = to_usize(result.new_position);
-        let added = new_pos - edit_pos;
-        inner.adjust_cursors(edit_pos, removed, added);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = new_pos;
-            d.anchor = new_pos;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: added,
-            blocks_affected: 1,
-        });
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Insert a Markdown fragment at the cursor position. Replaces selection if any.
     pub fn insert_markdown(&self, markdown: &str) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
-        let dto = frontend::document_editing::InsertMarkdownAtPositionDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
-            markdown: markdown.into(),
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertMarkdownAtPositionDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+                markdown: markdown.into(),
+            };
+            let result = document_editing_commands::insert_markdown_at_position(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let new_pos = to_usize(result.new_position);
+            let added = new_pos - edit_pos;
+            inner.adjust_cursors(edit_pos, removed, added);
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: added,
+                blocks_affected: 1,
+            });
+            inner.take_queued_events()
         };
-        let result = document_editing_commands::insert_markdown_at_position(
-            &inner.ctx,
-            Some(inner.stack_id),
-            &dto,
-        )?;
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let new_pos = to_usize(result.new_position);
-        let added = new_pos - edit_pos;
-        inner.adjust_cursors(edit_pos, removed, added);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = new_pos;
-            d.anchor = new_pos;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: added,
-            blocks_affected: 1,
-        });
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Insert a document fragment at the cursor. Replaces selection if any.
     pub fn insert_fragment(&self, fragment: &DocumentFragment) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
-        let dto = frontend::document_editing::InsertFragmentDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
-            fragment_data: fragment.raw_data().into(),
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertFragmentDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+                fragment_data: fragment.raw_data().into(),
+            };
+            let result =
+                document_editing_commands::insert_fragment(&inner.ctx, Some(inner.stack_id), &dto)?;
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let new_pos = to_usize(result.new_position);
+            let added = new_pos - edit_pos;
+            inner.adjust_cursors(edit_pos, removed, added);
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: added,
+                blocks_affected: 1,
+            });
+            inner.take_queued_events()
         };
-        let result =
-            document_editing_commands::insert_fragment(&inner.ctx, Some(inner.stack_id), &dto)?;
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let new_pos = to_usize(result.new_position);
-        let added = new_pos - edit_pos;
-        inner.adjust_cursors(edit_pos, removed, added);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = new_pos;
-            d.anchor = new_pos;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: added,
-            blocks_affected: 1,
-        });
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
@@ -479,7 +532,7 @@ impl TextCursor {
         if pos == anchor {
             return DocumentFragment::new();
         }
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::ExtractFragmentDto {
             position: to_i64(pos),
             anchor: to_i64(anchor),
@@ -493,40 +546,44 @@ impl TextCursor {
     /// Insert an image at the cursor.
     pub fn insert_image(&self, name: &str, width: u32, height: u32) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
-        let dto = frontend::document_editing::InsertImageDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
-            image_name: name.into(),
-            width: width as i64,
-            height: height as i64,
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertImageDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+                image_name: name.into(),
+                width: width as i64,
+                height: height as i64,
+            };
+            let result =
+                document_editing_commands::insert_image(&inner.ctx, Some(inner.stack_id), &dto)?;
+            let new_pos = to_usize(result.new_position);
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let added = new_pos - edit_pos;
+            inner.adjust_cursors(edit_pos, removed, added);
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: added,
+                blocks_affected: 1,
+            });
+            inner.take_queued_events()
         };
-        let result =
-            document_editing_commands::insert_image(&inner.ctx, Some(inner.stack_id), &dto)?;
-        let new_pos = to_usize(result.new_position);
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let added = new_pos - edit_pos;
-        inner.adjust_cursors(edit_pos, removed, added);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = new_pos;
-            d.anchor = new_pos;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: added,
-            blocks_affected: 1,
-        });
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Insert a new frame at the cursor.
     pub fn insert_frame(&self) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
+        let mut inner = self.doc.lock();
         let dto = frontend::document_editing::InsertFrameDto {
             position: to_i64(pos),
             anchor: to_i64(anchor),
@@ -566,7 +623,7 @@ impl TextCursor {
         if pos == anchor {
             return Ok(String::new());
         }
-        let mut inner = self.doc.lock().unwrap();
+        let mut inner = self.doc.lock();
         let dto = frontend::document_editing::DeleteTextDto {
             position: to_i64(pos),
             anchor: to_i64(anchor),
@@ -578,7 +635,7 @@ impl TextCursor {
         let new_pos = to_usize(result.new_position);
         inner.adjust_cursors(edit_pos, removed, 0);
         {
-            let mut d = self.data.lock().unwrap();
+            let mut d = self.data.lock();
             d.position = new_pos;
             d.anchor = new_pos;
         }
@@ -591,11 +648,11 @@ impl TextCursor {
     /// Turn the block(s) in the selection into a list.
     pub fn create_list(&self, style: ListStyle) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_editing::CreateListDto {
             position: to_i64(pos),
             anchor: to_i64(anchor),
-            style: to_edit_list_style(&style),
+            style: style.clone(),
         };
         document_editing_commands::create_list(&inner.ctx, Some(inner.stack_id), &dto)?;
         Ok(())
@@ -604,11 +661,11 @@ impl TextCursor {
     /// Insert a new list item at the cursor position.
     pub fn insert_list(&self, style: ListStyle) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let mut inner = self.doc.lock().unwrap();
+        let mut inner = self.doc.lock();
         let dto = frontend::document_editing::InsertListDto {
             position: to_i64(pos),
             anchor: to_i64(anchor),
-            style: to_edit_list_style(&style),
+            style: style.clone(),
         };
         let result =
             document_editing_commands::insert_list(&inner.ctx, Some(inner.stack_id), &dto)?;
@@ -618,7 +675,7 @@ impl TextCursor {
         let added = new_pos - edit_pos;
         inner.adjust_cursors(edit_pos, removed, added);
         {
-            let mut d = self.data.lock().unwrap();
+            let mut d = self.data.lock();
             d.position = new_pos;
             d.anchor = new_pos;
         }
@@ -631,7 +688,7 @@ impl TextCursor {
     /// Get the character format at the cursor position.
     pub fn char_format(&self) -> Result<TextFormat> {
         let pos = self.position();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::GetTextAtPositionDto {
             position: to_i64(pos),
             length: 1,
@@ -646,7 +703,7 @@ impl TextCursor {
     /// Get the block format of the block containing the cursor.
     pub fn block_format(&self) -> Result<BlockFormat> {
         let pos = self.position();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
         };
@@ -662,7 +719,7 @@ impl TextCursor {
     /// Set the character format for the selection.
     pub fn set_char_format(&self, format: &TextFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = format.to_set_dto(pos, anchor);
         document_formatting_commands::set_text_format(&inner.ctx, Some(inner.stack_id), &dto)?;
         Ok(())
@@ -671,7 +728,7 @@ impl TextCursor {
     /// Merge a character format into the selection.
     pub fn merge_char_format(&self, format: &TextFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = format.to_merge_dto(pos, anchor);
         document_formatting_commands::merge_text_format(&inner.ctx, Some(inner.stack_id), &dto)?;
         Ok(())
@@ -680,7 +737,7 @@ impl TextCursor {
     /// Set the block format for the current block (or all blocks in selection).
     pub fn set_block_format(&self, format: &BlockFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = format.to_set_dto(pos, anchor);
         document_formatting_commands::set_block_format(&inner.ctx, Some(inner.stack_id), &dto)?;
         Ok(())
@@ -689,7 +746,7 @@ impl TextCursor {
     /// Set the frame format.
     pub fn set_frame_format(&self, frame_id: usize, format: &FrameFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         let dto = format.to_set_dto(pos, anchor, frame_id);
         document_formatting_commands::set_frame_format(&inner.ctx, Some(inner.stack_id), &dto)?;
         Ok(())
@@ -699,13 +756,13 @@ impl TextCursor {
 
     /// Begin a group of operations that will be undone as a single unit.
     pub fn begin_edit_block(&self) {
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
     }
 
     /// End the current edit block.
     pub fn end_edit_block(&self) {
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         undo_redo_commands::end_composite(&inner.ctx);
     }
 
@@ -714,36 +771,40 @@ impl TextCursor {
     /// Used for continuous typing: each keystroke calls this so that
     /// consecutive character inserts are grouped into one undo unit.
     pub fn join_previous_edit_block(&self) {
-        let inner = self.doc.lock().unwrap();
+        let inner = self.doc.lock();
         undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
     }
 
     // ── Private helpers ─────────────────────────────────────
 
     fn do_delete(&self, pos: usize, anchor: usize) -> Result<()> {
-        let mut inner = self.doc.lock().unwrap();
-        let dto = frontend::document_editing::DeleteTextDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::DeleteTextDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+            };
+            let result =
+                document_editing_commands::delete_text(&inner.ctx, Some(inner.stack_id), &dto)?;
+            let edit_pos = pos.min(anchor);
+            let removed = pos.max(anchor) - edit_pos;
+            let new_pos = to_usize(result.new_position);
+            inner.adjust_cursors(edit_pos, removed, 0);
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: edit_pos,
+                chars_removed: removed,
+                chars_added: 0,
+                blocks_affected: 1,
+            });
+            inner.take_queued_events()
         };
-        let result =
-            document_editing_commands::delete_text(&inner.ctx, Some(inner.stack_id), &dto)?;
-        let edit_pos = pos.min(anchor);
-        let removed = pos.max(anchor) - edit_pos;
-        let new_pos = to_usize(result.new_position);
-        inner.adjust_cursors(edit_pos, removed, 0);
-        {
-            let mut d = self.data.lock().unwrap();
-            d.position = new_pos;
-            d.anchor = new_pos;
-        }
-        inner.modified = true;
-        inner.emit_event(DocumentEvent::ContentsChanged {
-            position: edit_pos,
-            chars_removed: removed,
-            chars_added: 0,
-            blocks_affected: 1,
-        });
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
@@ -754,7 +815,7 @@ impl TextCursor {
             MoveOperation::NoMove => pos,
             MoveOperation::Start => 0,
             MoveOperation::End => {
-                let inner = self.doc.lock().unwrap();
+                let inner = self.doc.lock();
                 document_inspection_commands::get_document_stats(&inner.ctx)
                     .map(|s| to_usize(s.character_count))
                     .unwrap_or(pos)
@@ -762,7 +823,7 @@ impl TextCursor {
             MoveOperation::NextCharacter | MoveOperation::Right => pos + n,
             MoveOperation::PreviousCharacter | MoveOperation::Left => pos.saturating_sub(n),
             MoveOperation::StartOfBlock | MoveOperation::StartOfLine => {
-                let inner = self.doc.lock().unwrap();
+                let inner = self.doc.lock();
                 let dto = frontend::document_inspection::GetBlockAtPositionDto {
                     position: to_i64(pos),
                 };
@@ -771,7 +832,7 @@ impl TextCursor {
                     .unwrap_or(pos)
             }
             MoveOperation::EndOfBlock | MoveOperation::EndOfLine => {
-                let inner = self.doc.lock().unwrap();
+                let inner = self.doc.lock();
                 let dto = frontend::document_inspection::GetBlockAtPositionDto {
                     position: to_i64(pos),
                 };
@@ -780,7 +841,7 @@ impl TextCursor {
                     .unwrap_or(pos)
             }
             MoveOperation::NextBlock => {
-                let inner = self.doc.lock().unwrap();
+                let inner = self.doc.lock();
                 let dto = frontend::document_inspection::GetBlockAtPositionDto {
                     position: to_i64(pos),
                 };
@@ -792,7 +853,7 @@ impl TextCursor {
                     .unwrap_or(pos)
             }
             MoveOperation::PreviousBlock => {
-                let inner = self.doc.lock().unwrap();
+                let inner = self.doc.lock();
                 let dto = frontend::document_inspection::GetBlockAtPositionDto {
                     position: to_i64(pos),
                 };
@@ -817,7 +878,7 @@ impl TextCursor {
                 // Move past the word end to the next word
                 if end == pos {
                     // Already at a boundary, skip whitespace
-                    let inner = self.doc.lock().unwrap();
+                    let inner = self.doc.lock();
                     let stats = document_inspection_commands::get_document_stats(&inner.ctx)
                         .map(|s| to_usize(s.character_count))
                         .unwrap_or(0);
@@ -849,11 +910,26 @@ impl TextCursor {
             }
             MoveOperation::PreviousWord | MoveOperation::StartOfWord | MoveOperation::WordLeft => {
                 let (start, _) = self.find_word_boundaries(pos);
-                if start == pos && pos > 0 {
-                    let (prev_start, _) = self.find_word_boundaries(pos - 1);
-                    prev_start
-                } else {
+                if start < pos {
                     start
+                } else if pos > 0 {
+                    // Cursor is at a word start or on whitespace — scan backwards
+                    // to find the start of the previous word.
+                    let mut search = pos - 1;
+                    loop {
+                        let (ws, we) = self.find_word_boundaries(search);
+                        if ws < we {
+                            // Found a word; return its start
+                            break ws;
+                        }
+                        // Still on whitespace/non-word; keep scanning
+                        if search == 0 {
+                            break 0;
+                        }
+                        search -= 1;
+                    }
+                } else {
+                    0
                 }
             }
             MoveOperation::Up | MoveOperation::Down => {
@@ -869,56 +945,63 @@ impl TextCursor {
     }
 
     /// Find the word boundaries around `pos`. Returns (start, end).
+    /// Uses Unicode word segmentation for correct handling of non-ASCII text.
     fn find_word_boundaries(&self, pos: usize) -> (usize, usize) {
-        let inner = self.doc.lock().unwrap();
-        // Read some text around the position
-        let scan_back = pos.min(64);
-        let start_pos = pos - scan_back;
-        let stats = document_inspection_commands::get_document_stats(&inner.ctx)
-            .map(|s| to_usize(s.character_count))
-            .unwrap_or(0);
-        let scan_forward = (stats - pos).min(64);
-        let total_len = scan_back + scan_forward;
-        if total_len == 0 {
+        let inner = self.doc.lock();
+        // Get block info so we can fetch the full block text
+        let block_dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos),
+        };
+        let block_info =
+            match document_inspection_commands::get_block_at_position(&inner.ctx, &block_dto) {
+                Ok(info) => info,
+                Err(_) => return (pos, pos),
+            };
+
+        let block_start = to_usize(block_info.block_start);
+        let block_length = to_usize(block_info.block_length);
+        if block_length == 0 {
             return (pos, pos);
         }
+
         let dto = frontend::document_inspection::GetTextAtPositionDto {
-            position: to_i64(start_pos),
-            length: to_i64(total_len),
+            position: to_i64(block_start),
+            length: to_i64(block_length),
         };
         let text = match document_inspection_commands::get_text_at_position(&inner.ctx, &dto) {
             Ok(r) => r.text,
             Err(_) => return (pos, pos),
         };
 
-        let cursor_offset = scan_back;
-        let chars: Vec<char> = text.chars().collect();
+        // cursor_offset is the char offset within the block text
+        let cursor_offset = pos.saturating_sub(block_start);
 
-        fn is_word_char(c: char) -> bool {
-            c.is_alphanumeric() || c == '_'
-        }
+        // Use unicode_word_indices to find word boundaries
+        for (word_byte_start, word) in text.unicode_word_indices() {
+            // Convert byte offset to char offset
+            let word_char_start = text[..word_byte_start].chars().count();
+            let word_char_len = word.chars().count();
+            let word_char_end = word_char_start + word_char_len;
 
-        // Find word start
-        let mut word_start = cursor_offset;
-        if cursor_offset < chars.len() && is_word_char(chars[cursor_offset]) {
-            while word_start > 0 && is_word_char(chars[word_start - 1]) {
-                word_start -= 1;
+            if cursor_offset >= word_char_start && cursor_offset < word_char_end {
+                return (block_start + word_char_start, block_start + word_char_end);
             }
-        } else if cursor_offset > 0 && is_word_char(chars[cursor_offset - 1]) {
-            word_start = cursor_offset - 1;
-            while word_start > 0 && is_word_char(chars[word_start - 1]) {
-                word_start -= 1;
+            // If cursor is exactly at word_char_end (between this word and next),
+            // and wasn't inside any previous word, it will be caught by the next word
+            // or fall through to the (pos, pos) default.
+        }
+
+        // Also check if cursor is at the end of the last word
+        if let Some((word_byte_start, word)) = text.unicode_word_indices().last() {
+            let word_char_start = text[..word_byte_start].chars().count();
+            let word_char_len = word.chars().count();
+            let word_char_end = word_char_start + word_char_len;
+
+            if cursor_offset == word_char_end {
+                return (block_start + word_char_start, block_start + word_char_end);
             }
-        } else {
-            return (pos, pos);
         }
 
-        // Find word end
-        let mut word_end = word_start;
-        while word_end < chars.len() && is_word_char(chars[word_end]) {
-            word_end += 1;
-        }
-
-        (start_pos + word_start, start_pos + word_end)
+        (pos, pos)
     }
 }

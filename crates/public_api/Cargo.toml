@@ -19,6 +19,8 @@ log = "0.4"
 anyhow = { workspace = true }
 base64 = "0.22"
 serde_json = "1.0"
+parking_lot = { workspace = true }
+unicode-segmentation = { workspace = true }
 
 # Backend (frontend re-exports all backend crates)
 frontend = { workspace = true }

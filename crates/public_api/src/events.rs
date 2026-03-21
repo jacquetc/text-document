@@ -74,12 +74,12 @@ impl Drop for Subscription {
 /// Register a callback with the document inner, returning a Subscription handle.
 pub(crate) fn subscribe_inner<F>(inner: &mut TextDocumentInner, callback: F) -> Subscription
 where
-    F: Fn(DocumentEvent) + Send + 'static,
+    F: Fn(DocumentEvent) + Send + Sync + 'static,
 {
     let alive = Arc::new(AtomicBool::new(true));
     inner.callbacks.push(CallbackEntry {
         alive: Arc::downgrade(&alive),
-        callback: Box::new(callback),
+        callback: Arc::new(callback),
     });
     Subscription { alive }
 }

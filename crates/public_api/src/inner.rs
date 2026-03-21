@@ -12,8 +12,11 @@
 //! then read/update cursor data while the document lock is held, and
 //! call `adjust_cursors()` before releasing the document lock.
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
+
+use parking_lot::Mutex;
 
 use anyhow::Result;
 use frontend::AppContext;
@@ -31,7 +34,7 @@ pub(crate) struct CursorData {
 /// Callback entry for document event subscriptions.
 pub(crate) struct CallbackEntry {
     pub alive: Weak<AtomicBool>,
-    pub callback: Box<dyn Fn(DocumentEvent) + Send>,
+    pub callback: Arc<dyn Fn(DocumentEvent) + Send + Sync>,
 }
 
 /// The shared document interior, behind `Arc<Mutex<>>`.
@@ -51,6 +54,11 @@ pub(crate) struct TextDocumentInner {
     // Event dispatch
     pub pending_events: Vec<DocumentEvent>,
     pub callbacks: Vec<CallbackEntry>,
+    /// Index into `pending_events` of the next event to dispatch to callbacks.
+    pub dispatch_cursor: usize,
+
+    // Resource name → entity ID cache for O(1) lookups by name.
+    pub resource_cache: HashMap<String, u64>,
 }
 
 impl TextDocumentInner {
@@ -67,7 +75,7 @@ impl TextDocumentInner {
         self.prune_dead_cursors();
         for weak in &self.cursors {
             if let Some(cursor) = weak.upgrade() {
-                let mut data = cursor.lock().unwrap();
+                let mut data = cursor.lock();
                 data.position = adjust_offset(data.position, edit_pos, removed, added);
                 data.anchor = adjust_offset(data.anchor, edit_pos, removed, added);
             }
@@ -85,18 +93,57 @@ impl TextDocumentInner {
         data
     }
 
-    /// Emit a DocumentEvent: push to pending_events and invoke live callbacks.
-    pub fn emit_event(&mut self, event: DocumentEvent) {
-        self.pending_events.push(event.clone());
+    /// Queue a DocumentEvent for deferred dispatch.
+    ///
+    /// Events are collected while the lock is held, then dispatched
+    /// after the lock is released via [`dispatch_queued_events`].
+    pub fn queue_event(&mut self, event: DocumentEvent) {
+        self.pending_events.push(event);
+    }
+
+    /// Collect un-dispatched events paired with live callbacks.
+    ///
+    /// Events remain in `pending_events` for `poll_events`. Only events
+    /// added since the last call are returned. The caller should release
+    /// the lock and then invoke callbacks via [`dispatch_queued_events`].
+    pub fn take_queued_events(
+        &mut self,
+    ) -> Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)> {
+        if self.dispatch_cursor >= self.pending_events.len() {
+            return Vec::new();
+        }
+
         self.callbacks
             .retain(|entry| entry.alive.strong_count() > 0);
-        for entry in &self.callbacks {
-            if let Some(alive) = entry.alive.upgrade() {
+
+        let live_callbacks: Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>> = self
+            .callbacks
+            .iter()
+            .filter_map(|entry| {
+                let alive = entry.alive.upgrade()?;
                 if alive.load(std::sync::atomic::Ordering::Relaxed) {
-                    (entry.callback)(event.clone());
+                    Some(Arc::clone(&entry.callback))
+                } else {
+                    None
                 }
-            }
+            })
+            .collect();
+
+        if live_callbacks.is_empty() {
+            self.dispatch_cursor = self.pending_events.len();
+            return Vec::new();
         }
+
+        let new_events: Vec<DocumentEvent> = self.pending_events[self.dispatch_cursor..]
+            .iter()
+            .cloned()
+            .collect();
+        self.dispatch_cursor = self.pending_events.len();
+
+        new_events
+            .into_iter()
+            .map(|e| (e, live_callbacks.clone()))
+            .collect()
     }
 
     /// Initialize the document: create Root → Document → Frame → Block → InlineElement.
@@ -160,6 +207,8 @@ impl TextDocumentInner {
             cursors: Vec::new(),
             pending_events: Vec::new(),
             callbacks: Vec::new(),
+            dispatch_cursor: 0,
+            resource_cache: HashMap::new(),
         })
     }
 }
@@ -167,6 +216,20 @@ impl TextDocumentInner {
 impl Drop for TextDocumentInner {
     fn drop(&mut self) {
         self.ctx.shutdown();
+    }
+}
+
+/// Dispatch queued events outside the lock.
+///
+/// Call this after releasing the document mutex to avoid deadlocks
+/// when callbacks call back into the document.
+pub(crate) fn dispatch_queued_events(
+    queued: Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)>,
+) {
+    for (event, callbacks) in queued {
+        for cb in &callbacks {
+            cb(event.clone());
+        }
     }
 }
 

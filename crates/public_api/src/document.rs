@@ -1,6 +1,8 @@
 //! TextDocument implementation.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use anyhow::Result;
 use base64::Engine;
@@ -50,19 +52,23 @@ impl TextDocument {
 
     /// Replace the entire document with plain text. Clears undo history.
     pub fn set_plain_text(&self, text: &str) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
-        let dto = frontend::document_io::ImportPlainTextDto {
-            plain_text: text.into(),
+        let queued = {
+            let mut inner = self.inner.lock();
+            let dto = frontend::document_io::ImportPlainTextDto {
+                plain_text: text.into(),
+            };
+            document_io_commands::import_plain_text(&inner.ctx, &dto)?;
+            undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
+            inner.queue_event(DocumentEvent::DocumentReset);
+            inner.take_queued_events()
         };
-        document_io_commands::import_plain_text(&inner.ctx, &dto)?;
-        undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
-        inner.emit_event(DocumentEvent::DocumentReset);
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Export the entire document as plain text.
     pub fn to_plain_text(&self) -> Result<String> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = document_io_commands::export_plain_text(&inner.ctx)?;
         Ok(dto.plain_text)
     }
@@ -71,7 +77,7 @@ impl TextDocument {
     ///
     /// This is a **long operation**. Returns a typed [`Operation`] handle.
     pub fn set_markdown(&self, markdown: &str) -> Result<Operation<MarkdownImportResult>> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = frontend::document_io::ImportMarkdownDto {
             markdown_text: markdown.into(),
         };
@@ -94,7 +100,7 @@ impl TextDocument {
 
     /// Export the entire document as Markdown.
     pub fn to_markdown(&self) -> Result<String> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = document_io_commands::export_markdown(&inner.ctx)?;
         Ok(dto.markdown_text)
     }
@@ -103,7 +109,7 @@ impl TextDocument {
     ///
     /// This is a **long operation**. Returns a typed [`Operation`] handle.
     pub fn set_html(&self, html: &str) -> Result<Operation<HtmlImportResult>> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = frontend::document_io::ImportHtmlDto {
             html_text: html.into(),
         };
@@ -126,14 +132,14 @@ impl TextDocument {
 
     /// Export the entire document as HTML.
     pub fn to_html(&self) -> Result<String> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = document_io_commands::export_html(&inner.ctx)?;
         Ok(dto.html_text)
     }
 
     /// Export the entire document as LaTeX.
     pub fn to_latex(&self, document_class: &str, include_preamble: bool) -> Result<String> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = frontend::document_io::ExportLatexDto {
             document_class: document_class.into(),
             include_preamble,
@@ -146,7 +152,7 @@ impl TextDocument {
     ///
     /// This is a **long operation**. Returns a typed [`Operation`] handle.
     pub fn to_docx(&self, output_path: &str) -> Result<Operation<DocxExportResult>> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = frontend::document_io::ExportDocxDto {
             output_path: output_path.into(),
         };
@@ -170,13 +176,17 @@ impl TextDocument {
 
     /// Clear all document content and reset to an empty state.
     pub fn clear(&self) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
-        let dto = frontend::document_io::ImportPlainTextDto {
-            plain_text: String::new(),
+        let queued = {
+            let mut inner = self.inner.lock();
+            let dto = frontend::document_io::ImportPlainTextDto {
+                plain_text: String::new(),
+            };
+            document_io_commands::import_plain_text(&inner.ctx, &dto)?;
+            undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
+            inner.queue_event(DocumentEvent::DocumentReset);
+            inner.take_queued_events()
         };
-        document_io_commands::import_plain_text(&inner.ctx, &dto)?;
-        undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
-        inner.emit_event(DocumentEvent::DocumentReset);
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
@@ -190,7 +200,7 @@ impl TextDocument {
     /// Create a cursor at the given position.
     pub fn cursor_at(&self, position: usize) -> TextCursor {
         let data = {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock();
             inner.register_cursor(position)
         };
         TextCursor {
@@ -203,7 +213,7 @@ impl TextDocument {
 
     /// Get document statistics. O(1) — reads cached values.
     pub fn stats(&self) -> DocumentStats {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = document_inspection_commands::get_document_stats(&inner.ctx)
             .expect("get_document_stats should not fail");
         DocumentStats::from(&dto)
@@ -226,7 +236,7 @@ impl TextDocument {
 
     /// Get text at a position for a given length.
     pub fn text_at(&self, position: usize, length: usize) -> Result<String> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = frontend::document_inspection::GetTextAtPositionDto {
             position: to_i64(position),
             length: to_i64(length),
@@ -237,7 +247,7 @@ impl TextDocument {
 
     /// Get info about the block at a position. O(log n).
     pub fn block_at(&self, position: usize) -> Result<BlockInfo> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(position),
         };
@@ -247,7 +257,7 @@ impl TextDocument {
 
     /// Get the block format at a position.
     pub fn block_format_at(&self, position: usize) -> Result<BlockFormat> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(position),
         };
@@ -268,7 +278,7 @@ impl TextDocument {
         from: usize,
         options: &FindOptions,
     ) -> Result<Option<FindMatch>> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = options.to_find_text_dto(query, from);
         let result = document_search_commands::find_text(&inner.ctx, &dto)?;
         Ok(convert::find_result_to_match(&result))
@@ -276,7 +286,7 @@ impl TextDocument {
 
     /// Find all occurrences.
     pub fn find_all(&self, query: &str, options: &FindOptions) -> Result<Vec<FindMatch>> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = options.to_find_all_dto(query);
         let result = document_search_commands::find_all(&inner.ctx, &dto)?;
         Ok(convert::find_all_to_matches(&result))
@@ -290,7 +300,7 @@ impl TextDocument {
         replace_all: bool,
         options: &FindOptions,
     ) -> Result<usize> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let dto = options.to_replace_dto(query, replacement, replace_all);
         let result =
             document_search_commands::replace_text(&inner.ctx, Some(inner.stack_id), &dto)?;
@@ -307,7 +317,7 @@ impl TextDocument {
         mime_type: &str,
         data: &[u8],
     ) -> Result<()> {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         let dto = frontend::resource::dtos::CreateResourceDto {
             created_at: Default::default(),
             updated_at: Default::default(),
@@ -317,22 +327,38 @@ impl TextDocument {
             mime_type: mime_type.into(),
             data_base64: BASE64.encode(data),
         };
-        resource_commands::create_resource(
+        let created = resource_commands::create_resource(
             &inner.ctx,
             Some(inner.stack_id),
             &dto,
             inner.document_id,
             -1,
         )?;
+        inner.resource_cache.insert(name.to_string(), created.id);
         Ok(())
     }
 
     /// Get a resource by name. Returns `None` if not found.
+    ///
+    /// Uses an internal cache to avoid scanning all resources on repeated lookups.
     pub fn resource(&self, name: &str) -> Result<Option<Vec<u8>>> {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
+
+        // Fast path: check the name → ID cache.
+        if let Some(&id) = inner.resource_cache.get(name) {
+            if let Some(r) = resource_commands::get_resource(&inner.ctx, &id)? {
+                let bytes = BASE64.decode(&r.data_base64)?;
+                return Ok(Some(bytes));
+            }
+            // ID was stale — fall through to full scan.
+            inner.resource_cache.remove(name);
+        }
+
+        // Slow path: linear scan, then populate cache for the match.
         let all = resource_commands::get_all_resource(&inner.ctx)?;
         for r in &all {
             if r.name == name {
+                inner.resource_cache.insert(name.to_string(), r.id);
                 let bytes = BASE64.decode(&r.data_base64)?;
                 return Ok(Some(bytes));
             }
@@ -344,31 +370,31 @@ impl TextDocument {
 
     /// Undo the last operation.
     pub fn undo(&self) -> Result<()> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         undo_redo_commands::undo(&inner.ctx, Some(inner.stack_id))
     }
 
     /// Redo the last undone operation.
     pub fn redo(&self) -> Result<()> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         undo_redo_commands::redo(&inner.ctx, Some(inner.stack_id))
     }
 
     /// Returns true if there are operations that can be undone.
     pub fn can_undo(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id))
     }
 
     /// Returns true if there are operations that can be redone.
     pub fn can_redo(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id))
     }
 
     /// Clear all undo/redo history.
     pub fn clear_undo_redo(&self) {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
     }
 
@@ -376,23 +402,27 @@ impl TextDocument {
 
     /// Returns true if the document has been modified since creation or last reset.
     pub fn is_modified(&self) -> bool {
-        self.inner.lock().unwrap().modified
+        self.inner.lock().modified
     }
 
     /// Set or clear the modified flag.
     pub fn set_modified(&self, modified: bool) {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.modified != modified {
-            inner.modified = modified;
-            inner.emit_event(DocumentEvent::ModificationChanged(modified));
-        }
+        let queued = {
+            let mut inner = self.inner.lock();
+            if inner.modified != modified {
+                inner.modified = modified;
+                inner.queue_event(DocumentEvent::ModificationChanged(modified));
+            }
+            inner.take_queued_events()
+        };
+        crate::inner::dispatch_queued_events(queued);
     }
 
     // ── Document properties ──────────────────────────────────
 
     /// Get the document title.
     pub fn title(&self) -> String {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         document_commands::get_document(&inner.ctx, &inner.document_id)
             .ok()
             .flatten()
@@ -402,7 +432,7 @@ impl TextDocument {
 
     /// Set the document title.
     pub fn set_title(&self, title: &str) -> Result<()> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let doc = document_commands::get_document(&inner.ctx, &inner.document_id)?
             .ok_or_else(|| anyhow::anyhow!("document not found"))?;
         let mut update: frontend::document::dtos::UpdateDocumentDto = doc.into();
@@ -413,7 +443,7 @@ impl TextDocument {
 
     /// Get the text direction.
     pub fn text_direction(&self) -> TextDirection {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         document_commands::get_document(&inner.ctx, &inner.document_id)
             .ok()
             .flatten()
@@ -423,7 +453,7 @@ impl TextDocument {
 
     /// Set the text direction.
     pub fn set_text_direction(&self, direction: TextDirection) -> Result<()> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let doc = document_commands::get_document(&inner.ctx, &inner.document_id)?
             .ok_or_else(|| anyhow::anyhow!("document not found"))?;
         let mut update: frontend::document::dtos::UpdateDocumentDto = doc.into();
@@ -434,7 +464,7 @@ impl TextDocument {
 
     /// Get the default wrap mode.
     pub fn default_wrap_mode(&self) -> WrapMode {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         document_commands::get_document(&inner.ctx, &inner.document_id)
             .ok()
             .flatten()
@@ -444,7 +474,7 @@ impl TextDocument {
 
     /// Set the default wrap mode.
     pub fn set_default_wrap_mode(&self, mode: WrapMode) -> Result<()> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let doc = document_commands::get_document(&inner.ctx, &inner.document_id)?
             .ok_or_else(|| anyhow::anyhow!("document not found"))?;
         let mut update: frontend::document::dtos::UpdateDocumentDto = doc.into();
@@ -463,15 +493,16 @@ impl TextDocument {
     /// dispatch heavy work to another thread or queue.
     pub fn on_change<F>(&self, callback: F) -> Subscription
     where
-        F: Fn(DocumentEvent) + Send + 'static,
+        F: Fn(DocumentEvent) + Send + Sync + 'static,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         events::subscribe_inner(&mut inner, callback)
     }
 
     /// Drain all pending events since the last call.
     pub fn poll_events(&self) -> Vec<DocumentEvent> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
+        inner.dispatch_cursor = 0;
         std::mem::take(&mut inner.pending_events)
     }
 }

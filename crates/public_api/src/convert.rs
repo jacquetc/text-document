@@ -6,20 +6,22 @@
 use crate::{
     BlockFormat, BlockInfo, DocumentStats, FindMatch, FindOptions, FrameFormat, TextFormat,
 };
-use frontend::common::entities as ent;
-// The DTOs in document_formatting/document_editing define their own copies of
-// enums. We convert from the common::entities versions (re-exported by our
-// public API) to the DTO-local versions via helper functions below.
-
-use frontend::document_formatting::dtos as fmt_dtos;
+use frontend::common::entities::{
+    Alignment, CharVerticalAlignment, MarkerType, UnderlineStyle,
+};
 
 // ── Position conversion ─────────────────────────────────────────
 
 pub fn to_i64(v: usize) -> i64 {
+    debug_assert!(
+        v <= i64::MAX as usize,
+        "position overflow: {v}"
+    );
     v as i64
 }
 
 pub fn to_usize(v: i64) -> usize {
+    debug_assert!(v >= 0, "negative position: {v}");
     v.max(0) as usize
 }
 
@@ -133,54 +135,6 @@ pub fn find_all_to_matches(dto: &frontend::document_search::FindAllResultDto) ->
         .collect()
 }
 
-// ── Enum conversion helpers ──────────────────────────────────────
-// common::entities enums → document_formatting::dtos enums (same variant names,
-// different crate-local types).
-
-fn to_fmt_underline_style(v: &ent::UnderlineStyle) -> fmt_dtos::UnderlineStyle {
-    match v {
-        ent::UnderlineStyle::NoUnderline => fmt_dtos::UnderlineStyle::NoUnderline,
-        ent::UnderlineStyle::SingleUnderline => fmt_dtos::UnderlineStyle::SingleUnderline,
-        ent::UnderlineStyle::DashUnderline => fmt_dtos::UnderlineStyle::DashUnderline,
-        ent::UnderlineStyle::DotLine => fmt_dtos::UnderlineStyle::DotLine,
-        ent::UnderlineStyle::DashDotLine => fmt_dtos::UnderlineStyle::DashDotLine,
-        ent::UnderlineStyle::DashDotDotLine => fmt_dtos::UnderlineStyle::DashDotDotLine,
-        ent::UnderlineStyle::WaveUnderline => fmt_dtos::UnderlineStyle::WaveUnderline,
-        ent::UnderlineStyle::SpellCheckUnderline => fmt_dtos::UnderlineStyle::SpellCheckUnderline,
-    }
-}
-
-fn to_fmt_char_vertical_alignment(
-    v: &ent::CharVerticalAlignment,
-) -> fmt_dtos::CharVerticalAlignment {
-    match v {
-        ent::CharVerticalAlignment::Normal => fmt_dtos::CharVerticalAlignment::Normal,
-        ent::CharVerticalAlignment::SuperScript => fmt_dtos::CharVerticalAlignment::SuperScript,
-        ent::CharVerticalAlignment::SubScript => fmt_dtos::CharVerticalAlignment::SubScript,
-        ent::CharVerticalAlignment::Middle => fmt_dtos::CharVerticalAlignment::Middle,
-        ent::CharVerticalAlignment::Bottom => fmt_dtos::CharVerticalAlignment::Bottom,
-        ent::CharVerticalAlignment::Top => fmt_dtos::CharVerticalAlignment::Top,
-        ent::CharVerticalAlignment::Baseline => fmt_dtos::CharVerticalAlignment::Baseline,
-    }
-}
-
-fn to_fmt_alignment(v: &ent::Alignment) -> fmt_dtos::Alignment {
-    match v {
-        ent::Alignment::Left => fmt_dtos::Alignment::Left,
-        ent::Alignment::Right => fmt_dtos::Alignment::Right,
-        ent::Alignment::Center => fmt_dtos::Alignment::Center,
-        ent::Alignment::Justify => fmt_dtos::Alignment::Justify,
-    }
-}
-
-fn to_fmt_marker_type(v: &ent::MarkerType) -> fmt_dtos::MarkerType {
-    match v {
-        ent::MarkerType::NoMarker => fmt_dtos::MarkerType::NoMarker,
-        ent::MarkerType::Unchecked => fmt_dtos::MarkerType::Unchecked,
-        ent::MarkerType::Checked => fmt_dtos::MarkerType::Checked,
-    }
-}
-
 // ── TextFormat → SetTextFormatDto ───────────────────────────────
 
 impl TextFormat {
@@ -204,14 +158,12 @@ impl TextFormat {
             word_spacing: opt_i32_to_i64(self.word_spacing),
             underline_style: self
                 .underline_style
-                .as_ref()
-                .map(to_fmt_underline_style)
-                .unwrap_or(fmt_dtos::UnderlineStyle::NoUnderline),
+                .clone()
+                .unwrap_or(UnderlineStyle::NoUnderline),
             vertical_alignment: self
                 .vertical_alignment
-                .as_ref()
-                .map(to_fmt_char_vertical_alignment)
-                .unwrap_or(fmt_dtos::CharVerticalAlignment::Normal),
+                .clone()
+                .unwrap_or(CharVerticalAlignment::Normal),
         }
     }
 
@@ -269,16 +221,14 @@ impl BlockFormat {
             anchor: to_i64(anchor),
             alignment: self
                 .alignment
-                .as_ref()
-                .map(to_fmt_alignment)
-                .unwrap_or(fmt_dtos::Alignment::Left),
+                .clone()
+                .unwrap_or(Alignment::Left),
             heading_level: opt_u8_to_i64(self.heading_level),
             indent: opt_u8_to_i64(self.indent),
             marker: self
                 .marker
-                .as_ref()
-                .map(to_fmt_marker_type)
-                .unwrap_or(fmt_dtos::MarkerType::NoMarker),
+                .clone()
+                .unwrap_or(MarkerType::NoMarker),
         }
     }
 }
