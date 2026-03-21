@@ -912,6 +912,8 @@ features:
           fields:
             - name: replacements_count
               type: integer
+            - name: skipped_cross_block
+              type: integer
 
   # ── Document Inspection (read-only queries about structure) ──
   - name: document_inspection

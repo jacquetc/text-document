@@ -42,4 +42,6 @@ pub struct ReplaceTextDto {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ReplaceResultDto {
     pub replacements_count: i64,
+    /// Number of matches that were skipped because they span block boundaries.
+    pub skipped_cross_block: i64,
 }
