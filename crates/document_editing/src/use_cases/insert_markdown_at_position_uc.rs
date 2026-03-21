@@ -9,7 +9,7 @@ use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
 use common::parser_tools::content_parser;
 use common::snapshot::EntityTreeSnapshot;
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
 
@@ -50,7 +50,7 @@ macro_rules! impl_content_insert {
             parsed_blocks: &[content_parser::ParsedBlock],
         ) -> Result<(i64, i64, EntityTreeSnapshot)> {
             let root = uow
-                .get_root(&1)?
+                .get_root(&ROOT_ENTITY_ID)?
                 .ok_or_else(|| anyhow!("Root entity not found"))?;
             let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
             let doc_id = *doc_ids

@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use common::entities::{Alignment, CharVerticalAlignment, MarkerType, UnderlineStyle};
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetTextFormatDto {
     pub position: i64,
@@ -20,30 +22,6 @@ pub struct SetTextFormatDto {
     pub vertical_alignment: CharVerticalAlignment,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
-pub enum UnderlineStyle {
-    #[default]
-    NoUnderline,
-    SingleUnderline,
-    DashUnderline,
-    DotLine,
-    DashDotLine,
-    DashDotDotLine,
-    WaveUnderline,
-    SpellCheckUnderline,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
-pub enum CharVerticalAlignment {
-    #[default]
-    Normal,
-    SuperScript,
-    SubScript,
-    Middle,
-    Bottom,
-    Top,
-    Baseline,
-}
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MergeTextFormatDto {
     pub position: i64,
@@ -61,23 +39,6 @@ pub struct SetBlockFormatDto {
     pub heading_level: i64,
     pub indent: i64,
     pub marker: MarkerType,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
-pub enum Alignment {
-    #[default]
-    Left,
-    Right,
-    Center,
-    Justify,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
-pub enum MarkerType {
-    #[default]
-    NoMarker,
-    Unchecked,
-    Checked,
 }
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetFrameFormatDto {

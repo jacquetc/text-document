@@ -9,7 +9,7 @@ use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
 use common::parser_tools::fragment_schema::FragmentData;
 use common::snapshot::EntityTreeSnapshot;
-use common::types::EntityId;
+use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
 
@@ -68,7 +68,7 @@ fn execute_insert_fragment(
     }
 
     let root = uow
-        .get_root(&1)?
+        .get_root(&ROOT_ENTITY_ID)?
         .ok_or_else(|| anyhow!("Root entity not found"))?;
     let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
     let doc_id = *doc_ids

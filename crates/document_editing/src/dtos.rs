@@ -78,18 +78,7 @@ pub struct CreateListDto {
     pub style: ListStyle,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
-pub enum ListStyle {
-    #[default]
-    Disc,
-    Circle,
-    Square,
-    Decimal,
-    LowerAlpha,
-    UpperAlpha,
-    LowerRoman,
-    UpperRoman,
-}
+pub use common::entities::ListStyle;
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CreateListResultDto {
     pub list_id: i64,
