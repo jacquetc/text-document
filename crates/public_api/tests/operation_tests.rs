@@ -1,0 +1,170 @@
+use text_document::TextDocument;
+
+// ── Markdown import (Operation) ──────────────────────────────────
+
+#[test]
+fn markdown_import_wait() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("# Hello\n\nWorld").unwrap();
+    let result = op.wait().unwrap();
+    assert!(result.block_count >= 2);
+    let text = doc.to_plain_text().unwrap();
+    assert!(text.contains("Hello"));
+    assert!(text.contains("World"));
+}
+
+#[test]
+fn markdown_import_operation_id() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("Some text").unwrap();
+    assert!(!op.id().is_empty());
+    op.wait().unwrap();
+}
+
+#[test]
+fn markdown_import_is_done_after_wait() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("Test").unwrap();
+    // Before waiting, it may or may not be done
+    let _id = op.id().to_string();
+    let result = op.wait().unwrap();
+    assert!(result.block_count >= 1);
+}
+
+#[test]
+fn markdown_import_try_result() {
+    let doc = TextDocument::new();
+    let mut op = doc.set_markdown("Quick").unwrap();
+    // Poll until done
+    loop {
+        if let Some(result) = op.try_result() {
+            let r = result.unwrap();
+            assert!(r.block_count >= 1);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn markdown_import_progress() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("# Title\n\nParagraph 1\n\nParagraph 2")
+        .unwrap();
+    // Progress may or may not be available depending on timing
+    let _progress = op.progress();
+    op.wait().unwrap();
+}
+
+// ── HTML import (Operation) ──────────────────────────────────────
+
+#[test]
+fn html_import_wait() {
+    let doc = TextDocument::new();
+    let op = doc.set_html("<p>Hello</p><p>World</p>").unwrap();
+    let result = op.wait().unwrap();
+    assert!(result.block_count >= 2);
+    let text = doc.to_plain_text().unwrap();
+    assert!(text.contains("Hello"));
+    assert!(text.contains("World"));
+}
+
+#[test]
+fn html_import_operation_id() {
+    let doc = TextDocument::new();
+    let op = doc.set_html("<p>Test</p>").unwrap();
+    assert!(!op.id().is_empty());
+    op.wait().unwrap();
+}
+
+#[test]
+fn html_import_is_done() {
+    let doc = TextDocument::new();
+    let op = doc.set_html("<p>Check</p>").unwrap();
+    op.wait().unwrap();
+    // After wait, the operation is consumed, so we can verify the doc
+    assert!(doc.character_count() > 0);
+}
+
+// ── DOCX export (Operation) ──────────────────────────────────────
+
+#[test]
+fn docx_export_wait() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("DOCX content").unwrap();
+
+    let tmp = std::env::temp_dir().join("test_export.docx");
+    let op = doc.to_docx(tmp.to_str().unwrap()).unwrap();
+    let result = op.wait().unwrap();
+    assert!(result.paragraph_count >= 1);
+    assert!(!result.file_path.is_empty());
+    // Clean up
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
+fn docx_export_operation_id() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Test").unwrap();
+
+    let tmp = std::env::temp_dir().join("test_export_id.docx");
+    let op = doc.to_docx(tmp.to_str().unwrap()).unwrap();
+    assert!(!op.id().is_empty());
+    op.wait().unwrap();
+    let _ = std::fs::remove_file(&tmp);
+}
+
+// ── Operation cancel ─────────────────────────────────────────────
+
+#[test]
+fn cancel_operation() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("# Some markdown\n\nWith content").unwrap();
+    // Cancel is a no-op if already finished, shouldn't panic
+    op.cancel();
+    // The operation may or may not have completed before cancel
+}
+
+// ── Markdown export ──────────────────────────────────────────────
+
+#[test]
+fn markdown_roundtrip() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("# Title\n\nParagraph text").unwrap();
+    op.wait().unwrap();
+    let md = doc.to_markdown().unwrap();
+    assert!(md.contains("Title"));
+    assert!(md.contains("Paragraph text"));
+}
+
+// ── HTML export ──────────────────────────────────────────────────
+
+#[test]
+fn html_roundtrip() {
+    let doc = TextDocument::new();
+    let op = doc.set_html("<h1>Title</h1><p>Body</p>").unwrap();
+    op.wait().unwrap();
+    let html = doc.to_html().unwrap();
+    assert!(html.contains("Title"));
+    assert!(html.contains("Body"));
+}
+
+// ── LaTeX export ─────────────────────────────────────────────────
+
+#[test]
+fn latex_export() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("LaTeX content").unwrap();
+    let latex = doc.to_latex("article", false).unwrap();
+    assert!(latex.contains("LaTeX content"));
+}
+
+#[test]
+fn latex_export_with_preamble() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Preamble test").unwrap();
+    let latex = doc.to_latex("report", true).unwrap();
+    assert!(latex.contains("\\documentclass"));
+    assert!(latex.contains("Preamble test"));
+}

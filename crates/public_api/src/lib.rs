@@ -1,0 +1,201 @@
+//! # text-document
+//!
+//! A rich text document model for Rust.
+//!
+//! Provides a [`TextDocument`] as the main entry point and [`TextCursor`] for
+//! cursor-based editing, inspired by Qt's QTextDocument/QTextCursor API.
+//!
+//! ```rust,no_run
+//! use text_document::{TextDocument, MoveMode, MoveOperation};
+//!
+//! let doc = TextDocument::new();
+//! doc.set_plain_text("Hello world").unwrap();
+//!
+//! let cursor = doc.cursor();
+//! cursor.move_position(MoveOperation::EndOfWord, MoveMode::KeepAnchor, 1);
+//! cursor.insert_text("Goodbye").unwrap(); // replaces "Hello"
+//!
+//! // Multiple cursors on the same document
+//! let c1 = doc.cursor();
+//! let c2 = doc.cursor_at(5);
+//! c1.insert_text("A").unwrap();
+//! // c2's position is automatically adjusted
+//!
+//! doc.undo().unwrap();
+//! ```
+
+mod convert;
+mod cursor;
+mod document;
+mod events;
+mod fragment;
+mod inner;
+mod operation;
+
+// ── Re-exports from generated code (enums that consumers need) ───
+pub use frontend::common::entities::{
+    Alignment, CharVerticalAlignment, FramePosition, InlineContent, ListStyle, MarkerType,
+    ResourceType, TextDirection, UnderlineStyle, WrapMode,
+};
+
+// ── Error type ───────────────────────────────────────────────────
+pub type Result<T> = anyhow::Result<T>;
+
+// ── Public API types ─────────────────────────────────────────────
+pub use cursor::TextCursor;
+pub use document::TextDocument;
+pub use events::{DocumentEvent, Subscription};
+pub use fragment::DocumentFragment;
+pub use operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Operation};
+
+// TextDocument and TextCursor are Send + Sync (all fields are Arc<Mutex<...>>).
+const _: () = {
+    fn assert_send_sync<T: Send + Sync>() {}
+    fn _assert_all() {
+        assert_send_sync::<TextDocument>();
+        assert_send_sync::<TextCursor>();
+    }
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Public format types
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Character/text formatting. All fields are optional: `None` means
+/// "not set — inherit from the block's default or the document's default."
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TextFormat {
+    pub font_family: Option<String>,
+    pub font_point_size: Option<u32>,
+    pub font_weight: Option<u32>,
+    pub font_bold: Option<bool>,
+    pub font_italic: Option<bool>,
+    pub font_underline: Option<bool>,
+    pub font_overline: Option<bool>,
+    pub font_strikeout: Option<bool>,
+    pub letter_spacing: Option<i32>,
+    pub word_spacing: Option<i32>,
+    pub underline_style: Option<UnderlineStyle>,
+    pub vertical_alignment: Option<CharVerticalAlignment>,
+    pub anchor_href: Option<String>,
+    pub anchor_names: Vec<String>,
+    pub is_anchor: Option<bool>,
+    pub tooltip: Option<String>,
+}
+
+/// Block (paragraph) formatting. All fields are optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BlockFormat {
+    pub alignment: Option<Alignment>,
+    pub top_margin: Option<i32>,
+    pub bottom_margin: Option<i32>,
+    pub left_margin: Option<i32>,
+    pub right_margin: Option<i32>,
+    pub heading_level: Option<u8>,
+    pub indent: Option<u8>,
+    pub text_indent: Option<i32>,
+    pub marker: Option<MarkerType>,
+    pub tab_positions: Vec<i32>,
+}
+
+/// Frame formatting. All fields are optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrameFormat {
+    pub height: Option<i32>,
+    pub width: Option<i32>,
+    pub top_margin: Option<i32>,
+    pub bottom_margin: Option<i32>,
+    pub left_margin: Option<i32>,
+    pub right_margin: Option<i32>,
+    pub padding: Option<i32>,
+    pub border: Option<i32>,
+    pub position: Option<FramePosition>,
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Enums for cursor movement
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Controls whether a movement collapses or extends the selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveMode {
+    /// Move both position and anchor — collapses selection.
+    MoveAnchor,
+    /// Move only position, keep anchor — creates or extends selection.
+    KeepAnchor,
+}
+
+/// Semantic cursor movement operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveOperation {
+    NoMove,
+    Start,
+    End,
+    StartOfLine,
+    EndOfLine,
+    StartOfBlock,
+    EndOfBlock,
+    StartOfWord,
+    EndOfWord,
+    PreviousBlock,
+    NextBlock,
+    PreviousCharacter,
+    NextCharacter,
+    PreviousWord,
+    NextWord,
+    Up,
+    Down,
+    Left,
+    Right,
+    WordLeft,
+    WordRight,
+}
+
+/// Quick-select a region around the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionType {
+    WordUnderCursor,
+    LineUnderCursor,
+    BlockUnderCursor,
+    Document,
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Read-only info types
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Document-level statistics. O(1) cached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentStats {
+    pub character_count: usize,
+    pub word_count: usize,
+    pub block_count: usize,
+    pub frame_count: usize,
+    pub image_count: usize,
+    pub list_count: usize,
+}
+
+/// Info about a block at a given position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockInfo {
+    pub block_id: usize,
+    pub block_number: usize,
+    pub start: usize,
+    pub length: usize,
+}
+
+/// A single search match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindMatch {
+    pub position: usize,
+    pub length: usize,
+}
+
+/// Options for find / find_all / replace operations.
+#[derive(Debug, Clone, Default)]
+pub struct FindOptions {
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub use_regex: bool,
+    pub search_backward: bool,
+}
