@@ -37,8 +37,8 @@ impl From<&ResourceDto> for Resource {
     fn from(dto: &ResourceDto) -> Self {
         Resource {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             resource_type: dto.resource_type.clone(),
             name: dto.name.clone(),
             url: dto.url.clone(),
@@ -93,8 +93,8 @@ impl From<&CreateResourceDto> for Resource {
     fn from(dto: &CreateResourceDto) -> Self {
         Resource {
             id: 0,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             resource_type: dto.resource_type.clone(),
             name: dto.name.clone(),
             url: dto.url.clone(),
@@ -149,8 +149,8 @@ impl From<&UpdateResourceDto> for Resource {
     fn from(dto: &UpdateResourceDto) -> Self {
         Resource {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             resource_type: dto.resource_type.clone(),
             name: dto.name.clone(),
             url: dto.url.clone(),

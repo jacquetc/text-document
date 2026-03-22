@@ -35,10 +35,10 @@ impl From<&ListDto> for List {
     fn from(dto: &ListDto) -> Self {
         List {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             style: dto.style.clone(),
-            indent: dto.indent.clone(),
+            indent: dto.indent,
             prefix: dto.prefix.clone(),
             suffix: dto.suffix.clone(),
         }
@@ -87,10 +87,10 @@ impl From<&CreateListDto> for List {
     fn from(dto: &CreateListDto) -> Self {
         List {
             id: 0,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             style: dto.style.clone(),
-            indent: dto.indent.clone(),
+            indent: dto.indent,
             prefix: dto.prefix.clone(),
             suffix: dto.suffix.clone(),
         }
@@ -139,10 +139,10 @@ impl From<&UpdateListDto> for List {
     fn from(dto: &UpdateListDto) -> Self {
         List {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             style: dto.style.clone(),
-            indent: dto.indent.clone(),
+            indent: dto.indent,
             prefix: dto.prefix.clone(),
             suffix: dto.suffix.clone(),
         }
