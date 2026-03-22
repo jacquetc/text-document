@@ -32,11 +32,13 @@ mod fragment;
 mod inner;
 mod operation;
 
-// ── Re-exports from generated code (enums that consumers need) ───
-pub use frontend::common::entities::{
-    Alignment, CharVerticalAlignment, FramePosition, InlineContent, ListStyle, MarkerType,
-    ResourceType, TextDirection, UnderlineStyle, WrapMode,
-};
+// ── Re-exports from entity DTOs (enums that consumers need) ──────
+pub use frontend::block::dtos::{Alignment, MarkerType};
+pub use frontend::document::dtos::{TextDirection, WrapMode};
+pub use frontend::frame::dtos::FramePosition;
+pub use frontend::inline_element::dtos::{CharVerticalAlignment, InlineContent, UnderlineStyle};
+pub use frontend::list::dtos::ListStyle;
+pub use frontend::resource::dtos::ResourceType;
 
 // ── Error type ───────────────────────────────────────────────────
 pub type Result<T> = anyhow::Result<T>;
