@@ -257,7 +257,7 @@ impl UndoRedoManager {
 
         if let Some(mut command) = stack.redo_stack.pop() {
             if let Err(e) = command.redo() {
-                log::error!("Undo failed, dropping command: {e}");
+                log::error!("Redo failed, dropping command: {e}");
                 // command dropped intentionally
                 return Err(e);
             }
