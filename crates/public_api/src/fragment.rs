@@ -327,16 +327,14 @@ fn block_style_attr(block: &FragmentBlock) -> String {
         };
         parts.push(format!("text-align: {}", value));
     }
-    if let Some(n) = block.indent {
-        if n > 0 {
+    if let Some(n) = block.indent
+        && n > 0 {
             parts.push(format!("margin-left: {}em", n));
         }
-    }
-    if let Some(px) = block.text_indent {
-        if px != 0 {
+    if let Some(px) = block.text_indent
+        && px != 0 {
             parts.push(format!("text-indent: {}px", px));
         }
-    }
     if let Some(px) = block.top_margin {
         parts.push(format!("margin-top: {}px", px));
     }
@@ -399,11 +397,10 @@ fn push_inline_html(out: &mut String, elements: &[FragmentElement]) {
         if is_strikeout {
             result = format!("<s>{}</s>", result);
         }
-        if is_anchor {
-            if let Some(ref href) = elem.fmt_anchor_href {
+        if is_anchor
+            && let Some(ref href) = elem.fmt_anchor_href {
                 result = format!("<a href=\"{}\">{}</a>", escape_html(href), result);
             }
-        }
 
         out.push_str(&result);
     }

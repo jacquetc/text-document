@@ -167,10 +167,7 @@ impl TextDocumentInner {
             return Vec::new();
         }
 
-        let new_events: Vec<DocumentEvent> = self.pending_events[self.callback_cursor..]
-            .iter()
-            .cloned()
-            .collect();
+        let new_events: Vec<DocumentEvent> = self.pending_events[self.callback_cursor..].to_vec();
         self.callback_cursor = self.pending_events.len();
 
         new_events

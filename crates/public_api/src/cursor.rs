@@ -181,7 +181,7 @@ impl TextCursor {
         let pos = self.position();
         let inner = self.doc.lock();
         let stats =
-            document_inspection_commands::get_document_stats(&inner.ctx).unwrap_or_else(|_| {
+            document_inspection_commands::get_document_stats(&inner.ctx).unwrap_or({
                 frontend::document_inspection::DocumentStatsDto {
                     character_count: 0,
                     word_count: 0,
