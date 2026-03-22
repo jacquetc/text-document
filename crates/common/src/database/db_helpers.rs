@@ -13,8 +13,7 @@ pub(crate) fn delete_from_backward_junction_table(
 
     {
         let iter = junction_table.iter()?;
-        for result in iter {
-            if let Ok((left_id, right_entities)) = result {
+        for (left_id, right_entities) in iter.flatten() {
                 let left_id = left_id.value();
                 let right_entities = right_entities.value();
                 let entities_left: Vec<EntityId> = right_entities
@@ -26,7 +25,6 @@ pub(crate) fn delete_from_backward_junction_table(
                 if entities_left.len() != right_entities.len() {
                     junctions_to_modify.push((left_id, entities_left));
                 }
-            }
         }
     }
 

@@ -136,13 +136,13 @@ impl LongOperation for ExportDocxUseCase {
 
             // Check if this is a table anchor frame
             let frame = uow.get_frame(frame_id)?;
-            if let Some(ref f) = frame {
-                if let Some(table_id) = f.table {
-                    let table = self.render_table_docx(&*uow, &table_id)?;
-                    docx = docx.add_table(table);
-                    paragraph_count += 1;
-                    continue;
-                }
+            if let Some(ref f) = frame
+                && let Some(table_id) = f.table
+            {
+                let table = self.render_table_docx(&*uow, &table_id)?;
+                docx = docx.add_table(table);
+                paragraph_count += 1;
+                continue;
             }
 
             let block_ids = uow.get_frame_relationship(

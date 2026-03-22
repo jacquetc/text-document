@@ -121,16 +121,14 @@ fn execute_remove_table(
     if let Some(anchor_id) = anchor_frame_id {
         // First, remove the anchor from its parent frame's child_order
         let frames_opt = uow.get_frame_multi(&frame_ids)?;
-        for frame_opt in &frames_opt {
-            if let Some(frame) = frame_opt {
-                let neg_anchor = -(anchor_id as i64);
-                if frame.child_order.contains(&neg_anchor) {
-                    let mut updated = frame.clone();
-                    updated.child_order.retain(|&x| x != neg_anchor);
-                    updated.updated_at = now;
-                    uow.update_frame(&updated)?;
-                    break;
-                }
+        for frame in frames_opt.iter().flatten() {
+            let neg_anchor = -(anchor_id as i64);
+            if frame.child_order.contains(&neg_anchor) {
+                let mut updated = frame.clone();
+                updated.child_order.retain(|&x| x != neg_anchor);
+                updated.updated_at = now;
+                uow.update_frame(&updated)?;
+                break;
             }
         }
         uow.remove_frame(&anchor_id)?;

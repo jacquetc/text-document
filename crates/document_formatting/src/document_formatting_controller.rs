@@ -41,7 +41,7 @@ pub fn set_text_format(
 ) -> Result<()> {
     let uow_context = SetTextFormatUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = SetTextFormatUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
@@ -49,7 +49,7 @@ pub fn set_text_format(
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
 
 pub fn merge_text_format(
@@ -61,7 +61,7 @@ pub fn merge_text_format(
 ) -> Result<()> {
     let uow_context = MergeTextFormatUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = MergeTextFormatUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
@@ -69,7 +69,7 @@ pub fn merge_text_format(
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
 
 pub fn set_block_format(
@@ -81,7 +81,7 @@ pub fn set_block_format(
 ) -> Result<()> {
     let uow_context = SetBlockFormatUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = SetBlockFormatUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
@@ -89,7 +89,7 @@ pub fn set_block_format(
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
 
 pub fn set_frame_format(
@@ -101,7 +101,7 @@ pub fn set_frame_format(
 ) -> Result<()> {
     let uow_context = SetFrameFormatUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = SetFrameFormatUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
@@ -109,7 +109,7 @@ pub fn set_frame_format(
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
 
 pub fn set_table_format(
@@ -121,7 +121,7 @@ pub fn set_table_format(
 ) -> Result<()> {
     let uow_context = SetTableFormatUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = SetTableFormatUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
@@ -129,7 +129,7 @@ pub fn set_table_format(
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
 
 pub fn set_table_cell_format(
@@ -141,7 +141,7 @@ pub fn set_table_cell_format(
 ) -> Result<()> {
     let uow_context = SetTableCellFormatUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = SetTableCellFormatUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
@@ -149,5 +149,5 @@ pub fn set_table_cell_format(
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
