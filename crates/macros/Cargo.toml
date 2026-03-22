@@ -4,7 +4,7 @@
 name = "text-document-macros"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Proc macros for text-document Unit of Work generation"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

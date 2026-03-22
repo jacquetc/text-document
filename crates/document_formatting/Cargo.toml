@@ -3,7 +3,7 @@
 name = "text-document-formatting"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Undoable text and block formatting use cases for text-document"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

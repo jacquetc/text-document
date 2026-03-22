@@ -3,7 +3,7 @@
 name = "text-document-editing"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Undoable text editing use cases for text-document"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

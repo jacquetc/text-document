@@ -3,7 +3,7 @@
 name = "text-document-io"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Import/export for text-document: plain text, Markdown, HTML, LaTeX, DOCX"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

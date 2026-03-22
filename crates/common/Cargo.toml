@@ -4,7 +4,7 @@
 name = "text-document-common"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Shared entities, database, events, and undo/redo infrastructure for text-document"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

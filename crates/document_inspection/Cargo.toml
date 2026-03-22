@@ -3,7 +3,7 @@
 name = "text-document-inspection"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Document stats, position queries, and fragment extraction for text-document"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

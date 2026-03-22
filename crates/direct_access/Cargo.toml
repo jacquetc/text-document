@@ -5,7 +5,7 @@
 name = "text-document-direct-access"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Entity CRUD controllers and DTOs for text-document"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

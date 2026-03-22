@@ -4,7 +4,7 @@
 name = "text-document"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Rich text document editing library"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true

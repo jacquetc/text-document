@@ -3,7 +3,7 @@
 name = "text-document-search"
 authors.workspace = true
 documentation.workspace = true
-description.workspace = true
+description = "Find and replace use cases for text-document"
 keywords.workspace = true
 categories.workspace = true
 version.workspace = true
