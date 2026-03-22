@@ -6,9 +6,6 @@
 use crate::{
     BlockFormat, BlockInfo, DocumentStats, FindMatch, FindOptions, FrameFormat, TextFormat,
 };
-use frontend::common::entities::{
-    Alignment, CharVerticalAlignment, MarkerType, UnderlineStyle,
-};
 
 // ── Position conversion ─────────────────────────────────────────
 
@@ -23,22 +20,6 @@ pub fn to_i64(v: usize) -> i64 {
 pub fn to_usize(v: i64) -> usize {
     debug_assert!(v >= 0, "negative position: {v}");
     v.max(0) as usize
-}
-
-fn opt_u32_to_i64(v: Option<u32>) -> i64 {
-    v.map(|x| x as i64).unwrap_or(0)
-}
-
-fn opt_u8_to_i64(v: Option<u8>) -> i64 {
-    v.map(|x| x as i64).unwrap_or(0)
-}
-
-fn opt_i32_to_i64(v: Option<i32>) -> i64 {
-    v.map(|x| x as i64).unwrap_or(0)
-}
-
-fn opt_bool(v: Option<bool>) -> bool {
-    v.unwrap_or(false)
 }
 
 // ── DocumentStats ───────────────────────────────────────────────
@@ -135,7 +116,62 @@ pub fn find_all_to_matches(dto: &frontend::document_search::FindAllResultDto) ->
         .collect()
 }
 
+// ── Domain ↔ DTO enum conversions ───────────────────────────────
+//
+// The DTO layer has its own enum types, separate from domain enums
+// in `common::entities`. This keeps the API boundary stable even
+// when domain internals change.
+
+// Formatting DTOs have their own enum types (separate from entity DTO enums).
+// These conversion functions bridge the two at the public API boundary.
+use frontend::document_formatting::dtos as fmt_dto;
+
+fn underline_style_to_dto(v: &crate::UnderlineStyle) -> fmt_dto::UnderlineStyle {
+    match v {
+        crate::UnderlineStyle::NoUnderline => fmt_dto::UnderlineStyle::NoUnderline,
+        crate::UnderlineStyle::SingleUnderline => fmt_dto::UnderlineStyle::SingleUnderline,
+        crate::UnderlineStyle::DashUnderline => fmt_dto::UnderlineStyle::DashUnderline,
+        crate::UnderlineStyle::DotLine => fmt_dto::UnderlineStyle::DotLine,
+        crate::UnderlineStyle::DashDotLine => fmt_dto::UnderlineStyle::DashDotLine,
+        crate::UnderlineStyle::DashDotDotLine => fmt_dto::UnderlineStyle::DashDotDotLine,
+        crate::UnderlineStyle::WaveUnderline => fmt_dto::UnderlineStyle::WaveUnderline,
+        crate::UnderlineStyle::SpellCheckUnderline => fmt_dto::UnderlineStyle::SpellCheckUnderline,
+    }
+}
+
+fn vertical_alignment_to_dto(v: &crate::CharVerticalAlignment) -> fmt_dto::CharVerticalAlignment {
+    match v {
+        crate::CharVerticalAlignment::Normal => fmt_dto::CharVerticalAlignment::Normal,
+        crate::CharVerticalAlignment::SuperScript => fmt_dto::CharVerticalAlignment::SuperScript,
+        crate::CharVerticalAlignment::SubScript => fmt_dto::CharVerticalAlignment::SubScript,
+        crate::CharVerticalAlignment::Middle => fmt_dto::CharVerticalAlignment::Middle,
+        crate::CharVerticalAlignment::Bottom => fmt_dto::CharVerticalAlignment::Bottom,
+        crate::CharVerticalAlignment::Top => fmt_dto::CharVerticalAlignment::Top,
+        crate::CharVerticalAlignment::Baseline => fmt_dto::CharVerticalAlignment::Baseline,
+    }
+}
+
+fn alignment_to_dto(v: &crate::Alignment) -> fmt_dto::Alignment {
+    match v {
+        crate::Alignment::Left => fmt_dto::Alignment::Left,
+        crate::Alignment::Right => fmt_dto::Alignment::Right,
+        crate::Alignment::Center => fmt_dto::Alignment::Center,
+        crate::Alignment::Justify => fmt_dto::Alignment::Justify,
+    }
+}
+
+fn marker_to_dto(v: &crate::MarkerType) -> fmt_dto::MarkerType {
+    match v {
+        crate::MarkerType::NoMarker => fmt_dto::MarkerType::NoMarker,
+        crate::MarkerType::Unchecked => fmt_dto::MarkerType::Unchecked,
+        crate::MarkerType::Checked => fmt_dto::MarkerType::Checked,
+    }
+}
+
 // ── TextFormat → SetTextFormatDto ───────────────────────────────
+//
+// Backend DTOs now use `Option` fields: `None` means "don't change
+// this property" and `Some(value)` means "set to value".
 
 impl TextFormat {
     pub(crate) fn to_set_dto(
@@ -146,24 +182,18 @@ impl TextFormat {
         frontend::document_formatting::SetTextFormatDto {
             position: to_i64(position),
             anchor: to_i64(anchor),
-            font_family: self.font_family.clone().unwrap_or_default(),
-            font_point_size: opt_u32_to_i64(self.font_point_size),
-            font_weight: opt_u32_to_i64(self.font_weight),
-            font_bold: opt_bool(self.font_bold),
-            font_italic: opt_bool(self.font_italic),
-            font_underline: opt_bool(self.font_underline),
-            font_overline: opt_bool(self.font_overline),
-            font_strikeout: opt_bool(self.font_strikeout),
-            letter_spacing: opt_i32_to_i64(self.letter_spacing),
-            word_spacing: opt_i32_to_i64(self.word_spacing),
-            underline_style: self
-                .underline_style
-                .clone()
-                .unwrap_or(UnderlineStyle::NoUnderline),
-            vertical_alignment: self
-                .vertical_alignment
-                .clone()
-                .unwrap_or(CharVerticalAlignment::Normal),
+            font_family: self.font_family.clone(),
+            font_point_size: self.font_point_size.map(|v| v as i64),
+            font_weight: self.font_weight.map(|v| v as i64),
+            font_bold: self.font_bold,
+            font_italic: self.font_italic,
+            font_underline: self.font_underline,
+            font_overline: self.font_overline,
+            font_strikeout: self.font_strikeout,
+            letter_spacing: self.letter_spacing.map(|v| v as i64),
+            word_spacing: self.word_spacing.map(|v| v as i64),
+            underline_style: self.underline_style.as_ref().map(underline_style_to_dto),
+            vertical_alignment: self.vertical_alignment.as_ref().map(vertical_alignment_to_dto),
         }
     }
 
@@ -219,16 +249,10 @@ impl BlockFormat {
         frontend::document_formatting::SetBlockFormatDto {
             position: to_i64(position),
             anchor: to_i64(anchor),
-            alignment: self
-                .alignment
-                .clone()
-                .unwrap_or(Alignment::Left),
-            heading_level: opt_u8_to_i64(self.heading_level),
-            indent: opt_u8_to_i64(self.indent),
-            marker: self
-                .marker
-                .clone()
-                .unwrap_or(MarkerType::NoMarker),
+            alignment: self.alignment.as_ref().map(alignment_to_dto),
+            heading_level: self.heading_level.map(|v| v as i64),
+            indent: self.indent.map(|v| v as i64),
+            marker: self.marker.as_ref().map(marker_to_dto),
         }
     }
 }
@@ -263,14 +287,14 @@ impl FrameFormat {
             position: to_i64(position),
             anchor: to_i64(anchor),
             frame_id: to_i64(frame_id),
-            height: opt_i32_to_i64(self.height),
-            width: opt_i32_to_i64(self.width),
-            top_margin: opt_i32_to_i64(self.top_margin),
-            bottom_margin: opt_i32_to_i64(self.bottom_margin),
-            left_margin: opt_i32_to_i64(self.left_margin),
-            right_margin: opt_i32_to_i64(self.right_margin),
-            padding: opt_i32_to_i64(self.padding),
-            border: opt_i32_to_i64(self.border),
+            height: self.height.map(|v| v as i64),
+            width: self.width.map(|v| v as i64),
+            top_margin: self.top_margin.map(|v| v as i64),
+            bottom_margin: self.bottom_margin.map(|v| v as i64),
+            left_margin: self.left_margin.map(|v| v as i64),
+            right_margin: self.right_margin.map(|v| v as i64),
+            padding: self.padding.map(|v| v as i64),
+            border: self.border.map(|v| v as i64),
         }
     }
 }

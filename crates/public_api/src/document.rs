@@ -12,7 +12,7 @@ use frontend::commands::{
     document_commands, document_inspection_commands, document_io_commands,
     document_search_commands, resource_commands, undo_redo_commands,
 };
-use frontend::common::entities::{ResourceType, TextDirection, WrapMode};
+use crate::{ResourceType, TextDirection, WrapMode};
 
 use crate::convert::{self, to_i64, to_usize};
 use crate::cursor::TextCursor;
@@ -59,6 +59,7 @@ impl TextDocument {
             };
             document_io_commands::import_plain_text(&inner.ctx, &dto)?;
             undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
+            inner.invalidate_text_cache();
             inner.queue_event(DocumentEvent::DocumentReset);
             inner.take_queued_events()
         };
@@ -68,16 +69,16 @@ impl TextDocument {
 
     /// Export the entire document as plain text.
     pub fn to_plain_text(&self) -> Result<String> {
-        let inner = self.inner.lock();
-        let dto = document_io_commands::export_plain_text(&inner.ctx)?;
-        Ok(dto.plain_text)
+        let mut inner = self.inner.lock();
+        Ok(inner.plain_text()?.to_string())
     }
 
     /// Replace the entire document with Markdown. Clears undo history.
     ///
     /// This is a **long operation**. Returns a typed [`Operation`] handle.
     pub fn set_markdown(&self, markdown: &str) -> Result<Operation<MarkdownImportResult>> {
-        let inner = self.inner.lock();
+        let mut inner = self.inner.lock();
+        inner.invalidate_text_cache();
         let dto = frontend::document_io::ImportMarkdownDto {
             markdown_text: markdown.into(),
         };
@@ -109,7 +110,8 @@ impl TextDocument {
     ///
     /// This is a **long operation**. Returns a typed [`Operation`] handle.
     pub fn set_html(&self, html: &str) -> Result<Operation<HtmlImportResult>> {
-        let inner = self.inner.lock();
+        let mut inner = self.inner.lock();
+        inner.invalidate_text_cache();
         let dto = frontend::document_io::ImportHtmlDto {
             html_text: html.into(),
         };
@@ -183,6 +185,7 @@ impl TextDocument {
             };
             document_io_commands::import_plain_text(&inner.ctx, &dto)?;
             undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
+            inner.invalidate_text_cache();
             inner.queue_event(DocumentEvent::DocumentReset);
             inner.take_queued_events()
         };
@@ -221,12 +224,18 @@ impl TextDocument {
 
     /// Get the total character count. O(1) — reads cached value.
     pub fn character_count(&self) -> usize {
-        self.stats().character_count
+        let inner = self.inner.lock();
+        let dto = document_inspection_commands::get_document_stats(&inner.ctx)
+            .expect("get_document_stats should not fail");
+        to_usize(dto.character_count)
     }
 
     /// Get the number of blocks (paragraphs). O(1) — reads cached value.
     pub fn block_count(&self) -> usize {
-        self.stats().block_count
+        let inner = self.inner.lock();
+        let dto = document_inspection_commands::get_document_stats(&inner.ctx)
+            .expect("get_document_stats should not fail");
+        to_usize(dto.block_count)
     }
 
     /// Returns true if the document has no text content.
@@ -300,10 +309,11 @@ impl TextDocument {
         replace_all: bool,
         options: &FindOptions,
     ) -> Result<usize> {
-        let inner = self.inner.lock();
+        let mut inner = self.inner.lock();
         let dto = options.to_replace_dto(query, replacement, replace_all);
         let result =
             document_search_commands::replace_text(&inner.ctx, Some(inner.stack_id), &dto)?;
+        inner.invalidate_text_cache();
         Ok(to_usize(result.replacements_count))
     }
 
@@ -370,14 +380,18 @@ impl TextDocument {
 
     /// Undo the last operation.
     pub fn undo(&self) -> Result<()> {
-        let inner = self.inner.lock();
-        undo_redo_commands::undo(&inner.ctx, Some(inner.stack_id))
+        let mut inner = self.inner.lock();
+        let result = undo_redo_commands::undo(&inner.ctx, Some(inner.stack_id));
+        inner.invalidate_text_cache();
+        result
     }
 
     /// Redo the last undone operation.
     pub fn redo(&self) -> Result<()> {
-        let inner = self.inner.lock();
-        undo_redo_commands::redo(&inner.ctx, Some(inner.stack_id))
+        let mut inner = self.inner.lock();
+        let result = undo_redo_commands::redo(&inner.ctx, Some(inner.stack_id));
+        inner.invalidate_text_cache();
+        result
     }
 
     /// Returns true if there are operations that can be undone.
@@ -487,10 +501,20 @@ impl TextDocument {
 
     /// Subscribe to document events via callback.
     ///
-    /// **Warning:** The callback is invoked while the document lock is held.
-    /// Do **not** call any `TextDocument` or `TextCursor` methods inside the
-    /// callback — this will deadlock. Keep the callback lightweight and
-    /// dispatch heavy work to another thread or queue.
+    /// Callbacks are invoked **outside** the document lock (after the editing
+    /// operation completes and the lock is released). It is safe to call
+    /// `TextDocument` or `TextCursor` methods from within the callback without
+    /// risk of deadlock. However, keep callbacks lightweight — they run
+    /// synchronously on the calling thread and block the caller until they
+    /// return.
+    ///
+    /// Drop the returned [`Subscription`] to unsubscribe.
+    ///
+    /// # Breaking change (v0.0.6)
+    ///
+    /// The callback bound changed from `Send` to `Send + Sync` in v0.0.6
+    /// to support `Arc`-based dispatch. Callbacks that capture non-`Sync`
+    /// types (e.g., `Rc<T>`, `Cell<T>`) must be wrapped in a `Mutex`.
     pub fn on_change<F>(&self, callback: F) -> Subscription
     where
         F: Fn(DocumentEvent) + Send + Sync + 'static,
@@ -499,11 +523,14 @@ impl TextDocument {
         events::subscribe_inner(&mut inner, callback)
     }
 
-    /// Drain all pending events since the last call.
+    /// Return events accumulated since the last `poll_events()` call.
+    ///
+    /// This delivery path is independent of callback dispatch via
+    /// [`on_change`](Self::on_change) — using both simultaneously is safe
+    /// and each path sees every event exactly once.
     pub fn poll_events(&self) -> Vec<DocumentEvent> {
         let mut inner = self.inner.lock();
-        inner.dispatch_cursor = 0;
-        std::mem::take(&mut inner.pending_events)
+        inner.drain_poll_events()
     }
 }
 

@@ -51,14 +51,31 @@ pub(crate) struct TextDocumentInner {
     // Cursor tracking
     pub cursors: Vec<Weak<Mutex<CursorData>>>,
 
-    // Event dispatch
+    // Event dispatch — two independent delivery paths:
+    //
+    // 1. **Callback path** (`on_change`): `take_queued_events()` reads from
+    //    `callback_cursor` to the end of `pending_events`, advances the cursor,
+    //    and returns events + callbacks for dispatch outside the lock.
+    //
+    // 2. **Polling path** (`poll_events`): `poll_events()` reads from
+    //    `poll_cursor` to the end of `pending_events` and advances the cursor.
+    //
+    // The two paths are independent — using both simultaneously is fine.
+    // Events are trimmed from the front of `pending_events` when both cursors
+    // have advanced past them.
     pub pending_events: Vec<DocumentEvent>,
     pub callbacks: Vec<CallbackEntry>,
-    /// Index into `pending_events` of the next event to dispatch to callbacks.
-    pub dispatch_cursor: usize,
+    /// Next event index for callback dispatch.
+    pub callback_cursor: usize,
+    /// Next event index for `poll_events()`.
+    pub poll_cursor: usize,
 
     // Resource name → entity ID cache for O(1) lookups by name.
     pub resource_cache: HashMap<String, u64>,
+
+    // Cached plain text for the entire document. Populated lazily, invalidated
+    // on any edit or document reset. Avoids O(blocks) reconstruction per search.
+    pub plain_text_cache: Option<String>,
 }
 
 impl TextDocumentInner {
@@ -101,15 +118,31 @@ impl TextDocumentInner {
         self.pending_events.push(event);
     }
 
+    /// Return events added since the last `poll_events()` call.
+    ///
+    /// This path is independent of callback dispatch — using both
+    /// `poll_events()` and `on_change()` simultaneously is safe and
+    /// each path sees every event exactly once.
+    pub fn drain_poll_events(&mut self) -> Vec<DocumentEvent> {
+        if self.poll_cursor >= self.pending_events.len() {
+            self.trim_delivered_events();
+            return Vec::new();
+        }
+        let events = self.pending_events[self.poll_cursor..].to_vec();
+        self.poll_cursor = self.pending_events.len();
+        self.trim_delivered_events();
+        events
+    }
+
     /// Collect un-dispatched events paired with live callbacks.
     ///
-    /// Events remain in `pending_events` for `poll_events`. Only events
-    /// added since the last call are returned. The caller should release
-    /// the lock and then invoke callbacks via [`dispatch_queued_events`].
+    /// Only events added since the last call are returned. The caller
+    /// should release the lock and then invoke callbacks via
+    /// [`dispatch_queued_events`].
     pub fn take_queued_events(
         &mut self,
     ) -> Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)> {
-        if self.dispatch_cursor >= self.pending_events.len() {
+        if self.callback_cursor >= self.pending_events.len() {
             return Vec::new();
         }
 
@@ -130,20 +163,44 @@ impl TextDocumentInner {
             .collect();
 
         if live_callbacks.is_empty() {
-            self.dispatch_cursor = self.pending_events.len();
+            self.callback_cursor = self.pending_events.len();
             return Vec::new();
         }
 
-        let new_events: Vec<DocumentEvent> = self.pending_events[self.dispatch_cursor..]
+        let new_events: Vec<DocumentEvent> = self.pending_events[self.callback_cursor..]
             .iter()
             .cloned()
             .collect();
-        self.dispatch_cursor = self.pending_events.len();
+        self.callback_cursor = self.pending_events.len();
 
         new_events
             .into_iter()
             .map(|e| (e, live_callbacks.clone()))
             .collect()
+    }
+
+    /// Discard events that both delivery paths have consumed.
+    fn trim_delivered_events(&mut self) {
+        let min_cursor = self.callback_cursor.min(self.poll_cursor);
+        if min_cursor > 0 {
+            self.pending_events.drain(..min_cursor);
+            self.callback_cursor -= min_cursor;
+            self.poll_cursor -= min_cursor;
+        }
+    }
+
+    /// Invalidate the cached plain text. Call after any edit.
+    pub fn invalidate_text_cache(&mut self) {
+        self.plain_text_cache = None;
+    }
+
+    /// Get or lazily build the cached plain text.
+    pub fn plain_text(&mut self) -> Result<&str> {
+        if self.plain_text_cache.is_none() {
+            let dto = frontend::commands::document_io_commands::export_plain_text(&self.ctx)?;
+            self.plain_text_cache = Some(dto.plain_text);
+        }
+        Ok(self.plain_text_cache.as_deref().unwrap())
     }
 
     /// Initialize the document: create Root → Document → Frame → Block → InlineElement.
@@ -207,8 +264,10 @@ impl TextDocumentInner {
             cursors: Vec::new(),
             pending_events: Vec::new(),
             callbacks: Vec::new(),
-            dispatch_cursor: 0,
+            callback_cursor: 0,
+            poll_cursor: 0,
             resource_cache: HashMap::new(),
+            plain_text_cache: None,
         })
     }
 }

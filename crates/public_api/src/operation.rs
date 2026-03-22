@@ -54,7 +54,19 @@ impl<T> Operation<T> {
     /// Get the current progress, if available.
     /// Returns `(percent, message)` where percent is 0.0–100.0.
     pub fn progress(&self) -> Option<(f64, String)> {
-        let mgr = self.state.ctx.long_operation_manager.lock().unwrap();
+        let mgr = self
+            .state
+            .ctx
+            .long_operation_manager
+            .lock()
+            .ok()
+            .or_else(|| {
+                // Mutex poisoned — recover by re-locking through the poison.
+                match self.state.ctx.long_operation_manager.lock() {
+                    Ok(g) => Some(g),
+                    Err(e) => Some(e.into_inner()),
+                }
+            })?;
         mgr.get_operation_progress(&self.id)
             .map(|p| (p.percentage as f64, p.message.unwrap_or_default()))
     }
@@ -66,8 +78,9 @@ impl<T> Operation<T> {
 
     /// Cancel the operation. No-op if already finished.
     pub fn cancel(&self) {
-        let mgr = self.state.ctx.long_operation_manager.lock().unwrap();
-        mgr.cancel_operation(&self.id);
+        if let Ok(mgr) = self.state.ctx.long_operation_manager.lock() {
+            mgr.cancel_operation(&self.id);
+        }
     }
 
     /// Block the calling thread until the operation completes and return
@@ -78,6 +91,22 @@ impl<T> Operation<T> {
                 return result;
             }
             thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Block until the operation completes or the timeout expires.
+    /// Returns `None` if the timeout elapsed before the operation finished.
+    pub fn wait_timeout(self, timeout: Duration) -> Option<Result<T>> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Some(result) = (self.result_fn)(&self.state.ctx, &self.id) {
+                return Some(result);
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            thread::sleep(remaining.min(Duration::from_millis(50)));
         }
     }
 
