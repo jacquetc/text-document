@@ -1481,7 +1481,6 @@ dependencies = [
  "anyhow",
  "text-document-common",
  "text-document-direct-access",
- "text-document-io",
 ]
 
 [[package]]

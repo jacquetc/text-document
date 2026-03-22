@@ -126,6 +126,7 @@ crates/
 +-- document_io/      # 8 use cases (import/export plain text, markdown, HTML, LaTeX, DOCX)
 +-- document_search/  # 3 use cases (find, find_all, replace)
 +-- document_inspection/ # 4 use cases (stats, text at position, block at position, extract fragment)
++-- test_harness/       # Shared test setup utilities
 ```
 
 Data flow: `TextDocument / TextCursor -> frontend::commands -> controllers -> use cases -> UoW -> repositories -> redb`
