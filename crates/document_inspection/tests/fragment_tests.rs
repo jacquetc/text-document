@@ -1,83 +1,17 @@
 extern crate text_document_inspection as document_inspection;
 use anyhow::Result;
-use common::database::db_context::DbContext;
-use common::direct_access::block::block_repository::BlockRelationshipField;
-use common::direct_access::document::document_repository::DocumentRelationshipField;
-use common::direct_access::frame::frame_repository::FrameRelationshipField;
-use common::direct_access::root::root_repository::RootRelationshipField;
-use common::event::EventHub;
 use common::parser_tools::fragment_schema::FragmentData;
-use common::types::EntityId;
-use common::undo_redo::UndoRedoManager;
-use std::sync::Arc;
 
-use direct_access::block::block_controller;
-use direct_access::document::document_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::frame::frame_controller;
-use direct_access::inline_element::inline_element_controller;
-use direct_access::root::dtos::CreateRootDto;
-use direct_access::root::root_controller;
+use test_harness::{
+    block_controller, export_text, get_block_ids, inline_element_controller, setup_with_text,
+    BlockRelationshipField,
+};
 
 use document_editing::InsertFragmentDto;
 use document_editing::document_editing_controller;
 
 use document_inspection::ExtractFragmentDto;
 use document_inspection::document_inspection_controller;
-
-use document_io::ImportPlainTextDto;
-use document_io::document_io_controller;
-
-/// Set up an in-memory database with Root, Document, and imported text content.
-fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    let db_context = DbContext::new()?;
-    let event_hub = Arc::new(EventHub::new());
-    let mut undo_redo_manager = UndoRedoManager::new();
-
-    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
-
-    let _doc = document_controller::create(
-        &db_context,
-        &event_hub,
-        &mut undo_redo_manager,
-        None,
-        &CreateDocumentDto::default(),
-        root.id,
-        -1,
-    )?;
-
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: text.to_string(),
-        },
-    )?;
-
-    Ok((db_context, event_hub, undo_redo_manager))
-}
-
-/// Helper to export the current document text.
-fn export_text(db_context: &DbContext, event_hub: &Arc<EventHub>) -> Result<String> {
-    let dto = document_io_controller::export_plain_text(db_context, event_hub)?;
-    Ok(dto.plain_text)
-}
-
-/// Get the first frame's block IDs.
-fn get_block_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
-    let root_rels =
-        root_controller::get_relationship(db_context, &1, &RootRelationshipField::Document)?;
-    let doc_id = root_rels[0];
-    let frame_ids = document_controller::get_relationship(
-        db_context,
-        &doc_id,
-        &DocumentRelationshipField::Frames,
-    )?;
-    let frame_id = frame_ids[0];
-    let block_ids =
-        frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)?;
-    Ok(block_ids)
-}
 
 // ─── Extract Fragment Tests ──────────────────────────────────────────
 

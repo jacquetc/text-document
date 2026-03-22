@@ -1,54 +1,10 @@
 extern crate text_document_search as document_search;
 use anyhow::Result;
-use common::database::db_context::DbContext;
-use common::event::EventHub;
-use common::undo_redo::UndoRedoManager;
-use std::sync::Arc;
 
-use direct_access::document::document_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::root::dtos::CreateRootDto;
-use direct_access::root::root_controller;
-
-use document_io::ImportPlainTextDto;
-use document_io::document_io_controller;
+use test_harness::{export_text, setup_with_text};
 
 use document_search::ReplaceTextDto;
 use document_search::document_search_controller;
-
-/// Set up an in-memory database with Root, Document, and imported text content.
-fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    let db_context = DbContext::new()?;
-    let event_hub = Arc::new(EventHub::new());
-    let mut undo_redo_manager = UndoRedoManager::new();
-
-    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
-
-    let _doc = document_controller::create(
-        &db_context,
-        &event_hub,
-        &mut undo_redo_manager,
-        None,
-        &CreateDocumentDto::default(),
-        root.id,
-        -1,
-    )?;
-
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: text.to_string(),
-        },
-    )?;
-
-    Ok((db_context, event_hub, undo_redo_manager))
-}
-
-fn export_text(db_context: &DbContext, event_hub: &Arc<EventHub>) -> Result<String> {
-    let dto = document_io_controller::export_plain_text(db_context, event_hub)?;
-    Ok(dto.plain_text)
-}
 
 #[test]
 fn test_replace_single() -> Result<()> {

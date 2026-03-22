@@ -1,55 +1,10 @@
 extern crate text_document_editing as document_editing;
 use anyhow::Result;
-use common::database::db_context::DbContext;
-use common::event::EventHub;
-use common::undo_redo::UndoRedoManager;
-use std::sync::Arc;
 
-use direct_access::document::document_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::root::dtos::CreateRootDto;
-use direct_access::root::root_controller;
-
-use document_io::ImportPlainTextDto;
-use document_io::document_io_controller;
+use test_harness::{export_text, setup_with_text};
 
 use document_editing::document_editing_controller;
 use document_editing::{DeleteTextDto, InsertBlockDto, InsertTextDto};
-
-/// Set up an in-memory database with Root, Document, and imported text content.
-fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    let db_context = DbContext::new()?;
-    let event_hub = Arc::new(EventHub::new());
-    let mut undo_redo_manager = UndoRedoManager::new();
-
-    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
-
-    let _doc = document_controller::create(
-        &db_context,
-        &event_hub,
-        &mut undo_redo_manager,
-        None,
-        &CreateDocumentDto::default(),
-        root.id,
-        -1,
-    )?;
-
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: text.to_string(),
-        },
-    )?;
-
-    Ok((db_context, event_hub, undo_redo_manager))
-}
-
-/// Helper to export the current document text.
-fn export_text(db_context: &DbContext, event_hub: &Arc<EventHub>) -> Result<String> {
-    let dto = document_io_controller::export_plain_text(db_context, event_hub)?;
-    Ok(dto.plain_text)
-}
 
 #[test]
 fn test_insert_text_at_beginning() -> Result<()> {
@@ -195,8 +150,7 @@ fn test_insert_block_creates_new_block() -> Result<()> {
     assert_eq!(result.new_position, 6);
 
     // Verify via document stats that block count increased from 1 to 2
-    use document_inspection::document_inspection_controller;
-    let stats = document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
+    let stats = test_harness::get_document_stats(&db_context)?;
     assert_eq!(stats.block_count, 2);
 
     // Verify content via export
@@ -399,8 +353,7 @@ fn test_insert_text_updates_stats() -> Result<()> {
         },
     )?;
 
-    use document_inspection::document_inspection_controller;
-    let stats = document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
+    let stats = test_harness::get_document_stats(&db_context)?;
     assert_eq!(stats.character_count, 8); // "Hi there"
     assert_eq!(stats.block_count, 1);
 

@@ -1,0 +1,16 @@
+[package]
+name = "text-document-test-harness"
+description = "Shared test setup utilities for text-document crate tests"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+common = { workspace = true }
+direct_access = { workspace = true }
+document_io = { workspace = true }

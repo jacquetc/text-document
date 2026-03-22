@@ -1,40 +1,10 @@
 extern crate text_document_io as document_io;
 use anyhow::Result;
-use common::database::db_context::DbContext;
-use common::event::EventHub;
-use common::undo_redo::UndoRedoManager;
-use std::sync::Arc;
 
-use direct_access::document::document_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::root::dtos::CreateRootDto;
-use direct_access::root::root_controller;
+use test_harness::setup;
 
 use document_io::ImportPlainTextDto;
 use document_io::document_io_controller;
-
-/// Set up an in-memory database with Root(id=1) and a Document owned by it.
-fn setup() -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    let db_context = DbContext::new()?;
-    let event_hub = Arc::new(EventHub::new());
-    let mut undo_redo_manager = UndoRedoManager::new();
-
-    // Create Root (non-undoable)
-    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
-
-    // Create Document owned by Root
-    let _doc = document_controller::create(
-        &db_context,
-        &event_hub,
-        &mut undo_redo_manager,
-        None,
-        &CreateDocumentDto::default(),
-        root.id,
-        -1,
-    )?;
-
-    Ok((db_context, event_hub, undo_redo_manager))
-}
 
 #[test]
 fn test_import_empty_text() -> Result<()> {
@@ -182,8 +152,7 @@ fn test_import_updates_cached_fields() -> Result<()> {
         },
     )?;
 
-    use document_inspection::document_inspection_controller;
-    let stats = document_inspection_controller::get_document_stats(&db_context, &event_hub)?;
+    let stats = test_harness::get_document_stats(&db_context)?;
     assert_eq!(stats.block_count, 2);
     assert_eq!(stats.character_count, 6); // "abc" (3) + "def" (3)
     assert_eq!(stats.frame_count, 1);

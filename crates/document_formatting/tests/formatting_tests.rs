@@ -1,25 +1,12 @@
 extern crate text_document_formatting as document_formatting;
 use anyhow::Result;
 use common::database::db_context::DbContext;
-use common::direct_access::block::BlockRelationshipField;
-use common::direct_access::document::DocumentRelationshipField;
-use common::direct_access::frame::FrameRelationshipField;
-use common::direct_access::root::RootRelationshipField;
-use common::event::EventHub;
-use common::undo_redo::UndoRedoManager;
-use std::sync::Arc;
+use common::types::EntityId;
 
-use direct_access::document::document_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::root::dtos::CreateRootDto;
-use direct_access::root::root_controller;
-
-use direct_access::block::block_controller;
-use direct_access::frame::frame_controller;
-use direct_access::inline_element::inline_element_controller;
-
-use document_io::ImportPlainTextDto;
-use document_io::document_io_controller;
+use test_harness::{
+    block_controller, frame_controller, get_block_ids,
+    get_frame_id, inline_element_controller, setup_with_text, BlockRelationshipField,
+};
 
 use document_formatting::document_formatting_controller;
 use document_formatting::{
@@ -27,81 +14,15 @@ use document_formatting::{
     SetFrameFormatDto, SetTextFormatDto, UnderlineStyle,
 };
 
-/// Set up an in-memory database with Root, Document, and imported text content.
-fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    let db_context = DbContext::new()?;
-    let event_hub = Arc::new(EventHub::new());
-    let mut undo_redo_manager = UndoRedoManager::new();
-
-    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
-
-    let _doc = document_controller::create(
-        &db_context,
-        &event_hub,
-        &mut undo_redo_manager,
-        None,
-        &CreateDocumentDto::default(),
-        root.id,
-        -1,
-    )?;
-
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: text.to_string(),
-        },
-    )?;
-
-    Ok((db_context, event_hub, undo_redo_manager))
-}
-
 /// Get the first block's ID from the document.
-fn get_first_block_id(db_context: &DbContext) -> Result<common::types::EntityId> {
-    let root = root_controller::get(db_context, &1)?.unwrap();
-    let doc_ids =
-        root_controller::get_relationship(db_context, &root.id, &RootRelationshipField::Document)?;
-    let doc_id = doc_ids[0];
-    let frame_ids = document_controller::get_relationship(
-        db_context,
-        &doc_id,
-        &DocumentRelationshipField::Frames,
-    )?;
-    let frame_id = frame_ids[0];
-    let block_ids =
-        frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)?;
+fn get_first_block_id(db_context: &DbContext) -> Result<EntityId> {
+    let block_ids = get_block_ids(db_context)?;
     Ok(block_ids[0])
 }
 
 /// Get all block IDs from the document.
-fn get_all_block_ids(db_context: &DbContext) -> Result<Vec<common::types::EntityId>> {
-    let root = root_controller::get(db_context, &1)?.unwrap();
-    let doc_ids =
-        root_controller::get_relationship(db_context, &root.id, &RootRelationshipField::Document)?;
-    let doc_id = doc_ids[0];
-    let frame_ids = document_controller::get_relationship(
-        db_context,
-        &doc_id,
-        &DocumentRelationshipField::Frames,
-    )?;
-    let frame_id = frame_ids[0];
-    let block_ids =
-        frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)?;
-    Ok(block_ids)
-}
-
-/// Get the root frame ID.
-fn get_frame_id(db_context: &DbContext) -> Result<common::types::EntityId> {
-    let root = root_controller::get(db_context, &1)?.unwrap();
-    let doc_ids =
-        root_controller::get_relationship(db_context, &root.id, &RootRelationshipField::Document)?;
-    let doc_id = doc_ids[0];
-    let frame_ids = document_controller::get_relationship(
-        db_context,
-        &doc_id,
-        &DocumentRelationshipField::Frames,
-    )?;
-    Ok(frame_ids[0])
+fn get_all_block_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
+    get_block_ids(db_context)
 }
 
 // ==================== SetBlockFormat tests ====================

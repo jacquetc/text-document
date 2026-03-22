@@ -1,51 +1,11 @@
 extern crate text_document_io as document_io;
 use anyhow::Result;
-use common::database::db_context::DbContext;
-use common::event::EventHub;
 use common::long_operation::{LongOperationManager, OperationStatus};
-use common::undo_redo::UndoRedoManager;
-use std::sync::Arc;
 
-use direct_access::document::document_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::root::dtos::CreateRootDto;
-use direct_access::root::root_controller;
+use test_harness::{setup, setup_with_text};
 
 use document_io::document_io_controller;
 use document_io::*;
-
-/// Set up an in-memory database with Root(id=1) and a Document owned by it.
-fn setup() -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    let db_context = DbContext::new()?;
-    let event_hub = Arc::new(EventHub::new());
-    let mut undo_redo_manager = UndoRedoManager::new();
-
-    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
-
-    let _doc = document_controller::create(
-        &db_context,
-        &event_hub,
-        &mut undo_redo_manager,
-        None,
-        &CreateDocumentDto::default(),
-        root.id,
-        -1,
-    )?;
-
-    Ok((db_context, event_hub, undo_redo_manager))
-}
-
-fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    let (db_context, event_hub, undo_redo_manager) = setup()?;
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: text.to_string(),
-        },
-    )?;
-    Ok((db_context, event_hub, undo_redo_manager))
-}
 
 fn wait_for_long_operation(long_op_manager: &LongOperationManager, op_id: &str) {
     loop {

@@ -23,9 +23,7 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-direct_access = { workspace = true }
-document_io = { workspace = true }
-document_inspection = { workspace = true }
+test_harness = { workspace = true }
 
 [lints]
 workspace = true
