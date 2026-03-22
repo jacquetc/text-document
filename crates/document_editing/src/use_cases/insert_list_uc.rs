@@ -10,6 +10,7 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
+use super::editing_helpers::find_block_at_position;
 
 pub trait InsertListUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertListUnitOfWorkTrait>;
@@ -53,23 +54,6 @@ fn convert_list_style(style: &crate::dtos::ListStyle) -> common::entities::ListS
         crate::dtos::ListStyle::LowerRoman => common::entities::ListStyle::LowerRoman,
         crate::dtos::ListStyle::UpperRoman => common::entities::ListStyle::UpperRoman,
     }
-}
-
-/// Find the block containing the given document position from a sorted list of blocks.
-fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block, usize, i64)> {
-    for (i, block) in blocks.iter().enumerate() {
-        let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
-        if position >= block_start && position <= block_end {
-            let offset = position - block_start;
-            return Ok((block.clone(), i, offset));
-        }
-    }
-    if let Some(block) = blocks.last() {
-        let offset = block.text_length;
-        return Ok((block.clone(), blocks.len() - 1, offset));
-    }
-    Err(anyhow!("No blocks found in document"))
 }
 
 fn execute_insert_list(

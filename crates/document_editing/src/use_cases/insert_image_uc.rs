@@ -11,6 +11,7 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
+use super::editing_helpers::{find_block_at_position, find_element_at_offset};
 
 pub trait InsertImageUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertImageUnitOfWorkTrait>;
@@ -42,51 +43,6 @@ pub struct InsertImageUseCase {
     last_dto: Option<InsertImageDto>,
 }
 
-/// Find the block containing the given document position from a list of blocks.
-fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block, usize, i64)> {
-    for (i, block) in blocks.iter().enumerate() {
-        let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
-        if position >= block_start && position <= block_end {
-            let offset = position - block_start;
-            return Ok((block.clone(), i, offset));
-        }
-    }
-    if let Some(block) = blocks.last() {
-        let offset = block.text_length;
-        return Ok((block.clone(), blocks.len() - 1, offset));
-    }
-    Err(anyhow!("No blocks found in document"))
-}
-
-/// Find the inline element at a given offset within a block.
-fn find_element_at_offset(
-    elements: &[InlineElement],
-    offset: i64,
-) -> Result<(InlineElement, usize, i64)> {
-    let mut running = 0i64;
-    for (i, elem) in elements.iter().enumerate() {
-        let elem_len = match &elem.content {
-            InlineContent::Text(s) => s.chars().count() as i64,
-            InlineContent::Image { .. } => 1,
-            InlineContent::Empty => 0,
-        };
-        if offset <= running + elem_len {
-            return Ok((elem.clone(), i, offset - running));
-        }
-        running += elem_len;
-    }
-    if let Some(elem) = elements.last() {
-        let elem_len = match &elem.content {
-            InlineContent::Text(s) => s.chars().count() as i64,
-            InlineContent::Image { .. } => 1,
-            InlineContent::Empty => 0,
-        };
-        return Ok((elem.clone(), elements.len() - 1, elem_len));
-    }
-    Err(anyhow!("No inline elements found in block"))
-}
-
 fn execute_insert_image(
     uow: &mut Box<dyn InsertImageUnitOfWorkTrait>,
     dto: &InsertImageDto,
@@ -94,6 +50,14 @@ fn execute_insert_image(
     if dto.position != dto.anchor {
         return Err(anyhow!(
             "Selection replacement is not supported for image insertion"
+        ));
+    }
+
+    if dto.width <= 0 || dto.height <= 0 {
+        return Err(anyhow!(
+            "Image dimensions must be positive (got {}x{})",
+            dto.width,
+            dto.height
         ));
     }
 

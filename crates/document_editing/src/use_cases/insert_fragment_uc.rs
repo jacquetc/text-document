@@ -12,6 +12,7 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
+use super::editing_helpers::find_block_at_position;
 
 pub trait InsertFragmentUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertFragmentUnitOfWorkTrait>;
@@ -40,26 +41,19 @@ pub trait InsertFragmentUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "List", action = "Create")]
 pub trait InsertFragmentUnitOfWorkTrait: CommandUnitOfWork {}
 
-fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block, usize, i64)> {
-    for (i, block) in blocks.iter().enumerate() {
-        let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
-        if position >= block_start && position <= block_end {
-            let offset = position - block_start;
-            return Ok((block.clone(), i, offset));
-        }
-    }
-    if let Some(block) = blocks.last() {
-        let offset = block.text_length;
-        return Ok((block.clone(), blocks.len() - 1, offset));
-    }
-    Err(anyhow!("No blocks found in document"))
-}
-
 fn execute_insert_fragment(
     uow: &mut Box<dyn InsertFragmentUnitOfWorkTrait>,
     dto: &InsertFragmentDto,
 ) -> Result<(InsertFragmentResultDto, EntityTreeSnapshot)> {
+    const MAX_FRAGMENT_SIZE: usize = 64 * 1024 * 1024; // 64 MB
+    if dto.fragment_data.len() > MAX_FRAGMENT_SIZE {
+        return Err(anyhow!(
+            "Fragment data exceeds maximum size ({} bytes, limit {})",
+            dto.fragment_data.len(),
+            MAX_FRAGMENT_SIZE
+        ));
+    }
+
     let fragment_data: FragmentData = serde_json::from_str(&dto.fragment_data)
         .map_err(|e| anyhow!("Invalid fragment_data JSON: {}", e))?;
 

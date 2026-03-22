@@ -11,6 +11,7 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
+use super::editing_helpers::find_block_at_position;
 
 pub trait DeleteTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn DeleteTextUnitOfWorkTrait>;
@@ -42,24 +43,6 @@ pub struct DeleteTextUseCase {
     uow_factory: Box<dyn DeleteTextUnitOfWorkFactoryTrait>,
     undo_snapshot: Option<EntityTreeSnapshot>,
     last_dto: Option<DeleteTextDto>,
-}
-
-/// Find the block containing the given document position from a sorted list of blocks.
-/// Returns (block, index_in_list, offset_within_block).
-fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block, usize, i64)> {
-    for (i, block) in blocks.iter().enumerate() {
-        let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
-        if position >= block_start && position <= block_end {
-            let offset = position - block_start;
-            return Ok((block.clone(), i, offset));
-        }
-    }
-    if let Some(block) = blocks.last() {
-        let offset = block.text_length;
-        return Ok((block.clone(), blocks.len() - 1, offset));
-    }
-    Err(anyhow!("No blocks found in document"))
 }
 
 /// Remove a range [start_offset..end_offset) from a text string, by char indices.
