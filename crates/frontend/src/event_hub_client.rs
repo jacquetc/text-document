@@ -48,6 +48,13 @@ impl EventHubClient {
             loop {
                 match receiver.recv_timeout(std::time::Duration::from_millis(200)) {
                     Ok(event) => {
+                        let pending = receiver.len();
+                        if pending > 100 {
+                            log::warn!(
+                                "EventHubClient: {} events pending — subscribers may be too slow",
+                                pending
+                            );
+                        }
                         log::debug!("EventHubClient received event: {:?}", event);
                         let subs = subscribers.lock().unwrap();
                         if let Some(callbacks) = subs.get(&event.origin) {
