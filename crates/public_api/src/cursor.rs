@@ -189,6 +189,7 @@ impl TextCursor {
                 frame_count: 0,
                 image_count: 0,
                 list_count: 0,
+                table_count: 0,
             }
         });
         pos >= to_usize(stats.character_count)

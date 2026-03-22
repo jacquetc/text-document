@@ -10,6 +10,7 @@ pub struct DocumentStatsDto {
     pub frame_count: i64,
     pub image_count: i64,
     pub list_count: i64,
+    pub table_count: i64,
 }
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct GetTextAtPositionDto {

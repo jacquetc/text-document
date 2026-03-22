@@ -3,9 +3,10 @@ use crate::ExportMarkdownDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
+    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
 };
 use common::types::{EntityId, ROOT_ENTITY_ID};
+use std::collections::HashSet;
 
 pub trait ExportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportMarkdownUnitOfWorkTrait>;
@@ -21,6 +22,9 @@ pub trait ExportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 pub trait ExportMarkdownUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct ExportMarkdownUseCase {
@@ -54,9 +58,46 @@ impl ExportMarkdownUseCase {
             &common::direct_access::document::DocumentRelationshipField::Frames,
         )?;
 
+        // Collect all cell frame IDs so we can skip them in the main loop
+        let table_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Tables,
+        )?;
+        let mut cell_frame_ids: HashSet<EntityId> = HashSet::new();
+        for tid in &table_ids {
+            let cell_ids = uow.get_table_relationship(
+                tid,
+                &common::direct_access::table::TableRelationshipField::Cells,
+            )?;
+            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+            for cell in cells_opt.into_iter().flatten() {
+                if let Some(cf_id) = cell.cell_frame {
+                    cell_frame_ids.insert(cf_id);
+                }
+            }
+        }
+
         let mut output_parts: Vec<String> = Vec::new();
 
         for frame_id in &frame_ids {
+            // Skip cell frames — they're rendered as part of their table
+            if cell_frame_ids.contains(frame_id) {
+                continue;
+            }
+
+            // Check if this is a table anchor frame
+            let frame = uow.get_frame(frame_id)?;
+            if let Some(ref f) = frame {
+                if let Some(table_id) = f.table {
+                    let table_md = self.render_table_markdown(&*uow, &table_id)?;
+                    if !output_parts.is_empty() {
+                        output_parts.push("\n\n".to_string());
+                    }
+                    output_parts.push(table_md);
+                    continue;
+                }
+            }
+
             let block_ids = uow.get_frame_relationship(
                 frame_id,
                 &common::direct_access::frame::FrameRelationshipField::Blocks,
@@ -188,6 +229,148 @@ impl ExportMarkdownUseCase {
         let markdown_text = output_parts.concat();
 
         Ok(ExportMarkdownDto { markdown_text })
+    }
+
+    fn render_table_markdown(
+        &self,
+        uow: &dyn ExportMarkdownUnitOfWorkTrait,
+        table_id: &EntityId,
+    ) -> Result<String> {
+        let table = uow
+            .get_table(table_id)?
+            .ok_or_else(|| anyhow!("Table not found"))?;
+
+        let cell_ids = uow.get_table_relationship(
+            table_id,
+            &common::direct_access::table::TableRelationshipField::Cells,
+        )?;
+        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+        let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
+        cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+
+        let rows = table.rows as usize;
+        let cols = table.columns as usize;
+
+        // Build a grid of cell content strings
+        let mut grid: Vec<Vec<String>> = vec![vec![String::new(); cols]; rows];
+
+        for cell in &cells {
+            let r = cell.row as usize;
+            let c = cell.column as usize;
+            if r >= rows || c >= cols {
+                continue;
+            }
+
+            let mut cell_text = String::new();
+            if let Some(cf_id) = cell.cell_frame {
+                let block_ids = uow.get_frame_relationship(
+                    &cf_id,
+                    &common::direct_access::frame::FrameRelationshipField::Blocks,
+                )?;
+                let blocks_opt = uow.get_block_multi(&block_ids)?;
+                let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+                blocks.sort_by_key(|b| b.document_position);
+
+                let mut parts: Vec<String> = Vec::new();
+                for block in &blocks {
+                    let inline_md = self.render_inline_markdown(uow, block)?;
+                    if !inline_md.is_empty() {
+                        parts.push(inline_md);
+                    }
+                }
+                cell_text = parts.join(" ");
+            }
+
+            grid[r][c] = cell_text;
+        }
+
+        // Render as pipe-delimited markdown table
+        let mut md = String::new();
+
+        for (r, row) in grid.iter().enumerate() {
+            md.push('|');
+            for cell_text in row {
+                md.push(' ');
+                md.push_str(cell_text);
+                md.push_str(" |");
+            }
+            md.push('\n');
+
+            // Add separator after header row
+            if r == 0 {
+                md.push('|');
+                for _ in 0..cols {
+                    md.push_str("---|");
+                }
+                md.push('\n');
+            }
+        }
+
+        // Remove trailing newline
+        if md.ends_with('\n') {
+            md.pop();
+        }
+
+        Ok(md)
+    }
+
+    fn render_inline_markdown(
+        &self,
+        uow: &dyn ExportMarkdownUnitOfWorkTrait,
+        block: &Block,
+    ) -> Result<String> {
+        let element_ids = uow.get_block_relationship(
+            &block.id,
+            &common::direct_access::block::BlockRelationshipField::Elements,
+        )?;
+
+        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+
+        let mut inline_md = String::new();
+        for elem in &elements {
+            let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
+            let text = match &elem.content {
+                InlineContent::Text(t) => {
+                    if is_code {
+                        t.clone()
+                    } else {
+                        escape_markdown(t)
+                    }
+                }
+                InlineContent::Image { name, .. } => {
+                    format!("![{}]({})", name, name)
+                }
+                InlineContent::Empty => String::new(),
+            };
+
+            if text.is_empty() {
+                continue;
+            }
+
+            let mut formatted = text.clone();
+
+            if elem.fmt_font_family.as_deref() == Some("monospace") {
+                formatted = format!("`{}`", formatted);
+            }
+            if elem.fmt_font_strikeout == Some(true) {
+                formatted = format!("~~{}~~", formatted);
+            }
+            if elem.fmt_font_bold == Some(true) && elem.fmt_font_italic == Some(true) {
+                formatted = format!("***{}***", formatted);
+            } else if elem.fmt_font_bold == Some(true) {
+                formatted = format!("**{}**", formatted);
+            } else if elem.fmt_font_italic == Some(true) {
+                formatted = format!("*{}*", formatted);
+            }
+            if let Some(ref href) = elem.fmt_anchor_href {
+                formatted = format!("[{}]({})", formatted, href);
+            }
+
+            inline_md.push_str(&formatted);
+        }
+
+        Ok(inline_md)
     }
 }
 

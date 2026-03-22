@@ -7,7 +7,9 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Resource, Root};
+use common::entities::{
+    Block, Document, Frame, InlineElement, List, Resource, Root, Table, TableCell,
+};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]
@@ -51,6 +53,9 @@ impl QueryUnitOfWork for ExportDocxUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Table", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO", thread_safe = true)]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO", thread_safe = true)]
 impl ExportDocxUnitOfWorkTrait for ExportDocxUnitOfWork {}
 
 pub struct ExportDocxUnitOfWorkFactory {

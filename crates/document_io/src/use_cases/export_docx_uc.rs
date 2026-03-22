@@ -3,9 +3,12 @@ use crate::ExportDocxDto;
 use crate::ExportDocxResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
+use common::entities::{
+    Block, Document, Frame, InlineContent, InlineElement, List, Root, Table, TableCell,
+};
 use common::long_operation::LongOperation;
 use common::types::{EntityId, ROOT_ENTITY_ID};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub trait ExportDocxUnitOfWorkFactoryTrait: Send + Sync {
@@ -22,6 +25,9 @@ pub trait ExportDocxUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Table", action = "GetRO", thread_safe = true)]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO", thread_safe = true)]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO", thread_safe = true)]
 pub trait ExportDocxUnitOfWorkTrait: QueryUnitOfWork + Send + Sync {}
 
 pub struct ExportDocxUseCase {
@@ -90,6 +96,25 @@ impl LongOperation for ExportDocxUseCase {
             &common::direct_access::document::DocumentRelationshipField::Frames,
         )?;
 
+        // Collect all cell frame IDs so we can skip them in the main loop
+        let table_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Tables,
+        )?;
+        let mut cell_frame_ids: HashSet<EntityId> = HashSet::new();
+        for tid in &table_ids {
+            let cell_ids = uow.get_table_relationship(
+                tid,
+                &common::direct_access::table::TableRelationshipField::Cells,
+            )?;
+            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+            for cell in cells_opt.into_iter().flatten() {
+                if let Some(cf_id) = cell.cell_frame {
+                    cell_frame_ids.insert(cf_id);
+                }
+            }
+        }
+
         let mut docx = Docx::new();
         let mut paragraph_count: i64 = 0;
 
@@ -102,6 +127,22 @@ impl LongOperation for ExportDocxUseCase {
             if cancel_flag.load(Ordering::Relaxed) {
                 uow.end_transaction()?;
                 return Err(anyhow!("Operation was cancelled"));
+            }
+
+            // Skip cell frames — they're rendered as part of their table
+            if cell_frame_ids.contains(frame_id) {
+                continue;
+            }
+
+            // Check if this is a table anchor frame
+            let frame = uow.get_frame(frame_id)?;
+            if let Some(ref f) = frame {
+                if let Some(table_id) = f.table {
+                    let table = self.render_table_docx(&*uow, &table_id)?;
+                    docx = docx.add_table(table);
+                    paragraph_count += 1;
+                    continue;
+                }
             }
 
             let block_ids = uow.get_frame_relationship(
@@ -215,5 +256,166 @@ impl LongOperation for ExportDocxUseCase {
             file_path: self.dto.output_path.clone(),
             paragraph_count,
         })
+    }
+}
+
+impl ExportDocxUseCase {
+    fn render_table_docx(
+        &self,
+        uow: &dyn ExportDocxUnitOfWorkTrait,
+        table_id: &EntityId,
+    ) -> Result<docx_rs::Table> {
+        use docx_rs::*;
+
+        let table = uow
+            .get_table(table_id)?
+            .ok_or_else(|| anyhow!("Table not found"))?;
+
+        let cell_ids = uow.get_table_relationship(
+            table_id,
+            &common::direct_access::table::TableRelationshipField::Cells,
+        )?;
+        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+        let mut cells: Vec<common::entities::TableCell> = cells_opt.into_iter().flatten().collect();
+        cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+
+        // Build a grid to track which cells are covered by spans
+        let rows = table.rows as usize;
+        let cols = table.columns as usize;
+        let mut covered = vec![vec![false; cols]; rows];
+
+        // Build column grid widths
+        let grid: Vec<usize> = table.column_widths.iter().map(|w| *w as usize).collect();
+
+        let mut docx_rows: Vec<TableRow> = Vec::new();
+
+        for r in 0..rows {
+            let mut docx_cells: Vec<docx_rs::TableCell> = Vec::new();
+
+            for c in 0..cols {
+                if covered[r][c] {
+                    // This position is covered by a row/column span from another cell.
+                    // In DOCX, vertically merged continuation cells still need a <w:tc>
+                    // with vMerge continue. For column spans, the cell is simply absent.
+                    // Check if this is a vertical merge continuation (a cell above spans into this row)
+                    let needs_vmerge_continue = r > 0 && {
+                        // Look for a cell above that spans into this row
+                        cells.iter().any(|cell| {
+                            cell.column == c as i64
+                                && cell.row < r as i64
+                                && (cell.row + cell.row_span) > r as i64
+                        })
+                    };
+                    if needs_vmerge_continue {
+                        let cont_cell =
+                            docx_rs::TableCell::new().vertical_merge(VMergeType::Continue);
+                        docx_cells.push(cont_cell);
+                    }
+                    continue;
+                }
+
+                // Find the cell at this position
+                let cell = cells
+                    .iter()
+                    .find(|cell| cell.row == r as i64 && cell.column == c as i64);
+
+                if let Some(cell) = cell {
+                    let mut docx_cell = docx_rs::TableCell::new();
+
+                    // Apply column span
+                    if cell.column_span > 1 {
+                        docx_cell = docx_cell.grid_span(cell.column_span as usize);
+                    }
+
+                    // Apply vertical merge for row spans
+                    if cell.row_span > 1 {
+                        docx_cell = docx_cell.vertical_merge(VMergeType::Restart);
+                    }
+
+                    // Render cell content from the cell's frame
+                    if let Some(cf_id) = cell.cell_frame {
+                        let block_ids = uow.get_frame_relationship(
+                            &cf_id,
+                            &common::direct_access::frame::FrameRelationshipField::Blocks,
+                        )?;
+                        let blocks_opt = uow.get_block_multi(&block_ids)?;
+                        let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+                        blocks.sort_by_key(|b| b.document_position);
+
+                        for block in &blocks {
+                            let element_ids = uow.get_block_relationship(
+                                &block.id,
+                                &common::direct_access::block::BlockRelationshipField::Elements,
+                            )?;
+                            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+                            let elements: Vec<InlineElement> =
+                                elements_opt.into_iter().flatten().collect();
+
+                            let mut paragraph = Paragraph::new();
+                            for elem in &elements {
+                                let text = match &elem.content {
+                                    InlineContent::Text(t) => t.clone(),
+                                    InlineContent::Image { name, .. } => {
+                                        format!("[Image: {}]", name)
+                                    }
+                                    InlineContent::Empty => String::new(),
+                                };
+
+                                if text.is_empty() {
+                                    continue;
+                                }
+
+                                let mut run = Run::new().add_text(text);
+                                if elem.fmt_font_bold == Some(true) {
+                                    run = run.bold();
+                                }
+                                if elem.fmt_font_italic == Some(true) {
+                                    run = run.italic();
+                                }
+                                if elem.fmt_font_underline == Some(true) {
+                                    run = run.underline("single");
+                                }
+                                if elem.fmt_font_strikeout == Some(true) {
+                                    run = run.strike();
+                                }
+                                if elem.fmt_font_family.as_deref() == Some("monospace") {
+                                    run = run.fonts(RunFonts::new().ascii("Courier New"));
+                                }
+
+                                paragraph = paragraph.add_run(run);
+                            }
+                            docx_cell = docx_cell.add_paragraph(paragraph);
+                        }
+                    }
+
+                    docx_cells.push(docx_cell);
+
+                    // Mark spanned cells as covered
+                    for sr in 0..cell.row_span as usize {
+                        for sc in 0..cell.column_span as usize {
+                            if sr == 0 && sc == 0 {
+                                continue;
+                            }
+                            if r + sr < rows && c + sc < cols {
+                                covered[r + sr][c + sc] = true;
+                            }
+                        }
+                    }
+                } else {
+                    // Empty cell — no TableCell entity at this position
+                    let docx_cell = docx_rs::TableCell::new().add_paragraph(Paragraph::new());
+                    docx_cells.push(docx_cell);
+                }
+            }
+
+            docx_rows.push(TableRow::new(docx_cells));
+        }
+
+        let mut docx_table = docx_rs::Table::new(docx_rows);
+        if !grid.is_empty() {
+            docx_table = docx_table.set_grid(grid);
+        }
+
+        Ok(docx_table)
     }
 }

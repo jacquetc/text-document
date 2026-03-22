@@ -127,3 +127,77 @@ pub struct InsertMarkdownAtPositionResultDto {
     pub new_position: i64,
     pub blocks_added: i64,
 }
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct InsertTableDto {
+    pub position: i64,
+    pub anchor: i64,
+    pub rows: i64,
+    pub columns: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct InsertTableResultDto {
+    pub table_id: i64,
+    pub new_position: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RemoveTableDto {
+    pub table_id: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct InsertTableRowDto {
+    pub table_id: i64,
+    pub row_index: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct InsertTableRowResultDto {
+    pub new_row_count: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct InsertTableColumnDto {
+    pub table_id: i64,
+    pub column_index: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct InsertTableColumnResultDto {
+    pub new_column_count: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RemoveTableRowDto {
+    pub table_id: i64,
+    pub row_index: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RemoveTableRowResultDto {
+    pub new_row_count: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RemoveTableColumnDto {
+    pub table_id: i64,
+    pub column_index: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RemoveTableColumnResultDto {
+    pub new_column_count: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct MergeTableCellsDto {
+    pub table_id: i64,
+    pub start_row: i64,
+    pub start_column: i64,
+    pub end_row: i64,
+    pub end_column: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct MergeTableCellsResultDto {
+    pub merged_cell_id: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SplitTableCellDto {
+    pub cell_id: i64,
+    pub split_rows: i64,
+    pub split_columns: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SplitTableCellResultDto {
+    pub new_cell_ids: Vec<i64>,
+}

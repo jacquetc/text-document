@@ -44,7 +44,6 @@ pub enum CharVerticalAlignment {
     Top,
     Baseline,
 }
-
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MergeTextFormatDto {
     pub position: i64,
@@ -54,7 +53,6 @@ pub struct MergeTextFormatDto {
     pub font_italic: Option<bool>,
     pub font_underline: Option<bool>,
 }
-
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetBlockFormatDto {
     pub position: i64,
@@ -81,7 +79,6 @@ pub enum MarkerType {
     Unchecked,
     Checked,
 }
-
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetFrameFormatDto {
     pub position: i64,
@@ -95,4 +92,29 @@ pub struct SetFrameFormatDto {
     pub right_margin: Option<i64>,
     pub padding: Option<i64>,
     pub border: Option<i64>,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SetTableFormatDto {
+    pub table_id: i64,
+    pub border: Option<i64>,
+    pub cell_spacing: Option<i64>,
+    pub cell_padding: Option<i64>,
+    pub width: Option<i64>,
+    pub alignment: Option<Alignment>,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SetTableCellFormatDto {
+    pub cell_id: i64,
+    pub padding: Option<i64>,
+    pub border: Option<i64>,
+    pub vertical_alignment: Option<CellVerticalAlignment>,
+    pub background_color: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub enum CellVerticalAlignment {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
 }

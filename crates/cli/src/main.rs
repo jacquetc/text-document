@@ -193,6 +193,7 @@ fn cmd_stats(file: &str) -> Result<()> {
     println!("Frames:     {}", stats.frame_count);
     println!("Images:     {}", stats.image_count);
     println!("Lists:      {}", stats.list_count);
+    println!("Tables:     {}", stats.table_count);
     Ok(())
 }
 

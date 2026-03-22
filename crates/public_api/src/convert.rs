@@ -30,6 +30,7 @@ impl From<&frontend::document_inspection::DocumentStatsDto> for DocumentStats {
             frame_count: to_usize(dto.frame_count),
             image_count: to_usize(dto.image_count),
             list_count: to_usize(dto.list_count),
+            table_count: to_usize(dto.table_count),
         }
     }
 }

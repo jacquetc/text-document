@@ -71,6 +71,11 @@ entities:
         entity: List
         relationship: one_to_many
         strong: true
+      - name: tables
+        type: entity
+        entity: Table
+        relationship: one_to_many
+        strong: true
       # ── Cached document stats (maintained by editing use cases) ──
       # These avoid full tree walks for get_document_stats and isEmpty().
       - name: character_count
@@ -132,6 +137,11 @@ entities:
           - InFlow
           - FloatLeft
           - FloatRight
+        optional: true
+      - name: table
+        type: entity
+        entity: Table
+        relationship: many_to_one
         optional: true
 
   # ── Block (paragraph-level container: holds inline elements) ─
@@ -335,6 +345,88 @@ entities:
       - name: data_base64
         type: string
 
+  # ── Table (grid structure for tabular data) ────────────────────
+  #    Document owns all tables. A table is anchored in the
+  #    document flow via a Frame (Frame.table weak reference).
+  #    Each cell points to a Frame that holds its rich content
+  #    (Block → InlineElement), reusing the full editing stack.
+  - name: Table
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      - name: cells
+        type: entity
+        entity: TableCell
+        relationship: ordered_one_to_many
+        strong: true
+      - name: rows
+        type: integer
+      - name: columns
+        type: integer
+      - name: column_widths
+        type: integer
+        is_list: true
+      - name: fmt_border
+        type: integer
+        optional: true
+      - name: fmt_cell_spacing
+        type: integer
+        optional: true
+      - name: fmt_cell_padding
+        type: integer
+        optional: true
+      - name: fmt_width
+        type: integer
+        optional: true
+      - name: fmt_alignment
+        type: enum
+        enum_name: Alignment
+        enum_values:
+          - Left
+          - Right
+          - Center
+          - Justify
+        optional: true
+
+  # ── TableCell (one cell in a table grid) ──────────────────────
+  #    Owned by Table. Each cell references a Frame (weak) that
+  #    holds its content blocks. row_span/column_span support
+  #    merged cells.
+  - name: TableCell
+    inherits_from: EntityBase
+    undoable: true
+    fields:
+      - name: row
+        type: integer
+      - name: column
+        type: integer
+      - name: row_span
+        type: integer
+      - name: column_span
+        type: integer
+      - name: cell_frame
+        type: entity
+        entity: Frame
+        relationship: many_to_one
+        optional: true
+      - name: fmt_padding
+        type: integer
+        optional: true
+      - name: fmt_border
+        type: integer
+        optional: true
+      - name: fmt_vertical_alignment
+        type: enum
+        enum_name: CellVerticalAlignment
+        enum_values:
+          - Top
+          - Middle
+          - Bottom
+        optional: true
+      - name: fmt_background_color
+        type: string
+        optional: true
+
 # ── Features ──────────────────────────────────────────────────
 features:
   # ── Document Editing (cursor-based text manipulation) ───────
@@ -526,7 +618,7 @@ features:
 
       - name: insert_fragment
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_in:
           name: InsertFragmentDto
           fields:
@@ -546,7 +638,7 @@ features:
 
       - name: insert_html_at_position
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_in:
           name: InsertHtmlAtPositionDto
           fields:
@@ -566,7 +658,7 @@ features:
 
       - name: insert_markdown_at_position
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_in:
           name: InsertMarkdownAtPositionDto
           fields:
@@ -583,6 +675,142 @@ features:
               type: integer
             - name: blocks_added
               type: integer
+
+      - name: insert_table
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: InsertTableDto
+          fields:
+            - name: position
+              type: integer
+            - name: anchor
+              type: integer
+            - name: rows
+              type: integer
+            - name: columns
+              type: integer
+        dto_out:
+          name: InsertTableResultDto
+          fields:
+            - name: table_id
+              type: integer
+            - name: new_position
+              type: integer
+
+      - name: remove_table
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: RemoveTableDto
+          fields:
+            - name: table_id
+              type: integer
+
+      - name: insert_table_row
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: InsertTableRowDto
+          fields:
+            - name: table_id
+              type: integer
+            - name: row_index
+              type: integer
+        dto_out:
+          name: InsertTableRowResultDto
+          fields:
+            - name: new_row_count
+              type: integer
+
+      - name: insert_table_column
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: InsertTableColumnDto
+          fields:
+            - name: table_id
+              type: integer
+            - name: column_index
+              type: integer
+        dto_out:
+          name: InsertTableColumnResultDto
+          fields:
+            - name: new_column_count
+              type: integer
+
+      - name: remove_table_row
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: RemoveTableRowDto
+          fields:
+            - name: table_id
+              type: integer
+            - name: row_index
+              type: integer
+        dto_out:
+          name: RemoveTableRowResultDto
+          fields:
+            - name: new_row_count
+              type: integer
+
+      - name: remove_table_column
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: RemoveTableColumnDto
+          fields:
+            - name: table_id
+              type: integer
+            - name: column_index
+              type: integer
+        dto_out:
+          name: RemoveTableColumnResultDto
+          fields:
+            - name: new_column_count
+              type: integer
+
+      - name: merge_table_cells
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: MergeTableCellsDto
+          fields:
+            - name: table_id
+              type: integer
+            - name: start_row
+              type: integer
+            - name: start_column
+              type: integer
+            - name: end_row
+              type: integer
+            - name: end_column
+              type: integer
+        dto_out:
+          name: MergeTableCellsResultDto
+          fields:
+            - name: merged_cell_id
+              type: integer
+
+      - name: split_table_cell
+        undoable: true
+        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        dto_in:
+          name: SplitTableCellDto
+          fields:
+            - name: cell_id
+              type: integer
+            - name: split_rows
+              type: integer
+            - name: split_columns
+              type: integer
+        dto_out:
+          name: SplitTableCellResultDto
+          fields:
+            - name: new_cell_ids
+              type: integer
+              is_list: true
 
   # ── Document Formatting ─────────────────────────────────────
   - name: document_formatting
@@ -747,6 +975,62 @@ features:
               type: integer
               optional: true
 
+      - name: set_table_format
+        undoable: true
+        entities: [Document, Table]
+        dto_in:
+          name: SetTableFormatDto
+          fields:
+            - name: table_id
+              type: integer
+            - name: border
+              type: integer
+              optional: true
+            - name: cell_spacing
+              type: integer
+              optional: true
+            - name: cell_padding
+              type: integer
+              optional: true
+            - name: width
+              type: integer
+              optional: true
+            - name: alignment
+              type: enum
+              enum_name: Alignment
+              optional: true
+              enum_values:
+                - Left
+                - Right
+                - Center
+                - Justify
+
+      - name: set_table_cell_format
+        undoable: true
+        entities: [Table, TableCell]
+        dto_in:
+          name: SetTableCellFormatDto
+          fields:
+            - name: cell_id
+              type: integer
+            - name: padding
+              type: integer
+              optional: true
+            - name: border
+              type: integer
+              optional: true
+            - name: vertical_alignment
+              type: enum
+              enum_name: CellVerticalAlignment
+              optional: true
+              enum_values:
+                - Top
+                - Middle
+                - Bottom
+            - name: background_color
+              type: string
+              optional: true
+
   # ── Document I/O (import/export in various formats) ─────────
   - name: document_io
     use_cases:
@@ -772,7 +1056,7 @@ features:
       - name: import_markdown
         undoable: false
         long_operation: true
-        entities: [Root, Document, Frame, Block, InlineElement, List]
+        entities: [Root, Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_in:
           name: ImportMarkdownDto
           fields:
@@ -787,7 +1071,7 @@ features:
       - name: export_markdown
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_out:
           name: ExportMarkdownDto
           fields:
@@ -797,7 +1081,7 @@ features:
       - name: import_html
         undoable: false
         long_operation: true
-        entities: [Root, Document, Frame, Block, InlineElement, List, Resource]
+        entities: [Root, Document, Frame, Block, InlineElement, List, Resource, Table, TableCell]
         dto_in:
           name: ImportHtmlDto
           fields:
@@ -812,7 +1096,7 @@ features:
       - name: export_html
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List, Resource]
+        entities: [Document, Frame, Block, InlineElement, List, Resource, Table, TableCell]
         dto_out:
           name: ExportHtmlDto
           fields:
@@ -822,7 +1106,7 @@ features:
       - name: export_latex
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_in:
           name: ExportLatexDto
           fields:
@@ -840,7 +1124,7 @@ features:
         undoable: false
         read_only: true
         long_operation: true
-        entities: [Document, Frame, Block, InlineElement, List, Resource]
+        entities: [Document, Frame, Block, InlineElement, List, Resource, Table, TableCell]
         dto_in:
           name: ExportDocxDto
           fields:
@@ -945,7 +1229,7 @@ features:
       - name: get_document_stats
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_out:
           name: DocumentStatsDto
           fields:
@@ -960,6 +1244,8 @@ features:
             - name: image_count
               type: integer
             - name: list_count
+              type: integer
+            - name: table_count
               type: integer
 
       - name: get_text_at_position
@@ -1007,7 +1293,7 @@ features:
       - name: extract_fragment
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
         dto_in:
           name: ExtractFragmentDto
           fields:

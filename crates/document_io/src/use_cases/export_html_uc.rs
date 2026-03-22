@@ -3,9 +3,11 @@ use crate::ExportHtmlDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Alignment, Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
+    Alignment, Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table,
+    TableCell,
 };
 use common::types::{EntityId, ROOT_ENTITY_ID};
+use std::collections::HashSet;
 
 pub trait ExportHtmlUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportHtmlUnitOfWorkTrait>;
@@ -21,6 +23,9 @@ pub trait ExportHtmlUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 pub trait ExportHtmlUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct ExportHtmlUseCase {
@@ -54,9 +59,43 @@ impl ExportHtmlUseCase {
             &common::direct_access::document::DocumentRelationshipField::Frames,
         )?;
 
+        // Collect all cell frame IDs so we can skip them in the main loop
+        let table_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Tables,
+        )?;
+        let mut cell_frame_ids: HashSet<EntityId> = HashSet::new();
+        for tid in &table_ids {
+            let cell_ids = uow.get_table_relationship(
+                tid,
+                &common::direct_access::table::TableRelationshipField::Cells,
+            )?;
+            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+            for cell in cells_opt.into_iter().flatten() {
+                if let Some(cf_id) = cell.cell_frame {
+                    cell_frame_ids.insert(cf_id);
+                }
+            }
+        }
+
         let mut body_parts: Vec<String> = Vec::new();
 
         for frame_id in &frame_ids {
+            // Skip cell frames — they're rendered as part of their table
+            if cell_frame_ids.contains(frame_id) {
+                continue;
+            }
+
+            // Check if this is a table anchor frame
+            let frame = uow.get_frame(frame_id)?;
+            if let Some(ref f) = frame {
+                if let Some(table_id) = f.table {
+                    let table_html = self.render_table_html(&*uow, &table_id)?;
+                    body_parts.push(table_html);
+                    continue;
+                }
+            }
+
             let block_ids = uow.get_frame_relationship(
                 frame_id,
                 &common::direct_access::frame::FrameRelationshipField::Blocks,
@@ -160,6 +199,100 @@ impl ExportHtmlUseCase {
         );
 
         Ok(ExportHtmlDto { html_text })
+    }
+
+    fn render_table_html(
+        &self,
+        uow: &dyn ExportHtmlUnitOfWorkTrait,
+        table_id: &EntityId,
+    ) -> Result<String> {
+        let table = uow
+            .get_table(table_id)?
+            .ok_or_else(|| anyhow!("Table not found"))?;
+
+        let cell_ids = uow.get_table_relationship(
+            table_id,
+            &common::direct_access::table::TableRelationshipField::Cells,
+        )?;
+        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+        let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
+        cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+
+        // Build a grid to track which cells are covered by spans
+        let rows = table.rows as usize;
+        let cols = table.columns as usize;
+        let mut covered = vec![vec![false; cols]; rows];
+
+        let mut html = String::from("<table");
+        if let Some(border) = table.fmt_border {
+            html.push_str(&format!(" border=\"{}\"", border));
+        }
+        html.push('>');
+
+        for r in 0..rows {
+            html.push_str("<tr>");
+            for c in 0..cols {
+                if covered[r][c] {
+                    continue;
+                }
+
+                // Find the cell at this position
+                let cell = cells
+                    .iter()
+                    .find(|cell| cell.row == r as i64 && cell.column == c as i64);
+
+                if let Some(cell) = cell {
+                    let mut td = String::from("<td");
+                    if cell.row_span > 1 {
+                        td.push_str(&format!(" rowspan=\"{}\"", cell.row_span));
+                    }
+                    if cell.column_span > 1 {
+                        td.push_str(&format!(" colspan=\"{}\"", cell.column_span));
+                    }
+                    td.push('>');
+
+                    // Render cell content from the cell's frame
+                    if let Some(cf_id) = cell.cell_frame {
+                        let block_ids = uow.get_frame_relationship(
+                            &cf_id,
+                            &common::direct_access::frame::FrameRelationshipField::Blocks,
+                        )?;
+                        let blocks_opt = uow.get_block_multi(&block_ids)?;
+                        let blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+
+                        let mut cell_parts: Vec<String> = Vec::new();
+                        for block in &blocks {
+                            let inline_html = self.render_inline_html(uow, block)?;
+                            if !inline_html.is_empty() {
+                                cell_parts.push(inline_html);
+                            }
+                        }
+                        td.push_str(&cell_parts.join("<br/>"));
+                    }
+
+                    td.push_str("</td>");
+                    html.push_str(&td);
+
+                    // Mark spanned cells as covered
+                    for sr in 0..cell.row_span as usize {
+                        for sc in 0..cell.column_span as usize {
+                            if sr == 0 && sc == 0 {
+                                continue;
+                            }
+                            if r + sr < rows && c + sc < cols {
+                                covered[r + sr][c + sc] = true;
+                            }
+                        }
+                    }
+                } else {
+                    html.push_str("<td></td>");
+                }
+            }
+            html.push_str("</tr>");
+        }
+
+        html.push_str("</table>");
+        Ok(html)
     }
 
     fn render_inline_html(

@@ -64,6 +64,11 @@ impl GetDocumentStatsUseCase {
         let list_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Lists)?;
         let list_count = list_ids.len() as i64;
 
+        // Table count from relationship
+        let table_ids =
+            uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
+        let table_count = table_ids.len() as i64;
+
         // Get all frames to iterate blocks and elements
         let frames_opt = uow.get_frame_multi(&frame_ids)?;
         let frames: Vec<&Frame> = frames_opt.iter().filter_map(|f| f.as_ref()).collect();
@@ -111,6 +116,7 @@ impl GetDocumentStatsUseCase {
             frame_count,
             image_count,
             list_count,
+            table_count,
         })
     }
 }

@@ -21,6 +21,8 @@ pub use common::direct_access::document::document_repository::DocumentRelationsh
 pub use common::direct_access::frame::frame_repository::FrameRelationshipField;
 pub use common::direct_access::root::root_repository::RootRelationshipField;
 
+pub use common::direct_access::table::table_repository::TableRelationshipField;
+pub use common::direct_access::table_cell::table_cell_repository::TableCellRelationshipField;
 pub use direct_access::block::block_controller;
 pub use direct_access::block::dtos::CreateBlockDto;
 pub use direct_access::document::document_controller;
@@ -31,6 +33,10 @@ pub use direct_access::inline_element::dtos::CreateInlineElementDto;
 pub use direct_access::inline_element::inline_element_controller;
 pub use direct_access::root::dtos::CreateRootDto;
 pub use direct_access::root::root_controller;
+pub use direct_access::table::dtos::TableDto;
+pub use direct_access::table::table_controller;
+pub use direct_access::table_cell::dtos::TableCellDto;
+pub use direct_access::table_cell::table_cell_controller;
 
 /// Create an in-memory database with a Root and empty Document.
 ///
@@ -213,6 +219,47 @@ pub fn get_frame_id(db_context: &DbContext) -> Result<EntityId> {
         &DocumentRelationshipField::Frames,
     )?;
     Ok(frame_ids[0])
+}
+
+/// Get all table IDs in the document.
+pub fn get_table_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
+    let root_rels =
+        root_controller::get_relationship(db_context, &1, &RootRelationshipField::Document)?;
+    let doc_id = root_rels[0];
+    document_controller::get_relationship(db_context, &doc_id, &DocumentRelationshipField::Tables)
+}
+
+/// Get all cell IDs for a given table.
+pub fn get_table_cell_ids(db_context: &DbContext, table_id: &EntityId) -> Result<Vec<EntityId>> {
+    table_controller::get_relationship(db_context, table_id, &TableRelationshipField::Cells)
+}
+
+/// Get all cells for a table, sorted by row then column.
+pub fn get_sorted_cells(db_context: &DbContext, table_id: &EntityId) -> Result<Vec<TableCellDto>> {
+    let cell_ids = get_table_cell_ids(db_context, table_id)?;
+    let cells_opt = table_cell_controller::get_multi(db_context, &cell_ids)?;
+    let mut cells: Vec<TableCellDto> = cells_opt.into_iter().flatten().collect();
+    cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+    Ok(cells)
+}
+
+/// Get all block IDs across all frames in the document (not just the first frame).
+pub fn get_all_block_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
+    let root_rels =
+        root_controller::get_relationship(db_context, &1, &RootRelationshipField::Document)?;
+    let doc_id = root_rels[0];
+    let frame_ids = document_controller::get_relationship(
+        db_context,
+        &doc_id,
+        &DocumentRelationshipField::Frames,
+    )?;
+    let mut all_block_ids = Vec::new();
+    for fid in &frame_ids {
+        let block_ids =
+            frame_controller::get_relationship(db_context, fid, &FrameRelationshipField::Blocks)?;
+        all_block_ids.extend(block_ids);
+    }
+    Ok(all_block_ids)
 }
 
 /// Basic document statistics retrieved directly from entity data.

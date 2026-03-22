@@ -4,9 +4,10 @@ use crate::ExportLatexResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root,
+    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
 };
 use common::types::{EntityId, ROOT_ENTITY_ID};
+use std::collections::HashSet;
 
 pub trait ExportLatexUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExportLatexUnitOfWorkTrait>;
@@ -22,6 +23,9 @@ pub trait ExportLatexUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 pub trait ExportLatexUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct ExportLatexUseCase {
@@ -55,9 +59,43 @@ impl ExportLatexUseCase {
             &common::direct_access::document::DocumentRelationshipField::Frames,
         )?;
 
+        // Collect all cell frame IDs so we can skip them in the main loop
+        let table_ids = uow.get_document_relationship(
+            &doc_id,
+            &common::direct_access::document::DocumentRelationshipField::Tables,
+        )?;
+        let mut cell_frame_ids: HashSet<EntityId> = HashSet::new();
+        for tid in &table_ids {
+            let cell_ids = uow.get_table_relationship(
+                tid,
+                &common::direct_access::table::TableRelationshipField::Cells,
+            )?;
+            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+            for cell in cells_opt.into_iter().flatten() {
+                if let Some(cf_id) = cell.cell_frame {
+                    cell_frame_ids.insert(cf_id);
+                }
+            }
+        }
+
         let mut body_parts: Vec<String> = Vec::new();
 
         for frame_id in &frame_ids {
+            // Skip cell frames — they're rendered as part of their table
+            if cell_frame_ids.contains(frame_id) {
+                continue;
+            }
+
+            // Check if this is a table anchor frame
+            let frame = uow.get_frame(frame_id)?;
+            if let Some(ref f) = frame {
+                if let Some(table_id) = f.table {
+                    let table_latex = self.render_table_latex(&*uow, &table_id)?;
+                    body_parts.push(table_latex);
+                    continue;
+                }
+            }
+
             let block_ids = uow.get_frame_relationship(
                 frame_id,
                 &common::direct_access::frame::FrameRelationshipField::Blocks,
@@ -224,6 +262,105 @@ impl ExportLatexUseCase {
             latex.push_str(&formatted);
         }
 
+        Ok(latex)
+    }
+
+    fn render_table_latex(
+        &self,
+        uow: &dyn ExportLatexUnitOfWorkTrait,
+        table_id: &EntityId,
+    ) -> Result<String> {
+        let table = uow
+            .get_table(table_id)?
+            .ok_or_else(|| anyhow!("Table not found"))?;
+
+        let cell_ids = uow.get_table_relationship(
+            table_id,
+            &common::direct_access::table::TableRelationshipField::Cells,
+        )?;
+        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+        let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
+        cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+
+        let rows = table.rows as usize;
+        let cols = table.columns as usize;
+        let mut covered = vec![vec![false; cols]; rows];
+
+        // Build column spec: |l|l|...|l|
+        let col_spec = format!("|{}|", vec!["l"; cols].join("|"));
+        let mut latex = format!("\\begin{{tabular}}{{{}}}\n\\hline", col_spec);
+
+        for r in 0..rows {
+            let mut row_parts: Vec<String> = Vec::new();
+            let mut c = 0;
+            while c < cols {
+                if covered[r][c] {
+                    c += 1;
+                    continue;
+                }
+
+                // Find the cell at this position
+                let cell = cells
+                    .iter()
+                    .find(|cell| cell.row == r as i64 && cell.column == c as i64);
+
+                if let Some(cell) = cell {
+                    // Get cell content
+                    let content = if let Some(cf_id) = cell.cell_frame {
+                        let block_ids = uow.get_frame_relationship(
+                            &cf_id,
+                            &common::direct_access::frame::FrameRelationshipField::Blocks,
+                        )?;
+                        let blocks_opt = uow.get_block_multi(&block_ids)?;
+                        let blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+
+                        let mut cell_parts: Vec<String> = Vec::new();
+                        for block in &blocks {
+                            let inline_latex = self.render_inline_latex(uow, block)?;
+                            if !inline_latex.is_empty() {
+                                cell_parts.push(inline_latex);
+                            }
+                        }
+                        cell_parts.join(" ")
+                    } else {
+                        String::new()
+                    };
+
+                    if cell.column_span > 1 {
+                        // Use \multicolumn for column spans
+                        let span = cell.column_span as usize;
+                        row_parts.push(format!("\\multicolumn{{{}}}{{|l|}}{{{}}}", span, content));
+                        // Mark spanned columns as covered
+                        for sc in 1..span {
+                            if c + sc < cols {
+                                covered[r][c + sc] = true;
+                            }
+                        }
+                    } else {
+                        row_parts.push(content);
+                    }
+
+                    // Mark row-spanned cells as covered
+                    for sr in 1..cell.row_span as usize {
+                        for sc in 0..cell.column_span as usize {
+                            if r + sr < rows && c + sc < cols {
+                                covered[r + sr][c + sc] = true;
+                            }
+                        }
+                    }
+
+                    c += cell.column_span as usize;
+                } else {
+                    row_parts.push(String::new());
+                    c += 1;
+                }
+            }
+
+            latex.push_str(&format!("\n{} \\\\", row_parts.join(" & ")));
+            latex.push_str("\n\\hline");
+        }
+
+        latex.push_str("\n\\end{tabular}");
         Ok(latex)
     }
 }

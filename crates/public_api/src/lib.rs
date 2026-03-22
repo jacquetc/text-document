@@ -176,6 +176,7 @@ pub struct DocumentStats {
     pub frame_count: usize,
     pub image_count: usize,
     pub list_count: usize,
+    pub table_count: usize,
 }
 
 /// Info about a block at a given position.
