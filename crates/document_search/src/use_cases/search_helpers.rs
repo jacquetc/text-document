@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Result, anyhow};
 use common::entities::Block;
 use regex::Regex;
@@ -28,21 +30,23 @@ pub fn build_byte_to_char_map(text: &str) -> Vec<usize> {
     map
 }
 
-/// Check if the given char index in the text is a Unicode word boundary.
-/// Uses `unicode_word_indices()` to determine word segment boundaries.
-pub fn is_word_boundary(text: &str, char_idx: usize) -> bool {
+/// Pre-compute the set of char indices that are Unicode word boundaries.
+///
+/// A word boundary is a char index where a word starts or ends according
+/// to `unicode_word_indices()`. Index 0 and `chars_len` are always
+/// boundaries. Looking up a boundary is O(1) via `HashSet::contains`.
+pub fn build_word_boundary_set(text: &str) -> HashSet<usize> {
     let chars_len = text.chars().count();
-    if char_idx == 0 || char_idx >= chars_len {
-        return true;
-    }
+    let mut set = HashSet::new();
+    set.insert(0);
+    set.insert(chars_len);
     for (byte_start, word) in text.unicode_word_indices() {
         let word_char_start = text[..byte_start].chars().count();
         let word_char_end = word_char_start + word.chars().count();
-        if char_idx == word_char_start || char_idx == word_char_end {
-            return true;
-        }
+        set.insert(word_char_start);
+        set.insert(word_char_end);
     }
-    false
+    set
 }
 
 /// Find all occurrences of the query in the text, respecting search options.
@@ -59,10 +63,16 @@ pub fn find_all_matches(
         return Ok(Vec::new());
     }
 
+    // Pre-compute word boundaries once if needed, instead of O(n) per match.
+    let word_boundaries = if whole_word {
+        Some(build_word_boundary_set(full_text))
+    } else {
+        None
+    };
+
     let mut results = Vec::new();
 
     if use_regex {
-        // Build regex with case-insensitive flag if needed
         let pattern = if case_sensitive {
             query.to_string()
         } else {
@@ -70,8 +80,6 @@ pub fn find_all_matches(
         };
         let re = Regex::new(&pattern).map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
 
-        // Regex::find_iter returns byte-based Match objects.
-        // We need to convert byte offsets to char offsets.
         let char_offsets = build_byte_to_char_map(full_text);
 
         for mat in re.find_iter(full_text) {
@@ -79,10 +87,8 @@ pub fn find_all_matches(
             let char_end = char_offsets[mat.end()];
             let char_len = char_end - char_start;
 
-            if whole_word {
-                let before_ok = is_word_boundary(full_text, char_start);
-                let after_ok = is_word_boundary(full_text, char_end);
-                if before_ok && after_ok {
+            if let Some(ref wb) = word_boundaries {
+                if wb.contains(&char_start) && wb.contains(&char_end) {
                     results.push((char_start, char_len));
                 }
             } else {
@@ -90,40 +96,40 @@ pub fn find_all_matches(
             }
         }
     } else {
-        // Literal string search using char-based scanning
-        let text_chars: Vec<char> = full_text.chars().collect();
-        let (search_chars, query_chars) = if case_sensitive {
-            (text_chars.clone(), query.chars().collect::<Vec<char>>())
+        // Literal search using lowercased Strings instead of Vec<char>.
+        let (search_text, search_query) = if case_sensitive {
+            (full_text.to_string(), query.to_string())
         } else {
-            (
-                text_chars
-                    .iter()
-                    .map(|c| c.to_lowercase().next().unwrap_or(*c))
-                    .collect::<Vec<char>>(),
-                query
-                    .chars()
-                    .map(|c| c.to_lowercase().next().unwrap_or(c))
-                    .collect::<Vec<char>>(),
-            )
+            (full_text.to_lowercase(), query.to_lowercase())
         };
 
-        let query_char_len = query_chars.len();
-        let mut pos = 0;
-        while pos + query_char_len <= search_chars.len() {
-            if search_chars[pos..pos + query_char_len] == query_chars[..] {
-                if whole_word {
-                    let before_ok = is_word_boundary(full_text, pos);
-                    let after_ok = is_word_boundary(full_text, pos + query_char_len);
-                    if before_ok && after_ok {
-                        results.push((pos, query_char_len));
+        // Build a char-index → byte-offset mapping for the search text
+        let char_indices: Vec<usize> = search_text.char_indices().map(|(i, _)| i).collect();
+        let query_char_len = search_query.chars().count();
+
+        if query_char_len == 0 || char_indices.len() < query_char_len {
+            return Ok(results);
+        }
+
+        let mut char_pos = 0;
+        while char_pos + query_char_len <= char_indices.len() {
+            let byte_start = char_indices[char_pos];
+            let byte_end = if char_pos + query_char_len < char_indices.len() {
+                char_indices[char_pos + query_char_len]
+            } else {
+                search_text.len()
+            };
+
+            if search_text[byte_start..byte_end] == search_query[..] {
+                if let Some(ref wb) = word_boundaries {
+                    if wb.contains(&char_pos) && wb.contains(&(char_pos + query_char_len)) {
+                        results.push((char_pos, query_char_len));
                     }
                 } else {
-                    results.push((pos, query_char_len));
+                    results.push((char_pos, query_char_len));
                 }
-                pos += 1;
-            } else {
-                pos += 1;
             }
+            char_pos += 1;
         }
     }
 
