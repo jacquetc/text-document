@@ -120,16 +120,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Publish text-document to crates.io
-        run: cargo publish -p text-document
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      - name: Publish text-document-cli to crates.io
-        run: |
-          # Wait for the library crate to be indexed
-          sleep 30
-          cargo publish -p text-document-cli
+      - name: Publish crates to crates.io
+        run: cargo publish --workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
