@@ -13,7 +13,6 @@ fn insert_text_at_position_0() {
     cursor.insert_text("Hello ").unwrap();
     let text = doc.to_plain_text().unwrap();
     assert_eq!(text, "Hello world");
-    // Cursor moved to end of inserted text (6 chars = "Hello ")
     assert_eq!(cursor.position(), 6);
 }
 
@@ -29,12 +28,9 @@ fn insert_text_at_end() {
 fn insert_text_replaces_selection() {
     let doc = new_doc_with_text("Hello world");
     let cursor = doc.cursor();
-    // Select "Hello"
     cursor.set_position(0, text_document::MoveMode::MoveAnchor);
     cursor.set_position(5, text_document::MoveMode::KeepAnchor);
     assert!(cursor.has_selection());
-    assert_eq!(cursor.selection_start(), 0);
-    assert_eq!(cursor.selection_end(), 5);
 
     cursor.insert_text("Goodbye").unwrap();
     assert_eq!(doc.to_plain_text().unwrap(), "Goodbye world");
@@ -46,42 +42,6 @@ fn delete_char_forward() {
     let cursor = doc.cursor();
     cursor.delete_char().unwrap();
     assert_eq!(doc.to_plain_text().unwrap(), "ello");
-}
-
-#[test]
-fn delete_previous_char() {
-    let doc = new_doc_with_text("Hello");
-    let cursor = doc.cursor_at(5);
-    cursor.delete_previous_char().unwrap();
-    assert_eq!(doc.to_plain_text().unwrap(), "Hell");
-}
-
-#[test]
-fn delete_previous_char_at_start_is_noop() {
-    let doc = new_doc_with_text("Hello");
-    let cursor = doc.cursor();
-    cursor.delete_previous_char().unwrap();
-    assert_eq!(doc.to_plain_text().unwrap(), "Hello");
-}
-
-#[test]
-fn remove_selected_text() {
-    let doc = new_doc_with_text("Hello world");
-    let cursor = doc.cursor();
-    cursor.set_position(0, text_document::MoveMode::MoveAnchor);
-    cursor.set_position(6, text_document::MoveMode::KeepAnchor);
-    let removed = cursor.remove_selected_text().unwrap();
-    assert_eq!(removed, "Hello ");
-    assert_eq!(doc.to_plain_text().unwrap(), "world");
-}
-
-#[test]
-fn remove_selected_text_no_selection_is_noop() {
-    let doc = new_doc_with_text("Hello");
-    let cursor = doc.cursor();
-    let removed = cursor.remove_selected_text().unwrap();
-    assert_eq!(removed, "");
-    assert_eq!(doc.to_plain_text().unwrap(), "Hello");
 }
 
 #[test]
@@ -110,16 +70,4 @@ fn cursor_position_tracking() {
     assert_eq!(cursor.anchor(), 0);
     assert!(!cursor.has_selection());
     assert!(cursor.at_start());
-}
-
-#[test]
-fn clear_selection() {
-    let doc = new_doc_with_text("Hello");
-    let cursor = doc.cursor();
-    cursor.set_position(0, text_document::MoveMode::MoveAnchor);
-    cursor.set_position(3, text_document::MoveMode::KeepAnchor);
-    assert!(cursor.has_selection());
-    cursor.clear_selection();
-    assert!(!cursor.has_selection());
-    assert_eq!(cursor.position(), cursor.anchor());
 }

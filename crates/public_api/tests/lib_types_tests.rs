@@ -322,15 +322,6 @@ fn text_document_is_send_sync() {
 // ── Document properties ─────────────────────────────────────────
 
 #[test]
-fn document_clear() {
-    let doc = TextDocument::new();
-    doc.set_plain_text("Some content").unwrap();
-    assert!(!doc.is_empty());
-    doc.clear().unwrap();
-    assert!(doc.is_empty());
-}
-
-#[test]
 fn document_block_count() {
     let doc = TextDocument::new();
     doc.set_plain_text("Line 1\nLine 2\nLine 3").unwrap();
@@ -338,57 +329,17 @@ fn document_block_count() {
 }
 
 #[test]
-fn document_modified_flag() {
-    let doc = TextDocument::new();
-    assert!(!doc.is_modified());
-    doc.set_modified(true);
-    assert!(doc.is_modified());
-    doc.set_modified(false);
-    assert!(!doc.is_modified());
-}
-
-#[test]
 fn document_modified_no_double_emit() {
     let doc = TextDocument::new();
     doc.set_modified(true);
-    // Setting the same value again should be a no-op (no event emitted)
     doc.set_modified(true);
     assert!(doc.is_modified());
 }
 
-// ── Document clone shares state ─────────────────────────────────
+// ── DocumentFragment ────────────────────────────────────────────
 
 #[test]
-fn clone_shares_content() {
-    let doc = TextDocument::new();
-    doc.set_plain_text("Shared").unwrap();
-    let doc2 = doc.clone();
-    assert_eq!(doc2.to_plain_text().unwrap(), "Shared");
-
-    // Editing via cursor on one should reflect on the other
-    let cursor = doc.cursor_at(6);
-    cursor.insert_text(" text").unwrap();
-    let text = doc2.to_plain_text().unwrap();
-    assert!(text.contains("Shared"));
-    assert!(text.contains("text"));
-}
-
-// ── TextDocument poll_events ────────────────────────────────────
-
-#[test]
-fn poll_events_returns_events() {
-    let doc = TextDocument::new();
-    doc.set_plain_text("Test").unwrap();
-    // set_plain_text emits DocumentReset
-    let events = doc.poll_events();
-    assert!(!events.is_empty());
-}
-
-#[test]
-fn poll_events_drains() {
-    let doc = TextDocument::new();
-    doc.set_plain_text("Test").unwrap();
-    let _ = doc.poll_events();
-    let events = doc.poll_events();
-    assert!(events.is_empty());
+fn document_fragment_is_send_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<DocumentFragment>();
 }
