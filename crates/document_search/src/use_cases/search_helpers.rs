@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};
 use common::entities::Block;
-use regex::Regex;
+use regex::RegexBuilder;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Build the full document text by concatenating block plain_text with '\n' separators.
@@ -73,12 +73,12 @@ pub fn find_all_matches(
     let mut results = Vec::new();
 
     if use_regex {
-        let pattern = if case_sensitive {
-            query.to_string()
-        } else {
-            format!("(?i){}", query)
-        };
-        let re = Regex::new(&pattern).map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
+        let re = RegexBuilder::new(query)
+            .case_insensitive(!case_sensitive)
+            .size_limit(1 << 20) // 1 MB compiled size limit
+            .dfa_size_limit(1 << 20)
+            .build()
+            .map_err(|e| anyhow!("Invalid regex pattern: {}", e))?;
 
         let char_offsets = build_byte_to_char_map(full_text);
 
