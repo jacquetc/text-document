@@ -419,11 +419,11 @@ proptest! {
 fn arb_unicode_text() -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop_oneof![
-            "[a-zA-Z ]{1,10}",                       // Latin
-            "[àáâãäåæçèéêëìíîïðñòóôõöùúûüýþÿ]{1,5}", // accented
+            "[a-zA-Z ]{1,10}",                         // Latin
+            "[àáâãäåæçèéêëìíîïðñòóôõöùúûüýþÿ]{1,5}",   // accented
             "[абвгдежзийклмнопрстуфхцчшщъыьэюя]{1,5}", // Cyrillic
-            "[日本語中文한국어]{1,5}",                    // CJK
-            "[🌍🎉🔥💯🚀✨]{1,3}",                      // emoji
+            "[日本語中文한국어]{1,5}",                 // CJK
+            "[🌍🎉🔥💯🚀✨]{1,3}",                     // emoji
         ],
         1..6,
     )

@@ -1,3 +1,4 @@
+use super::editing_helpers::find_block_at_position;
 use crate::InsertHtmlAtPositionDto;
 use crate::InsertHtmlAtPositionResultDto;
 use anyhow::{Result, anyhow};
@@ -12,7 +13,6 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
-use super::editing_helpers::find_block_at_position;
 
 pub trait InsertHtmlAtPositionUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertHtmlAtPositionUnitOfWorkTrait>;

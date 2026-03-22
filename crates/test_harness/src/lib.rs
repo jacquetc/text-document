@@ -25,8 +25,8 @@ pub use direct_access::block::block_controller;
 pub use direct_access::block::dtos::CreateBlockDto;
 pub use direct_access::document::document_controller;
 pub use direct_access::document::dtos::CreateDocumentDto;
-pub use direct_access::frame::frame_controller;
 pub use direct_access::frame::dtos::CreateFrameDto;
+pub use direct_access::frame::frame_controller;
 pub use direct_access::inline_element::dtos::CreateInlineElementDto;
 pub use direct_access::inline_element::inline_element_controller;
 pub use direct_access::root::dtos::CreateRootDto;
@@ -40,8 +40,7 @@ pub fn setup() -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
     let event_hub = Arc::new(EventHub::new());
     let mut undo_redo_manager = UndoRedoManager::new();
 
-    let root =
-        root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
+    let root = root_controller::create_orphan(&db_context, &event_hub, &CreateRootDto::default())?;
 
     let _doc = document_controller::create(
         &db_context,
@@ -145,7 +144,13 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
         .ok_or_else(|| anyhow::anyhow!("Document not found"))?;
     doc.character_count = total_chars;
     doc.block_count = lines.len() as i64;
-    document_controller::update(&db_context, &event_hub, &mut undo_redo_manager, None, &doc.into())?;
+    document_controller::update(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &doc.into(),
+    )?;
 
     // Clear undo history so test starts clean
     undo_redo_manager.clear_all_stacks();

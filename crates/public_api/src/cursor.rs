@@ -6,18 +6,18 @@ use parking_lot::Mutex;
 
 use anyhow::Result;
 
+use crate::ListStyle;
 use frontend::commands::{
     document_editing_commands, document_formatting_commands, document_inspection_commands,
     inline_element_commands, undo_redo_commands,
 };
-use crate::ListStyle;
 
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::convert::{to_i64, to_usize};
 use crate::events::DocumentEvent;
 use crate::fragment::DocumentFragment;
-use crate::inner::{CursorData, TextDocumentInner};
+use crate::inner::{CursorData, QueuedEvents, TextDocumentInner};
 use crate::{BlockFormat, FrameFormat, MoveMode, MoveOperation, SelectionType, TextFormat};
 
 /// A cursor into a [`TextDocument`](crate::TextDocument).
@@ -69,7 +69,7 @@ impl TextCursor {
         removed: usize,
         new_pos: usize,
         blocks_affected: usize,
-    ) -> Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)> {
+    ) -> QueuedEvents {
         let added = new_pos - edit_pos;
         inner.adjust_cursors(edit_pos, removed, added);
         {
@@ -181,17 +181,16 @@ impl TextCursor {
     pub fn at_end(&self) -> bool {
         let pos = self.position();
         let inner = self.doc.lock();
-        let stats =
-            document_inspection_commands::get_document_stats(&inner.ctx).unwrap_or({
-                frontend::document_inspection::DocumentStatsDto {
-                    character_count: 0,
-                    word_count: 0,
-                    block_count: 0,
-                    frame_count: 0,
-                    image_count: 0,
-                    list_count: 0,
-                }
-            });
+        let stats = document_inspection_commands::get_document_stats(&inner.ctx).unwrap_or({
+            frontend::document_inspection::DocumentStatsDto {
+                character_count: 0,
+                word_count: 0,
+                block_count: 0,
+                frame_count: 0,
+                image_count: 0,
+                list_count: 0,
+            }
+        });
         pos >= to_usize(stats.character_count)
     }
 
@@ -381,7 +380,13 @@ impl TextCursor {
             )?;
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(&mut inner, edit_pos, removed, to_usize(result.new_position), 1)
+            self.finish_edit(
+                &mut inner,
+                edit_pos,
+                removed,
+                to_usize(result.new_position),
+                1,
+            )
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
@@ -400,7 +405,13 @@ impl TextCursor {
                 document_editing_commands::insert_block(&inner.ctx, Some(inner.stack_id), &dto)?;
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(&mut inner, edit_pos, removed, to_usize(result.new_position), 2)
+            self.finish_edit(
+                &mut inner,
+                edit_pos,
+                removed,
+                to_usize(result.new_position),
+                2,
+            )
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
@@ -523,7 +534,13 @@ impl TextCursor {
                 document_editing_commands::insert_image(&inner.ctx, Some(inner.stack_id), &dto)?;
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(&mut inner, edit_pos, removed, to_usize(result.new_position), 1)
+            self.finish_edit(
+                &mut inner,
+                edit_pos,
+                removed,
+                to_usize(result.new_position),
+                1,
+            )
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
@@ -659,7 +676,13 @@ impl TextCursor {
                 document_editing_commands::insert_list(&inner.ctx, Some(inner.stack_id), &dto)?;
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(&mut inner, edit_pos, removed, to_usize(result.new_position), 1)
+            self.finish_edit(
+                &mut inner,
+                edit_pos,
+                removed,
+                to_usize(result.new_position),
+                1,
+            )
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
@@ -748,11 +771,7 @@ impl TextCursor {
         let queued = {
             let mut inner = self.doc.lock();
             let dto = format.to_set_dto(pos, anchor);
-            document_formatting_commands::set_block_format(
-                &inner.ctx,
-                Some(inner.stack_id),
-                &dto,
-            )?;
+            document_formatting_commands::set_block_format(&inner.ctx, Some(inner.stack_id), &dto)?;
             let start = pos.min(anchor);
             let length = pos.max(anchor) - start;
             inner.modified = true;
@@ -772,11 +791,7 @@ impl TextCursor {
         let queued = {
             let mut inner = self.doc.lock();
             let dto = format.to_set_dto(pos, anchor, frame_id);
-            document_formatting_commands::set_frame_format(
-                &inner.ctx,
-                Some(inner.stack_id),
-                &dto,
-            )?;
+            document_formatting_commands::set_frame_format(&inner.ctx, Some(inner.stack_id), &dto)?;
             let start = pos.min(anchor);
             let length = pos.max(anchor) - start;
             inner.modified = true;
@@ -817,14 +832,9 @@ impl TextCursor {
     // ── Private helpers ─────────────────────────────────────
 
     /// Queue an `UndoRedoChanged` event and return all queued events for dispatch.
-    fn queue_undo_redo_event(
-        &self,
-        inner: &mut TextDocumentInner,
-    ) -> Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)> {
-        let can_undo =
-            undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
-        let can_redo =
-            undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
+    fn queue_undo_redo_event(&self, inner: &mut TextDocumentInner) -> QueuedEvents {
+        let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
+        let can_redo = undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
         inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
         inner.take_queued_events()
     }

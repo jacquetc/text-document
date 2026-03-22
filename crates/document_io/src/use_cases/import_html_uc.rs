@@ -62,7 +62,11 @@ fn create_inline_element_from_span(span: &ParsedSpan, is_code_block: bool) -> In
             None
         },
         fmt_anchor_href: span.link_href.clone(),
-        fmt_is_anchor: if span.link_href.is_some() { Some(true) } else { None },
+        fmt_is_anchor: if span.link_href.is_some() {
+            Some(true)
+        } else {
+            None
+        },
         ..InlineElement::default()
     }
 }

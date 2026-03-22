@@ -1,3 +1,4 @@
+use super::editing_helpers::find_block_at_position;
 use crate::DeleteTextDto;
 use crate::DeleteTextResultDto;
 use anyhow::{Result, anyhow};
@@ -11,7 +12,6 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
-use super::editing_helpers::find_block_at_position;
 
 pub trait DeleteTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn DeleteTextUnitOfWorkTrait>;
@@ -240,8 +240,7 @@ fn execute_delete(
         let start_element_ids =
             uow.get_block_relationship(&start_block.id, &BlockRelationshipField::Elements)?;
         let start_elements_opt = uow.get_inline_element_multi(&start_element_ids)?;
-        let start_elements: Vec<InlineElement> =
-            start_elements_opt.into_iter().flatten().collect();
+        let start_elements: Vec<InlineElement> = start_elements_opt.into_iter().flatten().collect();
 
         // Walk start block elements to truncate at start_offset
         let mut char_cursor: usize = 0;
@@ -285,8 +284,7 @@ fn execute_delete(
         let end_element_ids =
             uow.get_block_relationship(&end_block.id, &BlockRelationshipField::Elements)?;
         let end_elements_opt = uow.get_inline_element_multi(&end_element_ids)?;
-        let end_elements: Vec<InlineElement> =
-            end_elements_opt.into_iter().flatten().collect();
+        let end_elements: Vec<InlineElement> = end_elements_opt.into_iter().flatten().collect();
 
         let mut end_char_cursor: usize = 0;
         let mut past_delete = false;

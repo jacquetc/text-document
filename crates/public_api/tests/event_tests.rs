@@ -245,9 +245,9 @@ fn undo_redo_changed_after_edit() {
 
     let events = doc.poll_events();
     assert!(
-        events.iter().any(
-            |e| matches!(e, DocumentEvent::UndoRedoChanged { can_undo: true, .. })
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, DocumentEvent::UndoRedoChanged { can_undo: true, .. })),
         "expected UndoRedoChanged with can_undo=true after edit, got: {:?}",
         events
     );
@@ -264,9 +264,9 @@ fn undo_redo_changed_after_undo() {
 
     let events = doc.poll_events();
     assert!(
-        events.iter().any(
-            |e| matches!(e, DocumentEvent::UndoRedoChanged { can_redo: true, .. })
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, DocumentEvent::UndoRedoChanged { can_redo: true, .. })),
         "expected UndoRedoChanged with can_redo=true after undo, got: {:?}",
         events
     );
@@ -284,9 +284,13 @@ fn undo_redo_changed_after_redo() {
 
     let events = doc.poll_events();
     assert!(
-        events.iter().any(
-            |e| matches!(e, DocumentEvent::UndoRedoChanged { can_undo: true, can_redo: false })
-        ),
+        events.iter().any(|e| matches!(
+            e,
+            DocumentEvent::UndoRedoChanged {
+                can_undo: true,
+                can_redo: false
+            }
+        )),
         "expected UndoRedoChanged(can_undo=true, can_redo=false) after redo, got: {:?}",
         events
     );
@@ -303,9 +307,13 @@ fn undo_redo_changed_after_set_plain_text() {
 
     let events = doc.poll_events();
     assert!(
-        events.iter().any(
-            |e| matches!(e, DocumentEvent::UndoRedoChanged { can_undo: false, can_redo: false })
-        ),
+        events.iter().any(|e| matches!(
+            e,
+            DocumentEvent::UndoRedoChanged {
+                can_undo: false,
+                can_redo: false
+            }
+        )),
         "expected UndoRedoChanged(false, false) after set_plain_text, got: {:?}",
         events
     );
@@ -327,9 +335,9 @@ fn undo_redo_changed_after_formatting() {
 
     let events = doc.poll_events();
     assert!(
-        events.iter().any(
-            |e| matches!(e, DocumentEvent::UndoRedoChanged { can_undo: true, .. })
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, DocumentEvent::UndoRedoChanged { can_undo: true, .. })),
         "expected UndoRedoChanged with can_undo=true after formatting, got: {:?}",
         events
     );
@@ -342,7 +350,9 @@ fn long_operation_events_on_markdown_import() {
     let doc = TextDocument::new();
     doc.poll_events(); // drain setup
 
-    let op = doc.set_markdown("# Title\n\nParagraph one.\n\nParagraph two.").unwrap();
+    let op = doc
+        .set_markdown("# Title\n\nParagraph one.\n\nParagraph two.")
+        .unwrap();
     let _result = op.wait().unwrap();
 
     // Give the background event hub thread a moment to deliver events
@@ -352,9 +362,10 @@ fn long_operation_events_on_markdown_import() {
 
     // Should have at least a LongOperationFinished with success=true
     assert!(
-        events.iter().any(
-            |e| matches!(e, DocumentEvent::LongOperationFinished { success: true, .. })
-        ),
+        events.iter().any(|e| matches!(
+            e,
+            DocumentEvent::LongOperationFinished { success: true, .. }
+        )),
         "expected LongOperationFinished(success=true), got: {:?}",
         events
     );
@@ -374,9 +385,10 @@ fn long_operation_events_on_html_import() {
     let events = doc.poll_events();
 
     assert!(
-        events.iter().any(
-            |e| matches!(e, DocumentEvent::LongOperationFinished { success: true, .. })
-        ),
+        events.iter().any(|e| matches!(
+            e,
+            DocumentEvent::LongOperationFinished { success: true, .. }
+        )),
         "expected LongOperationFinished(success=true), got: {:?}",
         events
     );

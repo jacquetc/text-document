@@ -2,8 +2,8 @@ extern crate text_document_editing as document_editing;
 use anyhow::Result;
 
 use test_harness::{
-    block_controller, export_text, get_block_ids, get_element_ids, inline_element_controller,
-    setup_with_text, BlockRelationshipField,
+    BlockRelationshipField, block_controller, export_text, get_block_ids, get_element_ids,
+    inline_element_controller, setup_with_text,
 };
 
 use document_editing::document_editing_controller;

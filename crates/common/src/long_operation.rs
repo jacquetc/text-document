@@ -177,7 +177,9 @@ struct OperationHandle {
 /// inconsistent state, but for status/progress tracking this is preferable
 /// to propagating the panic.
 fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl OperationHandleTrait for OperationHandle {
@@ -334,8 +336,7 @@ impl LongOperationManager {
             _join_handle: join_handle,
         };
 
-        lock_or_recover(&self.operations)
-            .insert(id.clone(), Box::new(handle));
+        lock_or_recover(&self.operations).insert(id.clone(), Box::new(handle));
 
         id
     }

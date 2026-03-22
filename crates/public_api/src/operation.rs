@@ -7,6 +7,9 @@ use anyhow::Result;
 
 use frontend::AppContext;
 
+/// Function that polls the long-operation manager for a result.
+type ResultFn<T> = Box<dyn Fn(&AppContext, &str) -> Option<Result<T>> + Send>;
+
 /// Shared state for a single long operation.
 pub(crate) struct OperationState {
     ctx: AppContext,
@@ -30,15 +33,11 @@ impl OperationState {
 pub struct Operation<T> {
     id: String,
     state: OperationState,
-    result_fn: Box<dyn Fn(&AppContext, &str) -> Option<Result<T>> + Send>,
+    result_fn: ResultFn<T>,
 }
 
 impl<T> Operation<T> {
-    pub(crate) fn new(
-        id: String,
-        ctx: &AppContext,
-        result_fn: Box<dyn Fn(&AppContext, &str) -> Option<Result<T>> + Send>,
-    ) -> Self {
+    pub(crate) fn new(id: String, ctx: &AppContext, result_fn: ResultFn<T>) -> Self {
         Self {
             id,
             state: OperationState::new(ctx),

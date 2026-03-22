@@ -18,6 +18,12 @@ use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 
+/// A batch of events paired with the callbacks to invoke for each.
+pub(crate) type QueuedEvents = Vec<(
+    crate::events::DocumentEvent,
+    Vec<Arc<dyn Fn(crate::events::DocumentEvent) + Send + Sync>>,
+)>;
+
 use anyhow::Result;
 use frontend::AppContext;
 use frontend::EventHubClient;
@@ -141,9 +147,7 @@ impl TextDocumentInner {
     /// Only events added since the last call are returned. The caller
     /// should release the lock and then invoke callbacks via
     /// [`dispatch_queued_events`].
-    pub fn take_queued_events(
-        &mut self,
-    ) -> Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)> {
+    pub fn take_queued_events(&mut self) -> QueuedEvents {
         if self.callback_cursor >= self.pending_events.len() {
             return Vec::new();
         }
@@ -294,9 +298,7 @@ impl Drop for TextDocumentInner {
 ///
 /// Call this after releasing the document mutex to avoid deadlocks
 /// when callbacks call back into the document.
-pub(crate) fn dispatch_queued_events(
-    queued: Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)>,
-) {
+pub(crate) fn dispatch_queued_events(queued: QueuedEvents) {
     for (event, callbacks) in queued {
         for cb in &callbacks {
             cb(event.clone());

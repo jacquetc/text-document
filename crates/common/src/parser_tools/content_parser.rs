@@ -348,7 +348,14 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 if is_block_tag && tag != "br" {
                     // Start collecting spans for a new block
                     let mut spans: Vec<ParsedSpan> = Vec::new();
-                    collect_inline_spans(node, &new_state, &mut spans, &new_list_style, blocks, depth + 1);
+                    collect_inline_spans(
+                        node,
+                        &new_state,
+                        &mut spans,
+                        &new_list_style,
+                        blocks,
+                        depth + 1,
+                    );
 
                     let list_style_for_block = if tag == "li" {
                         new_list_style.clone()
@@ -483,7 +490,14 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         walk_node(child, &new_state, blocks, current_list_style, depth + 1);
                     } else {
                         // Inline element: recurse
-                        collect_inline_spans(child, &new_state, spans, current_list_style, blocks, depth + 1);
+                        collect_inline_spans(
+                            child,
+                            &new_state,
+                            spans,
+                            current_list_style,
+                            blocks,
+                            depth + 1,
+                        );
                     }
                 }
                 _ => {}

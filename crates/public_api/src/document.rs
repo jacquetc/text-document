@@ -8,11 +8,11 @@ use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
+use crate::{ResourceType, TextDirection, WrapMode};
 use frontend::commands::{
     document_commands, document_inspection_commands, document_io_commands,
     document_search_commands, resource_commands, undo_redo_commands,
 };
-use crate::{ResourceType, TextDirection, WrapMode};
 
 use crate::convert::{self, to_i64, to_usize};
 use crate::cursor::TextCursor;
@@ -70,9 +70,9 @@ impl TextDocument {
             let locked = inner.lock();
             // Progress
             let w = weak.clone();
-            locked.event_client.subscribe(
-                Origin::LongOperation(LOE::Progress),
-                move |event| {
+            locked
+                .event_client
+                .subscribe(Origin::LongOperation(LOE::Progress), move |event| {
                     if let Some(inner) = w.upgrade() {
                         let (op_id, percent, message) = parse_progress_data(&event.data);
                         let mut inner = inner.lock();
@@ -82,14 +82,13 @@ impl TextDocument {
                             message,
                         });
                     }
-                },
-            );
+                });
 
             // Completed
             let w = weak.clone();
-            locked.event_client.subscribe(
-                Origin::LongOperation(LOE::Completed),
-                move |event| {
+            locked
+                .event_client
+                .subscribe(Origin::LongOperation(LOE::Completed), move |event| {
                     if let Some(inner) = w.upgrade() {
                         let op_id = parse_id_data(&event.data);
                         let mut inner = inner.lock();
@@ -101,14 +100,13 @@ impl TextDocument {
                             error: None,
                         });
                     }
-                },
-            );
+                });
 
             // Cancelled
             let w = weak.clone();
-            locked.event_client.subscribe(
-                Origin::LongOperation(LOE::Cancelled),
-                move |event| {
+            locked
+                .event_client
+                .subscribe(Origin::LongOperation(LOE::Cancelled), move |event| {
                     if let Some(inner) = w.upgrade() {
                         let op_id = parse_id_data(&event.data);
                         let mut inner = inner.lock();
@@ -118,13 +116,12 @@ impl TextDocument {
                             error: Some("cancelled".into()),
                         });
                     }
-                },
-            );
+                });
 
             // Failed
-            locked.event_client.subscribe(
-                Origin::LongOperation(LOE::Failed),
-                move |event| {
+            locked
+                .event_client
+                .subscribe(Origin::LongOperation(LOE::Failed), move |event| {
                     if let Some(inner) = weak.upgrade() {
                         let (op_id, error) = parse_failed_data(&event.data);
                         let mut inner = inner.lock();
@@ -134,8 +131,7 @@ impl TextDocument {
                             error: Some(error),
                         });
                     }
-                },
-            );
+                });
         }
     }
 

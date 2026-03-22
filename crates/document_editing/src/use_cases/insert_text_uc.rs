@@ -1,3 +1,4 @@
+use super::editing_helpers::{find_block_at_position, find_element_at_offset};
 use crate::InsertTextDto;
 use crate::InsertTextResultDto;
 use anyhow::{Result, anyhow};
@@ -11,7 +12,6 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
-use super::editing_helpers::{find_block_at_position, find_element_at_offset};
 
 pub trait InsertTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertTextUnitOfWorkTrait>;

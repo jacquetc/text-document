@@ -82,8 +82,7 @@ impl ExportMarkdownUseCase {
                 )?;
 
                 let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                let elements: Vec<InlineElement> =
-                    elements_opt.into_iter().flatten().collect();
+                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
                 // Check if block has a list
                 let list_ids = uow.get_block_relationship(
@@ -196,8 +195,8 @@ fn escape_markdown(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
-            '\\' | '*' | '_' | '{' | '}' | '[' | ']' | '(' | ')' | '#' | '+' | '-' | '.'
-            | '!' | '|' | '~' | '>' => {
+            '\\' | '*' | '_' | '{' | '}' | '[' | ']' | '(' | ')' | '#' | '+' | '-' | '.' | '!'
+            | '|' | '~' | '>' => {
                 result.push('\\');
                 result.push(c);
             }

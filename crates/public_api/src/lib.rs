@@ -52,6 +52,7 @@ pub use operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Op
 
 // TextDocument and TextCursor are Send + Sync (all fields are Arc<Mutex<...>>).
 const _: () = {
+    #[allow(dead_code)]
     fn assert_send_sync<T: Send + Sync>() {}
     fn _assert_all() {
         assert_send_sync::<TextDocument>();

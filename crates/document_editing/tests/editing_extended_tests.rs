@@ -3,9 +3,9 @@ use anyhow::Result;
 
 use common::types::EntityId;
 use test_harness::{
-    block_controller, document_controller, export_text, frame_controller, get_block_ids,
-    get_first_block_element_ids, inline_element_controller, root_controller, setup_with_text,
-    DocumentRelationshipField, RootRelationshipField,
+    DocumentRelationshipField, RootRelationshipField, block_controller, document_controller,
+    export_text, frame_controller, get_block_ids, get_first_block_element_ids,
+    inline_element_controller, root_controller, setup_with_text,
 };
 
 use document_editing::document_editing_controller;

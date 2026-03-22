@@ -4,8 +4,8 @@ use common::database::db_context::DbContext;
 use common::types::EntityId;
 
 use test_harness::{
-    block_controller, frame_controller, get_block_ids,
-    get_frame_id, inline_element_controller, setup_with_text, BlockRelationshipField,
+    BlockRelationshipField, block_controller, frame_controller, get_block_ids, get_frame_id,
+    inline_element_controller, setup_with_text,
 };
 
 use document_formatting::document_formatting_controller;

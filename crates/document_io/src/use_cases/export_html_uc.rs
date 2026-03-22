@@ -140,7 +140,10 @@ impl ExportHtmlUseCase {
 
                     if let Some(level) = block.fmt_heading_level {
                         let level = level.clamp(1, 6);
-                        body_parts.push(format!("<h{}{}>{}</h{}>", level, style_attr, inline_html, level));
+                        body_parts.push(format!(
+                            "<h{}{}>{}</h{}>",
+                            level, style_attr, inline_html, level
+                        ));
                     } else {
                         body_parts.push(format!("<p{}>{}</p>", style_attr, inline_html));
                     }
@@ -151,7 +154,10 @@ impl ExportHtmlUseCase {
 
         uow.end_transaction()?;
 
-        let html_text = format!("<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>", body_parts.join(""));
+        let html_text = format!(
+            "<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>",
+            body_parts.join("")
+        );
 
         Ok(ExportHtmlDto { html_text })
     }

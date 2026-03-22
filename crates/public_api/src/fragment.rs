@@ -126,7 +126,7 @@ impl DocumentFragment {
             Err(_) => {
                 return String::from(
                     "<html><head><meta charset=\"utf-8\"></head><body></body></html>",
-                )
+                );
             }
         };
 
@@ -224,7 +224,10 @@ impl DocumentFragment {
                 }
                 if is_ordered {
                     list_counter += 1;
-                    parts.push(format!("{}{}. {}", indent_prefix, list_counter, inline_text));
+                    parts.push(format!(
+                        "{}{}. {}",
+                        indent_prefix, list_counter, inline_text
+                    ));
                 } else {
                     parts.push(format!("{}- {}", indent_prefix, inline_text));
                 }
@@ -328,13 +331,15 @@ fn block_style_attr(block: &FragmentBlock) -> String {
         parts.push(format!("text-align: {}", value));
     }
     if let Some(n) = block.indent
-        && n > 0 {
-            parts.push(format!("margin-left: {}em", n));
-        }
+        && n > 0
+    {
+        parts.push(format!("margin-left: {}em", n));
+    }
     if let Some(px) = block.text_indent
-        && px != 0 {
-            parts.push(format!("text-indent: {}px", px));
-        }
+        && px != 0
+    {
+        parts.push(format!("text-indent: {}px", px));
+    }
     if let Some(px) = block.top_margin {
         parts.push(format!("margin-top: {}px", px));
     }
@@ -397,10 +402,9 @@ fn push_inline_html(out: &mut String, elements: &[FragmentElement]) {
         if is_strikeout {
             result = format!("<s>{}</s>", result);
         }
-        if is_anchor
-            && let Some(ref href) = elem.fmt_anchor_href {
-                result = format!("<a href=\"{}\">{}</a>", escape_html(href), result);
-            }
+        if is_anchor && let Some(ref href) = elem.fmt_anchor_href {
+            result = format!("<a href=\"{}\">{}</a>", escape_html(href), result);
+        }
 
         out.push_str(&result);
     }

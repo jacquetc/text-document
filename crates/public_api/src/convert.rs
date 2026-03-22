@@ -10,10 +10,7 @@ use crate::{
 // ── Position conversion ─────────────────────────────────────────
 
 pub fn to_i64(v: usize) -> i64 {
-    debug_assert!(
-        v <= i64::MAX as usize,
-        "position overflow: {v}"
-    );
+    debug_assert!(v <= i64::MAX as usize, "position overflow: {v}");
     v as i64
 }
 
@@ -193,7 +190,10 @@ impl TextFormat {
             letter_spacing: self.letter_spacing.map(|v| v as i64),
             word_spacing: self.word_spacing.map(|v| v as i64),
             underline_style: self.underline_style.as_ref().map(underline_style_to_dto),
-            vertical_alignment: self.vertical_alignment.as_ref().map(vertical_alignment_to_dto),
+            vertical_alignment: self
+                .vertical_alignment
+                .as_ref()
+                .map(vertical_alignment_to_dto),
         }
     }
 

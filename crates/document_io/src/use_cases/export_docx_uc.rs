@@ -130,8 +130,7 @@ impl LongOperation for ExportDocxUseCase {
                 )?;
 
                 let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                let elements: Vec<InlineElement> =
-                    elements_opt.into_iter().flatten().collect();
+                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
                 let mut paragraph = Paragraph::new();
 
@@ -196,8 +195,13 @@ impl LongOperation for ExportDocxUseCase {
         ));
 
         // Write to file
-        let file = std::fs::File::create(&self.dto.output_path)
-            .map_err(|e| anyhow!("Failed to create output file '{}': {}", self.dto.output_path, e))?;
+        let file = std::fs::File::create(&self.dto.output_path).map_err(|e| {
+            anyhow!(
+                "Failed to create output file '{}': {}",
+                self.dto.output_path,
+                e
+            )
+        })?;
         docx.build()
             .pack(file)
             .map_err(|e| anyhow!("Failed to write DOCX: {}", e))?;

@@ -3,8 +3,8 @@ use anyhow::Result;
 use common::parser_tools::fragment_schema::FragmentData;
 
 use test_harness::{
-    block_controller, export_text, get_block_ids, inline_element_controller, setup_with_text,
-    BlockRelationshipField,
+    BlockRelationshipField, block_controller, export_text, get_block_ids,
+    inline_element_controller, setup_with_text,
 };
 
 use document_editing::InsertFragmentDto;
