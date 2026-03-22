@@ -52,6 +52,17 @@ impl LongOperation for ExportDocxUseCase {
         use docx_rs::*;
         use std::sync::atomic::Ordering;
 
+        // Validate output path
+        let output_path = std::path::Path::new(&self.dto.output_path);
+        if let Some(parent) = output_path.parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                return Err(anyhow!(
+                    "Output directory does not exist: '{}'",
+                    parent.display()
+                ));
+            }
+        }
+
         progress_callback(common::long_operation::OperationProgress::new(
             0.0,
             Some("Starting DOCX export...".to_string()),
@@ -185,7 +196,7 @@ impl LongOperation for ExportDocxUseCase {
 
         // Write to file
         let file = std::fs::File::create(&self.dto.output_path)
-            .map_err(|e| anyhow!("Failed to create output file: {}", e))?;
+            .map_err(|e| anyhow!("Failed to create output file '{}': {}", self.dto.output_path, e))?;
         docx.build()
             .pack(file)
             .map_err(|e| anyhow!("Failed to write DOCX: {}", e))?;

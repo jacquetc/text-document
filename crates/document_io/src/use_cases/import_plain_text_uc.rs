@@ -65,7 +65,9 @@ impl ImportPlainTextUseCase {
         let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
         // Step 4: Split input text into lines and create blocks with inline elements
-        let lines: Vec<&str> = dto.plain_text.split('\n').collect();
+        // Normalize line endings: \r\n -> \n, lone \r -> \n
+        let normalized = dto.plain_text.replace("\r\n", "\n").replace('\r', "\n");
+        let lines: Vec<&str> = normalized.split('\n').collect();
         let num_blocks = lines.len() as i64;
         let mut total_chars: i64 = 0;
         let mut document_position: i64 = 0;

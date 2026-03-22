@@ -263,12 +263,18 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
         link_href: Option<String>,
     }
 
+    const MAX_RECURSION_DEPTH: usize = 256;
+
     fn walk_node(
         node: ego_tree::NodeRef<Node>,
         state: &FmtState,
         blocks: &mut Vec<ParsedBlock>,
         current_list_style: &Option<ListStyle>,
+        depth: usize,
     ) {
+        if depth > MAX_RECURSION_DEPTH {
+            return;
+        }
         match node.value() {
             Node::Element(el) => {
                 let tag = el.name();
@@ -342,7 +348,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 if is_block_tag && tag != "br" {
                     // Start collecting spans for a new block
                     let mut spans: Vec<ParsedSpan> = Vec::new();
-                    collect_inline_spans(node, &new_state, &mut spans, &new_list_style, blocks);
+                    collect_inline_spans(node, &new_state, &mut spans, &new_list_style, blocks, depth + 1);
 
                     let list_style_for_block = if tag == "li" {
                         new_list_style.clone()
@@ -361,12 +367,12 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 } else if matches!(tag, "ul" | "ol" | "table" | "thead" | "tbody" | "tr") {
                     // Container elements: recurse into children
                     for child in node.children() {
-                        walk_node(child, &new_state, blocks, &new_list_style);
+                        walk_node(child, &new_state, blocks, &new_list_style, depth + 1);
                     }
                 } else {
                     // Inline element or unknown: recurse
                     for child in node.children() {
-                        walk_node(child, &new_state, blocks, current_list_style);
+                        walk_node(child, &new_state, blocks, current_list_style, depth + 1);
                     }
                 }
             }
@@ -394,7 +400,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
             _ => {
                 // Document, Comment, etc. — recurse children
                 for child in node.children() {
-                    walk_node(child, state, blocks, current_list_style);
+                    walk_node(child, state, blocks, current_list_style, depth + 1);
                 }
             }
         }
@@ -409,7 +415,11 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
         spans: &mut Vec<ParsedSpan>,
         current_list_style: &Option<ListStyle>,
         blocks: &mut Vec<ParsedBlock>,
+        depth: usize,
     ) {
+        if depth > MAX_RECURSION_DEPTH {
+            return;
+        }
         for child in node.children() {
             match child.value() {
                 Node::Text(text) => {
@@ -470,10 +480,10 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         });
                     } else if nested_block {
                         // Flush as separate block
-                        walk_node(child, &new_state, blocks, current_list_style);
+                        walk_node(child, &new_state, blocks, current_list_style, depth + 1);
                     } else {
                         // Inline element: recurse
-                        collect_inline_spans(child, &new_state, spans, current_list_style, blocks);
+                        collect_inline_spans(child, &new_state, spans, current_list_style, blocks, depth + 1);
                     }
                 }
                 _ => {}
@@ -483,7 +493,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
 
     let initial_state = FmtState::default();
     for child in root.children() {
-        walk_node(child, &initial_state, &mut blocks, &None);
+        walk_node(child, &initial_state, &mut blocks, &None, 0);
     }
 
     // If no blocks were parsed, create a single empty paragraph
