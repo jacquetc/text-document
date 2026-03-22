@@ -25,5 +25,8 @@ unicode-segmentation = { workspace = true }
 # Backend (frontend re-exports all backend crates)
 frontend = { workspace = true }
 
+[dev-dependencies]
+proptest = "1"
+
 [lints]
 workspace = true
