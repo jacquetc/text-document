@@ -18,8 +18,8 @@ pub fn to_i64(v: usize) -> i64 {
 }
 
 pub fn to_usize(v: i64) -> usize {
-    debug_assert!(v >= 0, "negative position: {v}");
-    v.max(0) as usize
+    assert!(v >= 0, "negative position: {v}");
+    v as usize
 }
 
 // ── DocumentStats ───────────────────────────────────────────────

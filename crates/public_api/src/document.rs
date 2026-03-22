@@ -40,12 +40,22 @@ impl TextDocument {
     // ── Construction ──────────────────────────────────────────
 
     /// Create a new, empty document.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the database context cannot be created (e.g. filesystem error).
+    /// Use [`TextDocument::try_new`] for a fallible alternative.
     pub fn new() -> Self {
+        Self::try_new().expect("failed to initialize document")
+    }
+
+    /// Create a new, empty document, returning an error on failure.
+    pub fn try_new() -> Result<Self> {
         let ctx = frontend::AppContext::new();
-        let doc_inner = TextDocumentInner::initialize(ctx).expect("failed to initialize document");
-        Self {
+        let doc_inner = TextDocumentInner::initialize(ctx)?;
+        Ok(Self {
             inner: Arc::new(Mutex::new(doc_inner)),
-        }
+        })
     }
 
     // ── Whole-document content ────────────────────────────────
