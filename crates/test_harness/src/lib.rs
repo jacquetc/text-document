@@ -7,25 +7,27 @@
 
 use anyhow::Result;
 use common::database::db_context::DbContext;
-use common::direct_access::block::block_repository::BlockRelationshipField;
-use common::direct_access::document::document_repository::DocumentRelationshipField;
-use common::direct_access::frame::frame_repository::FrameRelationshipField;
-use common::direct_access::root::root_repository::RootRelationshipField;
 use common::event::EventHub;
 use common::types::EntityId;
 use common::undo_redo::UndoRedoManager;
 use std::sync::Arc;
 
-use direct_access::block::block_controller;
-use direct_access::document::document_controller;
-use direct_access::document::dtos::CreateDocumentDto;
-use direct_access::frame::frame_controller;
-use direct_access::inline_element::inline_element_controller;
-use direct_access::root::dtos::CreateRootDto;
-use direct_access::root::root_controller;
+// Re-export commonly used types and controllers for convenience
+pub use common::direct_access::block::block_repository::BlockRelationshipField;
+pub use common::direct_access::document::document_repository::DocumentRelationshipField;
+pub use common::direct_access::frame::frame_repository::FrameRelationshipField;
+pub use common::direct_access::root::root_repository::RootRelationshipField;
 
-use document_io::document_io_controller;
-use document_io::ImportPlainTextDto;
+pub use direct_access::block::block_controller;
+pub use direct_access::document::document_controller;
+pub use direct_access::document::dtos::CreateDocumentDto;
+pub use direct_access::frame::frame_controller;
+pub use direct_access::inline_element::inline_element_controller;
+pub use direct_access::root::dtos::CreateRootDto;
+pub use direct_access::root::root_controller;
+
+pub use document_io::document_io_controller;
+pub use document_io::ImportPlainTextDto;
 
 /// Create an in-memory database with a Root and empty Document.
 ///
@@ -116,21 +118,6 @@ pub fn get_frame_id(db_context: &DbContext) -> Result<EntityId> {
     )?;
     Ok(frame_ids[0])
 }
-
-// Re-export commonly used types and controllers for convenience
-pub use direct_access::block::block_controller;
-pub use direct_access::document::document_controller;
-pub use direct_access::frame::frame_controller;
-pub use direct_access::inline_element::inline_element_controller;
-pub use direct_access::root::root_controller;
-
-pub use common::direct_access::block::block_repository::BlockRelationshipField;
-pub use common::direct_access::document::document_repository::DocumentRelationshipField;
-pub use common::direct_access::frame::frame_repository::FrameRelationshipField;
-pub use common::direct_access::root::root_repository::RootRelationshipField;
-
-pub use document_io::document_io_controller;
-pub use document_io::ImportPlainTextDto;
 
 /// Basic document statistics retrieved directly from entity data.
 pub struct BasicStats {

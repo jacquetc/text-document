@@ -7,7 +7,10 @@ edition.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
-publish = false
+publish = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

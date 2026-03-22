@@ -56,7 +56,7 @@ document_io = { version = "0.0.8", path = "crates/document_io", package = "text-
 document_search = { version = "0.0.8", path = "crates/document_search", package = "text-document-search" }
 frontend = { version = "0.0.8", path = "crates/frontend", package = "text-document-frontend" }
 text-document = { version = "0.0.8", path = "crates/public_api" }
-test_harness = { path = "crates/test_harness", package = "text-document-test-harness" }
+test_harness = { version = "0.0.8", path = "crates/test_harness", package = "text-document-test-harness" }
 
 [profile.release]
 lto = "fat"
