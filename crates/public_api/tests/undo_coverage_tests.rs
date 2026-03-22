@@ -409,3 +409,42 @@ fn undo_redo_delete_previous_char() {
     doc.redo().unwrap();
     assert_eq!(doc.to_plain_text().unwrap(), "Hell");
 }
+
+// ── edit block groups operations ────────────────────────────────
+
+#[test]
+fn undo_edit_block_groups_operations() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor_at(5);
+
+    c.begin_edit_block();
+    c.insert_text(" ").unwrap();
+    c.insert_text("world").unwrap();
+    c.end_edit_block();
+
+    assert_eq!(doc.to_plain_text().unwrap(), "Hello world");
+
+    // One undo should reverse both inserts
+    doc.undo().unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "Hello");
+}
+
+// ── undo with no history ────────────────────────────────────────
+
+#[test]
+fn no_undo_after_set_plain_text() {
+    let doc = new_doc("Hello");
+    assert!(!doc.can_undo());
+}
+
+#[test]
+fn clear_undo_redo_stack() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor_at(5);
+    c.insert_text(" world").unwrap();
+    assert!(doc.can_undo());
+
+    doc.clear_undo_redo();
+    assert!(!doc.can_undo());
+    assert!(!doc.can_redo());
+}
