@@ -16,4 +16,3 @@ categories.workspace = true
 anyhow = { workspace = true }
 common = { workspace = true }
 direct_access = { workspace = true }
-document_io = { workspace = true }
