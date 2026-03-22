@@ -47,16 +47,32 @@ fn execute_set_frame_format(
         .get_frame(&frame_id)?
         .ok_or_else(|| anyhow!("Frame not found with id {}", dto.frame_id))?;
 
-    // Set frame format fields
+    // Set frame format fields — None means preserve existing value.
     let mut updated = frame.clone();
-    updated.fmt_height = Some(dto.height);
-    updated.fmt_width = Some(dto.width);
-    updated.fmt_top_margin = Some(dto.top_margin);
-    updated.fmt_bottom_margin = Some(dto.bottom_margin);
-    updated.fmt_left_margin = Some(dto.left_margin);
-    updated.fmt_right_margin = Some(dto.right_margin);
-    updated.fmt_padding = Some(dto.padding);
-    updated.fmt_border = Some(dto.border);
+    if let Some(v) = dto.height {
+        updated.fmt_height = Some(v);
+    }
+    if let Some(v) = dto.width {
+        updated.fmt_width = Some(v);
+    }
+    if let Some(v) = dto.top_margin {
+        updated.fmt_top_margin = Some(v);
+    }
+    if let Some(v) = dto.bottom_margin {
+        updated.fmt_bottom_margin = Some(v);
+    }
+    if let Some(v) = dto.left_margin {
+        updated.fmt_left_margin = Some(v);
+    }
+    if let Some(v) = dto.right_margin {
+        updated.fmt_right_margin = Some(v);
+    }
+    if let Some(v) = dto.padding {
+        updated.fmt_padding = Some(v);
+    }
+    if let Some(v) = dto.border {
+        updated.fmt_border = Some(v);
+    }
     updated.updated_at = chrono::Utc::now();
     uow.update_frame(&updated)?;
 

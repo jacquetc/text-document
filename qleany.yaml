@@ -599,27 +599,38 @@ features:
               type: integer
             - name: font_family
               type: string
+              optional: true
             - name: font_point_size
               type: integer
+              optional: true
             - name: font_weight
               type: integer
+              optional: true
             - name: font_bold
               type: boolean
+              optional: true
             - name: font_italic
               type: boolean
+              optional: true
             - name: font_underline
               type: boolean
+              optional: true
             - name: font_overline
               type: boolean
+              optional: true
             - name: font_strikeout
               type: boolean
+              optional: true
             - name: letter_spacing
               type: integer
+              optional: true
             - name: word_spacing
               type: integer
+              optional: true
             - name: underline_style
               type: enum
               enum_name: UnderlineStyle
+              optional: true
               enum_values:
                 - NoUnderline
                 - SingleUnderline
@@ -632,6 +643,7 @@ features:
             - name: vertical_alignment
               type: enum
               enum_name: CharVerticalAlignment
+              optional: true
               enum_values:
                 - Normal
                 - SuperScript
@@ -677,6 +689,7 @@ features:
             - name: alignment
               type: enum
               enum_name: Alignment
+              optional: true
               enum_values:
                 - Left
                 - Right
@@ -684,11 +697,14 @@ features:
                 - Justify
             - name: heading_level
               type: integer
+              optional: true
             - name: indent
               type: integer
+              optional: true
             - name: marker
               type: enum
               enum_name: MarkerType
+              optional: true
               enum_values:
                 - NoMarker
                 - Unchecked
@@ -708,20 +724,28 @@ features:
               type: integer
             - name: height
               type: integer
+              optional: true
             - name: width
               type: integer
+              optional: true
             - name: top_margin
               type: integer
+              optional: true
             - name: bottom_margin
               type: integer
+              optional: true
             - name: left_margin
               type: integer
+              optional: true
             - name: right_margin
               type: integer
+              optional: true
             - name: padding
               type: integer
+              optional: true
             - name: border
               type: integer
+              optional: true
 
   # ── Document I/O (import/export in various formats) ─────────
   - name: document_io

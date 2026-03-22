@@ -92,10 +92,18 @@ fn execute_set_block_format(
         // Block overlaps the range if it starts before range_end and ends after range_start
         if block_start <= range_end && block_end >= range_start {
             let mut updated = block.clone();
-            updated.fmt_alignment = Some(alignment_to_entity(&dto.alignment));
-            updated.fmt_heading_level = Some(dto.heading_level);
-            updated.fmt_indent = Some(dto.indent);
-            updated.fmt_marker = Some(marker_to_entity(&dto.marker));
+            if let Some(ref a) = dto.alignment {
+                updated.fmt_alignment = Some(alignment_to_entity(a));
+            }
+            if let Some(v) = dto.heading_level {
+                updated.fmt_heading_level = Some(v);
+            }
+            if let Some(v) = dto.indent {
+                updated.fmt_indent = Some(v);
+            }
+            if let Some(ref m) = dto.marker {
+                updated.fmt_marker = Some(marker_to_entity(m));
+            }
             updated.updated_at = chrono::Utc::now();
             blocks_to_update.push(updated);
         }

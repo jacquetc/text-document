@@ -2,24 +2,47 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use common::entities::{Alignment, CharVerticalAlignment, MarkerType, UnderlineStyle};
-
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetTextFormatDto {
     pub position: i64,
     pub anchor: i64,
-    pub font_family: String,
-    pub font_point_size: i64,
-    pub font_weight: i64,
-    pub font_bold: bool,
-    pub font_italic: bool,
-    pub font_underline: bool,
-    pub font_overline: bool,
-    pub font_strikeout: bool,
-    pub letter_spacing: i64,
-    pub word_spacing: i64,
-    pub underline_style: UnderlineStyle,
-    pub vertical_alignment: CharVerticalAlignment,
+    pub font_family: Option<String>,
+    pub font_point_size: Option<i64>,
+    pub font_weight: Option<i64>,
+    pub font_bold: Option<bool>,
+    pub font_italic: Option<bool>,
+    pub font_underline: Option<bool>,
+    pub font_overline: Option<bool>,
+    pub font_strikeout: Option<bool>,
+    pub letter_spacing: Option<i64>,
+    pub word_spacing: Option<i64>,
+    pub underline_style: Option<UnderlineStyle>,
+    pub vertical_alignment: Option<CharVerticalAlignment>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub enum UnderlineStyle {
+    #[default]
+    NoUnderline,
+    SingleUnderline,
+    DashUnderline,
+    DotLine,
+    DashDotLine,
+    DashDotDotLine,
+    WaveUnderline,
+    SpellCheckUnderline,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub enum CharVerticalAlignment {
+    #[default]
+    Normal,
+    SuperScript,
+    SubScript,
+    Middle,
+    Bottom,
+    Top,
+    Baseline,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -31,26 +54,45 @@ pub struct MergeTextFormatDto {
     pub font_italic: Option<bool>,
     pub font_underline: Option<bool>,
 }
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetBlockFormatDto {
     pub position: i64,
     pub anchor: i64,
-    pub alignment: Alignment,
-    pub heading_level: i64,
-    pub indent: i64,
-    pub marker: MarkerType,
+    pub alignment: Option<Alignment>,
+    pub heading_level: Option<i64>,
+    pub indent: Option<i64>,
+    pub marker: Option<MarkerType>,
 }
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub enum Alignment {
+    #[default]
+    Left,
+    Right,
+    Center,
+    Justify,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub enum MarkerType {
+    #[default]
+    NoMarker,
+    Unchecked,
+    Checked,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetFrameFormatDto {
     pub position: i64,
     pub anchor: i64,
     pub frame_id: i64,
-    pub height: i64,
-    pub width: i64,
-    pub top_margin: i64,
-    pub bottom_margin: i64,
-    pub left_margin: i64,
-    pub right_margin: i64,
-    pub padding: i64,
-    pub border: i64,
+    pub height: Option<i64>,
+    pub width: Option<i64>,
+    pub top_margin: Option<i64>,
+    pub bottom_margin: Option<i64>,
+    pub left_margin: Option<i64>,
+    pub right_margin: Option<i64>,
+    pub padding: Option<i64>,
+    pub border: Option<i64>,
 }

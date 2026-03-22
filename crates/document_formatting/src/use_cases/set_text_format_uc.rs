@@ -90,20 +90,45 @@ fn element_char_len(elem: &InlineElement) -> i64 {
     }
 }
 
-/// Apply all text format fields from the DTO to an inline element.
+/// Apply text format fields from the DTO to an inline element.
+/// `None` fields are left unchanged (preserve existing formatting).
 fn apply_text_format(elem: &mut InlineElement, dto: &SetTextFormatDto) {
-    elem.fmt_font_family = Some(dto.font_family.clone());
-    elem.fmt_font_point_size = Some(dto.font_point_size);
-    elem.fmt_font_weight = Some(dto.font_weight);
-    elem.fmt_font_bold = Some(dto.font_bold);
-    elem.fmt_font_italic = Some(dto.font_italic);
-    elem.fmt_font_underline = Some(dto.font_underline);
-    elem.fmt_font_overline = Some(dto.font_overline);
-    elem.fmt_font_strikeout = Some(dto.font_strikeout);
-    elem.fmt_letter_spacing = Some(dto.letter_spacing);
-    elem.fmt_word_spacing = Some(dto.word_spacing);
-    elem.fmt_underline_style = Some(underline_style_to_entity(&dto.underline_style));
-    elem.fmt_vertical_alignment = Some(vertical_alignment_to_entity(&dto.vertical_alignment));
+    if let Some(ref v) = dto.font_family {
+        elem.fmt_font_family = Some(v.clone());
+    }
+    if let Some(v) = dto.font_point_size {
+        elem.fmt_font_point_size = Some(v);
+    }
+    if let Some(v) = dto.font_weight {
+        elem.fmt_font_weight = Some(v);
+    }
+    if let Some(v) = dto.font_bold {
+        elem.fmt_font_bold = Some(v);
+    }
+    if let Some(v) = dto.font_italic {
+        elem.fmt_font_italic = Some(v);
+    }
+    if let Some(v) = dto.font_underline {
+        elem.fmt_font_underline = Some(v);
+    }
+    if let Some(v) = dto.font_overline {
+        elem.fmt_font_overline = Some(v);
+    }
+    if let Some(v) = dto.font_strikeout {
+        elem.fmt_font_strikeout = Some(v);
+    }
+    if let Some(v) = dto.letter_spacing {
+        elem.fmt_letter_spacing = Some(v);
+    }
+    if let Some(v) = dto.word_spacing {
+        elem.fmt_word_spacing = Some(v);
+    }
+    if let Some(ref v) = dto.underline_style {
+        elem.fmt_underline_style = Some(underline_style_to_entity(v));
+    }
+    if let Some(ref v) = dto.vertical_alignment {
+        elem.fmt_vertical_alignment = Some(vertical_alignment_to_entity(v));
+    }
     elem.updated_at = chrono::Utc::now();
 }
 
