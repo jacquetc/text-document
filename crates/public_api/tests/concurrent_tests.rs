@@ -9,7 +9,7 @@ fn concurrent_inserts_from_multiple_threads() {
     doc.set_plain_text("Hello").unwrap();
 
     let num_threads = 8;
-    let insert_text = "TX"; // 2 chars per thread
+    let chars_per_insert = 2; // "T0".."T7" are each 2 unicode chars
 
     let mut handles = Vec::new();
     for i in 0..num_threads {
@@ -27,7 +27,7 @@ fn concurrent_inserts_from_multiple_threads() {
 
     let stats = doc.stats();
     // Each thread inserts 2 chars, original text is 5 chars.
-    let expected = 5 + num_threads * insert_text.len();
+    let expected = 5 + num_threads * chars_per_insert;
     assert_eq!(
         stats.character_count, expected,
         "expected {} characters, got {}",

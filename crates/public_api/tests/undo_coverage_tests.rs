@@ -253,10 +253,22 @@ fn undo_redo_set_text_format() {
     };
     c.set_char_format(&fmt).unwrap();
 
+    // Verify format was applied
+    let read_c = doc.cursor_at(0);
+    let applied = read_c.char_format().unwrap();
+    assert_eq!(applied.font_bold, Some(true));
+
     doc.undo().unwrap();
     // Format should be reverted
+    let read_c = doc.cursor_at(0);
+    let reverted = read_c.char_format().unwrap();
+    assert_ne!(reverted.font_bold, Some(true));
+
     doc.redo().unwrap();
     // Format should be re-applied
+    let read_c = doc.cursor_at(0);
+    let reapplied = read_c.char_format().unwrap();
+    assert_eq!(reapplied.font_bold, Some(true));
 }
 
 // ── merge_text_format undo/redo ─────────────────────────────────
@@ -283,8 +295,24 @@ fn undo_redo_merge_text_format() {
     };
     c.merge_char_format(&fmt2).unwrap();
 
+    // Verify merge result
+    let read_c = doc.cursor_at(0);
+    let merged = read_c.char_format().unwrap();
+    assert_eq!(merged.font_bold, Some(true));
+    assert_eq!(merged.font_italic, Some(true));
+
     doc.undo().unwrap();
+    // After undoing merge, italic should be reverted but bold preserved
+    let read_c = doc.cursor_at(0);
+    let after_undo = read_c.char_format().unwrap();
+    assert_eq!(after_undo.font_bold, Some(true));
+    assert_ne!(after_undo.font_italic, Some(true));
+
     doc.redo().unwrap();
+    let read_c = doc.cursor_at(0);
+    let after_redo = read_c.char_format().unwrap();
+    assert_eq!(after_redo.font_bold, Some(true));
+    assert_eq!(after_redo.font_italic, Some(true));
 }
 
 // ── set_block_format undo/redo ──────────────────────────────────
@@ -302,8 +330,21 @@ fn undo_redo_set_block_format() {
     };
     c.set_block_format(&fmt).unwrap();
 
+    // Verify format was applied
+    let read_c = doc.cursor_at(0);
+    let applied = read_c.block_format().unwrap();
+    assert_eq!(applied.alignment, Some(Alignment::Center));
+    assert_eq!(applied.heading_level, Some(1));
+
     doc.undo().unwrap();
+    let read_c = doc.cursor_at(0);
+    let reverted = read_c.block_format().unwrap();
+    assert_ne!(reverted.alignment, Some(Alignment::Center));
+
     doc.redo().unwrap();
+    let read_c = doc.cursor_at(0);
+    let reapplied = read_c.block_format().unwrap();
+    assert_eq!(reapplied.alignment, Some(Alignment::Center));
 }
 
 // ── set_frame_format undo/redo ──────────────────────────────────
@@ -332,8 +373,13 @@ fn undo_redo_set_frame_format() {
     };
     c.set_frame_format(frame_id, &fmt).unwrap();
 
+    // Just verify undo/redo don't error — frame format read-back is
+    // not exposed at block level, so we verify via the round-trip.
     doc.undo().unwrap();
+    assert!(doc.can_redo());
+
     doc.redo().unwrap();
+    assert!(doc.can_undo());
 }
 
 // ── replace_text undo/redo ──────────────────────────────────────

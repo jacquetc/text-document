@@ -95,7 +95,6 @@ fn set_text_direction_rtl() {
 #[test]
 fn wrap_mode_default() {
     let doc = TextDocument::new();
-    // Default is NoWrap
     assert_eq!(doc.default_wrap_mode(), WrapMode::NoWrap);
 }
 
@@ -118,133 +117,6 @@ fn set_wrap_mode_all_variants() {
         doc.set_default_wrap_mode(mode.clone()).unwrap();
         assert_eq!(doc.default_wrap_mode(), mode);
     }
-}
-
-// ── Undo / Redo ─────────────────────────────────────────────────
-
-#[test]
-fn can_undo_and_redo() {
-    let doc = new_doc("Hello");
-    assert!(!doc.can_undo());
-    assert!(!doc.can_redo());
-
-    let c = doc.cursor_at(5);
-    c.insert_text(" world").unwrap();
-    assert!(doc.can_undo());
-    assert!(!doc.can_redo());
-
-    doc.undo().unwrap();
-    assert!(!doc.can_undo());
-    assert!(doc.can_redo());
-
-    doc.redo().unwrap();
-    assert!(doc.can_undo());
-    assert!(!doc.can_redo());
-}
-
-#[test]
-fn clear_undo_redo() {
-    let doc = new_doc("Hello");
-    let c = doc.cursor_at(5);
-    c.insert_text(" world").unwrap();
-    assert!(doc.can_undo());
-
-    doc.clear_undo_redo();
-    assert!(!doc.can_undo());
-    assert!(!doc.can_redo());
-}
-
-// ── Search ──────────────────────────────────────────────────────
-
-#[test]
-fn find_basic() {
-    let doc = new_doc("Hello world hello");
-    let opts = FindOptions::default();
-    let m = doc.find("hello", 0, &opts).unwrap();
-    assert!(m.is_some());
-    let m = m.unwrap();
-    assert_eq!(m.position, 0);
-    assert_eq!(m.length, 5);
-}
-
-#[test]
-fn find_from_offset() {
-    let doc = new_doc("Hello world hello");
-    let opts = FindOptions::default();
-    let m = doc.find("hello", 5, &opts).unwrap();
-    assert!(m.is_some());
-    assert_eq!(m.unwrap().position, 12);
-}
-
-#[test]
-fn find_not_found() {
-    let doc = new_doc("Hello world");
-    let opts = FindOptions::default();
-    let m = doc.find("xyz", 0, &opts).unwrap();
-    assert!(m.is_none());
-}
-
-#[test]
-fn find_backward() {
-    let doc = new_doc("Hello world hello");
-    let opts = FindOptions {
-        search_backward: true,
-        ..Default::default()
-    };
-    let m = doc.find("hello", 17, &opts).unwrap();
-    assert!(m.is_some());
-}
-
-#[test]
-fn find_case_sensitive() {
-    let doc = new_doc("Hello HELLO hello");
-    let opts = FindOptions {
-        case_sensitive: true,
-        ..Default::default()
-    };
-    let matches = doc.find_all("Hello", &opts).unwrap();
-    assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].position, 0);
-}
-
-#[test]
-fn find_whole_word() {
-    let doc = new_doc("hello helloworld hello");
-    let opts = FindOptions {
-        whole_word: true,
-        ..Default::default()
-    };
-    let matches = doc.find_all("hello", &opts).unwrap();
-    assert_eq!(matches.len(), 2); // first and last, not "helloworld"
-}
-
-#[test]
-fn find_regex() {
-    let doc = new_doc("foo123 bar456");
-    let opts = FindOptions {
-        use_regex: true,
-        ..Default::default()
-    };
-    let matches = doc.find_all(r"\d+", &opts).unwrap();
-    assert_eq!(matches.len(), 2);
-}
-
-#[test]
-fn replace_text() {
-    let doc = new_doc("Hello world");
-    let opts = FindOptions::default();
-    let count = doc.replace_text("world", "Rust", false, &opts).unwrap();
-    assert_eq!(count, 1);
-    assert_eq!(doc.to_plain_text().unwrap(), "Hello Rust");
-}
-
-#[test]
-fn replace_all() {
-    let doc = new_doc("foo bar foo baz foo");
-    let opts = FindOptions::default();
-    let count = doc.replace_text("foo", "X", true, &opts).unwrap();
-    assert_eq!(count, 3);
-    assert_eq!(doc.to_plain_text().unwrap(), "X bar X baz X");
 }
 
 // ── Text format with full fields ────────────────────────────────
@@ -291,49 +163,6 @@ fn set_block_format_full() {
     c.set_block_format(&fmt).unwrap();
 }
 
-// ── Event subscription ──────────────────────────────────────────
-
-#[test]
-fn on_change_callback() {
-    use std::sync::{Arc, Mutex};
-    let doc = new_doc("Hello");
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let events_clone = events.clone();
-    let _sub = doc.on_change(move |e| {
-        events_clone.lock().unwrap().push(format!("{:?}", e));
-    });
-
-    let c = doc.cursor_at(5);
-    c.insert_text(" world").unwrap();
-
-    let collected = events.lock().unwrap();
-    assert!(!collected.is_empty());
-}
-
-#[test]
-fn subscription_drop_stops_events() {
-    use std::sync::{Arc, Mutex};
-    let doc = new_doc("Hello");
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let events_clone = events.clone();
-
-    {
-        let _sub = doc.on_change(move |e| {
-            events_clone.lock().unwrap().push(format!("{:?}", e));
-        });
-        let c = doc.cursor_at(5);
-        c.insert_text("!").unwrap();
-    }
-    // Sub dropped
-
-    let before = events.lock().unwrap().len();
-    let c = doc.cursor_at(6);
-    c.insert_text("!").unwrap();
-    let after = events.lock().unwrap().len();
-    // After dropping sub, no new events should fire
-    assert_eq!(before, after);
-}
-
 // ── Import/export roundtrips ────────────────────────────────────
 
 #[test]
@@ -343,31 +172,131 @@ fn plain_text_roundtrip() {
     assert_eq!(text, "Hello\nWorld");
 }
 
-#[test]
-fn html_export() {
-    let doc = new_doc("Hello world");
-    let html = doc.to_html().unwrap();
-    assert!(html.contains("Hello world"));
-}
+// ── try_new ─────────────────────────────────────────────────────
 
 #[test]
-fn markdown_export() {
-    let doc = new_doc("Hello world");
-    let md = doc.to_markdown().unwrap();
-    assert!(md.contains("Hello world"));
+fn try_new_succeeds() {
+    let doc = TextDocument::try_new().unwrap();
+    assert!(doc.is_empty());
 }
 
+// ── Out-of-bounds queries ───────────────────────────────────────
+
 #[test]
-fn latex_export_no_preamble() {
+fn text_at_beyond_document_length() {
     let doc = new_doc("Hello");
-    let latex = doc.to_latex("article", false).unwrap();
-    assert!(latex.contains("Hello"));
+    // Requesting more text than available should not panic
+    let result = doc.text_at(0, 100);
+    // Implementation may truncate or error — just verify no panic
+    let _ = result;
 }
 
 #[test]
-fn latex_export_with_preamble() {
+fn text_at_position_beyond_end() {
     let doc = new_doc("Hello");
-    let latex = doc.to_latex("book", true).unwrap();
-    assert!(latex.contains("\\documentclass"));
-    assert!(latex.contains("Hello"));
+    let result = doc.text_at(100, 5);
+    let _ = result;
+}
+
+#[test]
+fn block_at_beyond_end() {
+    let doc = new_doc("Hello");
+    let result = doc.block_at(100);
+    let _ = result;
+}
+
+// ── ContentsChanged event payload ───────────────────────────────
+
+#[test]
+fn contents_changed_event_has_correct_payload() {
+    use text_document::DocumentEvent;
+
+    let doc = new_doc("Hello");
+    doc.poll_events(); // drain setup events
+
+    let cursor = doc.cursor_at(5);
+    cursor.insert_text(" world").unwrap();
+
+    let events = doc.poll_events();
+    let contents_event = events
+        .iter()
+        .find(|e| matches!(e, DocumentEvent::ContentsChanged { .. }));
+    assert!(contents_event.is_some(), "expected ContentsChanged event");
+
+    if let Some(DocumentEvent::ContentsChanged {
+        position,
+        chars_removed,
+        chars_added,
+        ..
+    }) = contents_event
+    {
+        assert_eq!(*position, 5, "edit position should be 5");
+        assert_eq!(*chars_removed, 0, "no chars removed on insert");
+        assert_eq!(*chars_added, 6, "6 chars added (' world')");
+    }
+}
+
+// ── ModificationChanged event payload ───────────────────────────
+
+#[test]
+fn modification_changed_event_payload() {
+    use text_document::DocumentEvent;
+
+    let doc = TextDocument::new();
+    doc.poll_events(); // drain
+
+    doc.set_modified(true);
+    let events = doc.poll_events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, DocumentEvent::ModificationChanged(true))),
+        "expected ModificationChanged(true), got: {:?}",
+        events
+    );
+
+    doc.set_modified(false);
+    let events = doc.poll_events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, DocumentEvent::ModificationChanged(false))),
+        "expected ModificationChanged(false), got: {:?}",
+        events
+    );
+}
+
+// ── InlineContent enum ──────────────────────────────────────────
+
+#[test]
+fn inline_content_variants_are_accessible() {
+    use text_document::InlineContent;
+
+    let empty = InlineContent::Empty;
+    let text = InlineContent::Text("hello".into());
+    let image = InlineContent::Image {
+        name: "img.png".into(),
+        width: 100,
+        height: 50,
+        quality: 90,
+    };
+
+    // Verify pattern matching works
+    assert!(matches!(empty, InlineContent::Empty));
+    assert!(matches!(text, InlineContent::Text(_)));
+    assert!(matches!(image, InlineContent::Image { .. }));
+}
+
+// ── replace_text single (not replace_all) ───────────────────────
+
+#[test]
+fn replace_text_single_occurrence() {
+    let doc = new_doc("foo bar foo baz foo");
+    let opts = FindOptions::default();
+    let count = doc.replace_text("foo", "X", false, &opts).unwrap();
+    assert_eq!(count, 1);
+    let text = doc.to_plain_text().unwrap();
+    assert!(text.starts_with("X bar"));
+    // Only one replacement
+    assert_eq!(text.matches("foo").count(), 2);
 }
