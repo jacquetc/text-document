@@ -77,16 +77,20 @@ impl ImportPlainTextUseCase {
             let line_len = line.chars().count() as i64;
 
             // Create a Block owned by the Frame
-            let mut block = Block::default();
-            block.plain_text = line.to_string();
-            block.text_length = line_len;
-            block.document_position = document_position;
+            let block = Block {
+                plain_text: line.to_string(),
+                text_length: line_len,
+                document_position,
+                ..Block::default()
+            };
 
             let created_block = uow.create_block(&block, created_frame.id, -1)?;
 
             // Create an InlineElement owned by the Block
-            let mut element = InlineElement::default();
-            element.content = InlineContent::Text(line.to_string());
+            let element = InlineElement {
+                content: InlineContent::Text(line.to_string()),
+                ..InlineElement::default()
+            };
 
             uow.create_inline_element(&element, created_block.id, -1)?;
 

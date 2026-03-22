@@ -68,7 +68,7 @@ fn execute_create_list(
         .first()
         .ok_or_else(|| anyhow!("Root has no document"))?;
 
-    let document = uow
+    let _document = uow
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
@@ -86,7 +86,7 @@ fn execute_create_list(
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     // Create the List entity

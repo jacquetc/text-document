@@ -66,16 +66,14 @@ impl GetTextAtPositionUseCase {
         let frames_opt = uow.get_frame_multi(&frame_ids)?;
 
         let mut all_block_ids: Vec<EntityId> = Vec::new();
-        for frame_opt in &frames_opt {
-            if let Some(frame) = frame_opt {
-                let block_ids =
-                    uow.get_frame_relationship(&frame.id, &FrameRelationshipField::Blocks)?;
-                all_block_ids.extend(block_ids);
-            }
+        for frame in frames_opt.iter().flatten() {
+            let block_ids =
+                uow.get_frame_relationship(&frame.id, &FrameRelationshipField::Blocks)?;
+            all_block_ids.extend(block_ids);
         }
 
         let blocks_opt = uow.get_block_multi(&all_block_ids)?;
-        let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+        let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
         blocks.sort_by_key(|b| b.document_position);
 
         // Find the block containing the requested position.
@@ -96,12 +94,11 @@ impl GetTextAtPositionUseCase {
         let mut first_element_id: EntityId = 0;
         let mut found_first_element = false;
 
-        for block_idx in first_block_idx..blocks.len() {
+        for (block_idx, block) in blocks.iter().enumerate().skip(first_block_idx) {
             if remaining == 0 {
                 break;
             }
 
-            let block = &blocks[block_idx];
             let block_offset = if block_idx == first_block_idx {
                 offset_in_first_block
             } else {
@@ -142,11 +139,7 @@ impl GetTextAtPositionUseCase {
 
                 if current_char_offset + elem_char_len > block_offset {
                     // This element overlaps with our read range
-                    let start_in_elem = if current_char_offset < block_offset {
-                        block_offset - current_char_offset
-                    } else {
-                        0
-                    };
+                    let start_in_elem = block_offset.saturating_sub(current_char_offset);
                     let available = elem_char_len - start_in_elem;
                     let take = available.min(remaining);
 

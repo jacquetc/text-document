@@ -82,7 +82,7 @@ fn execute_insert_block(
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     // Find block at position
@@ -92,7 +92,7 @@ fn execute_insert_block(
     let element_ids =
         uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-    let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
     // Split the block at the offset
     let plain_chars: Vec<char> = current_block.plain_text.chars().collect();

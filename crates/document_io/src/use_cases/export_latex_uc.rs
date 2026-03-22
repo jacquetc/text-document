@@ -68,7 +68,7 @@ impl ExportLatexUseCase {
             }
 
             let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
             blocks.sort_by_key(|b| b.document_position);
 
             let mut i = 0;
@@ -112,7 +112,7 @@ impl ExportLatexUseCase {
                         };
 
                         if b_list.is_some() {
-                            let inline_latex = self.render_inline_latex(&uow, b)?;
+                            let inline_latex = self.render_inline_latex(&*uow, b)?;
                             items.push(format!("\\item {}", inline_latex));
                             i += 1;
                         } else {
@@ -127,7 +127,7 @@ impl ExportLatexUseCase {
                         env
                     ));
                 } else {
-                    let inline_latex = self.render_inline_latex(&uow, block)?;
+                    let inline_latex = self.render_inline_latex(&*uow, block)?;
 
                     if let Some(level) = block.fmt_heading_level {
                         let cmd = match level {
@@ -168,7 +168,7 @@ impl ExportLatexUseCase {
 
     fn render_inline_latex(
         &self,
-        uow: &Box<dyn ExportLatexUnitOfWorkTrait>,
+        uow: &dyn ExportLatexUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
         let element_ids = uow.get_block_relationship(
@@ -177,7 +177,7 @@ impl ExportLatexUseCase {
         )?;
 
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
         let mut latex = String::new();
 

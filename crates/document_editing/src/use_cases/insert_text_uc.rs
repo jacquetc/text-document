@@ -52,7 +52,7 @@ fn delete_range_in_block(
 ) -> Result<i64> {
     let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-    let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
     let mut running: i64 = 0;
     for elem in &elements {
@@ -136,7 +136,7 @@ fn execute_insert(
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     // Handle selection deletion (position != anchor) — same-block only
@@ -180,7 +180,7 @@ fn execute_insert(
 
         // Re-read blocks after deletion
         let blocks_opt = uow.get_block_multi(&block_ids)?;
-        blocks = blocks_opt.into_iter().filter_map(|b| b).collect();
+        blocks = blocks_opt.into_iter().flatten().collect();
         blocks.sort_by_key(|b| b.document_position);
         document = uow
             .get_document(&doc_id)?
@@ -195,7 +195,7 @@ fn execute_insert(
     // Get elements for this block
     let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-    let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
     if elements.is_empty() {
         return Err(anyhow!("Block has no inline elements"));

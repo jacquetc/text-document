@@ -66,7 +66,7 @@ impl ExportPlainTextUseCase {
 
             // Get all blocks in batch and sort by document_position
             let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
             blocks.sort_by_key(|b| b.document_position);
 
             for block in &blocks {

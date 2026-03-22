@@ -54,13 +54,14 @@ impl LongOperation for ExportDocxUseCase {
 
         // Validate output path
         let output_path = std::path::Path::new(&self.dto.output_path);
-        if let Some(parent) = output_path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                return Err(anyhow!(
-                    "Output directory does not exist: '{}'",
-                    parent.display()
-                ));
-            }
+        if let Some(parent) = output_path.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            return Err(anyhow!(
+                "Output directory does not exist: '{}'",
+                parent.display()
+            ));
         }
 
         progress_callback(common::long_operation::OperationProgress::new(
@@ -113,7 +114,7 @@ impl LongOperation for ExportDocxUseCase {
             }
 
             let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
             blocks.sort_by_key(|b| b.document_position);
             let total = blocks.len();
 
@@ -130,13 +131,13 @@ impl LongOperation for ExportDocxUseCase {
 
                 let elements_opt = uow.get_inline_element_multi(&element_ids)?;
                 let elements: Vec<InlineElement> =
-                    elements_opt.into_iter().filter_map(|e| e).collect();
+                    elements_opt.into_iter().flatten().collect();
 
                 let mut paragraph = Paragraph::new();
 
                 // Apply heading style
                 if let Some(level) = block.fmt_heading_level {
-                    let style_name = format!("Heading{}", level.min(6).max(1));
+                    let style_name = format!("Heading{}", level.clamp(1, 6));
                     paragraph = paragraph.style(&style_name);
                 }
 

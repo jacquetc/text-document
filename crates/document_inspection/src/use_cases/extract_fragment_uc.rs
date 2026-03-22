@@ -73,7 +73,7 @@ impl ExtractFragmentUseCase {
         }
 
         let blocks_opt = uow.get_block_multi(&all_block_ids)?;
-        let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+        let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
         blocks.sort_by_key(|b| b.document_position);
 
         let mut fragment_blocks: Vec<FragmentBlock> = Vec::new();
@@ -104,7 +104,7 @@ impl ExtractFragmentUseCase {
             let element_ids =
                 uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
             let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+            let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
             // Get list if any
             let list = if let Some(list_id) = block.list {
@@ -231,11 +231,7 @@ fn extract_elements_in_range(
         }
 
         // This element overlaps with [local_start, local_end)
-        let take_start = if local_start > elem_start {
-            local_start - elem_start
-        } else {
-            0
-        };
+        let take_start = local_start.saturating_sub(elem_start);
         let take_end = if local_end < elem_end {
             local_end - elem_start
         } else {

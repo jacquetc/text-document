@@ -61,7 +61,7 @@ fn fetch_blocks_and_build_text(
     }
 
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     let full_text = build_full_text_from_blocks(&blocks);
@@ -192,7 +192,7 @@ fn execute_replace(
         let element_ids =
             uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
         // Replace within inline elements
         // Walk elements to find the one containing the match
@@ -298,7 +298,7 @@ fn execute_replace(
         all_block_ids.extend(block_ids);
     }
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
-    let mut current_blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    let mut current_blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     current_blocks.sort_by_key(|b| b.document_position);
 
     // Compute position adjustments: for each block, determine how much to shift
@@ -315,7 +315,7 @@ fn execute_replace(
     // For each block in sorted order, compute cumulative shift from all blocks before it
     let mut cumulative_shift: i64 = 0;
     let mut blocks_to_update: Vec<Block> = Vec::new();
-    for (_i, block) in current_blocks.iter().enumerate() {
+    for block in current_blocks.iter() {
         // Find original block index mapping: blocks[i].id == current_blocks[i].id
         // since both are sorted by document_position and IDs haven't changed.
         // Find the original index for this block by matching id

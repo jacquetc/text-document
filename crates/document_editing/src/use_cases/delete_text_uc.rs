@@ -114,7 +114,7 @@ fn execute_delete(
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     // Find start and end blocks
@@ -129,7 +129,7 @@ fn execute_delete(
         let element_ids =
             uow.get_block_relationship(&start_block.id, &BlockRelationshipField::Elements)?;
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
         // Collect deleted text from plain_text
         let plain_chars: Vec<char> = start_block.plain_text.chars().collect();
@@ -158,16 +158,13 @@ fn execute_delete(
                 let local_end = overlap_end - elem_start;
 
                 let mut updated_elem = elem.clone();
-                match &updated_elem.content {
-                    InlineContent::Text(s) => {
-                        let (new_text, _) = remove_char_range(s, local_start, local_end);
-                        updated_elem.content = if new_text.is_empty() {
-                            InlineContent::Text(String::new())
-                        } else {
-                            InlineContent::Text(new_text)
-                        };
-                    }
-                    _ => {}
+                if let InlineContent::Text(s) = &updated_elem.content {
+                    let (new_text, _) = remove_char_range(s, local_start, local_end);
+                    updated_elem.content = if new_text.is_empty() {
+                        InlineContent::Text(String::new())
+                    } else {
+                        InlineContent::Text(new_text)
+                    };
                 }
                 updated_elem.updated_at = chrono::Utc::now();
                 uow.update_inline_element(&updated_elem)?;
@@ -244,7 +241,7 @@ fn execute_delete(
             uow.get_block_relationship(&start_block.id, &BlockRelationshipField::Elements)?;
         let start_elements_opt = uow.get_inline_element_multi(&start_element_ids)?;
         let start_elements: Vec<InlineElement> =
-            start_elements_opt.into_iter().filter_map(|e| e).collect();
+            start_elements_opt.into_iter().flatten().collect();
 
         // Walk start block elements to truncate at start_offset
         let mut char_cursor: usize = 0;
@@ -265,16 +262,13 @@ fn execute_delete(
                 // This element contains the delete start
                 truncation_done = true;
                 let local_cut = so - char_cursor;
-                match &elem.content {
-                    InlineContent::Text(s) => {
-                        let chars: Vec<char> = s.chars().collect();
-                        let kept: String = chars[..local_cut].iter().collect();
-                        let mut updated = elem.clone();
-                        updated.content = InlineContent::Text(kept);
-                        updated.updated_at = now;
-                        uow.update_inline_element(&updated)?;
-                    }
-                    _ => {}
+                if let InlineContent::Text(s) = &elem.content {
+                    let chars: Vec<char> = s.chars().collect();
+                    let kept: String = chars[..local_cut].iter().collect();
+                    let mut updated = elem.clone();
+                    updated.content = InlineContent::Text(kept);
+                    updated.updated_at = now;
+                    uow.update_inline_element(&updated)?;
                 }
                 char_cursor += elem_char_len;
             } else {
@@ -292,7 +286,7 @@ fn execute_delete(
             uow.get_block_relationship(&end_block.id, &BlockRelationshipField::Elements)?;
         let end_elements_opt = uow.get_inline_element_multi(&end_element_ids)?;
         let end_elements: Vec<InlineElement> =
-            end_elements_opt.into_iter().filter_map(|e| e).collect();
+            end_elements_opt.into_iter().flatten().collect();
 
         let mut end_char_cursor: usize = 0;
         let mut past_delete = false;

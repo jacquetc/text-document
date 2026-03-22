@@ -45,10 +45,10 @@ fn element_char_len(elem: &InlineElement) -> i64 {
 /// Only overwrites fields that are `Some(...)` in the DTO.
 /// `None` fields are left unchanged — this is the "merge" semantics.
 fn apply_merge_format(elem: &mut InlineElement, dto: &MergeTextFormatDto) {
-    if let Some(ref family) = dto.font_family {
-        if !family.is_empty() {
-            elem.fmt_font_family = Some(family.clone());
-        }
+    if let Some(ref family) = dto.font_family
+        && !family.is_empty()
+    {
+        elem.fmt_font_family = Some(family.clone());
     }
     if let Some(bold) = dto.font_bold {
         elem.fmt_font_bold = Some(bold);
@@ -93,7 +93,7 @@ fn execute_merge_text_format(
 
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     // Determine the range
@@ -118,7 +118,7 @@ fn execute_merge_text_format(
         let element_ids =
             uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
         let mut elem_doc_pos = block_start;
 

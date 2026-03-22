@@ -84,7 +84,7 @@ macro_rules! impl_content_insert {
                 uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
 
             let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
             blocks.sort_by_key(|b| b.document_position);
 
             let (current_block, block_idx, offset) = find_block_at_position(&blocks, position)?;
@@ -92,7 +92,7 @@ macro_rules! impl_content_insert {
             let element_ids =
                 uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
             let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+            let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
             let plain_chars: Vec<char> = current_block.plain_text.chars().collect();
             let split_pos = (offset as usize).min(plain_chars.len());

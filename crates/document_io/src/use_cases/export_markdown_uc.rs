@@ -67,7 +67,7 @@ impl ExportMarkdownUseCase {
             }
 
             let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
             blocks.sort_by_key(|b| b.document_position);
 
             let mut prev_was_list = false;
@@ -83,7 +83,7 @@ impl ExportMarkdownUseCase {
 
                 let elements_opt = uow.get_inline_element_multi(&element_ids)?;
                 let elements: Vec<InlineElement> =
-                    elements_opt.into_iter().filter_map(|e| e).collect();
+                    elements_opt.into_iter().flatten().collect();
 
                 // Check if block has a list
                 let list_ids = uow.get_block_relationship(

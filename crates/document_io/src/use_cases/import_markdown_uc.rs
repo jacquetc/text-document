@@ -47,30 +47,21 @@ impl ImportMarkdownUseCase {
 }
 
 fn create_inline_element_from_span(span: &ParsedSpan, is_code_block: bool) -> InlineElement {
-    let mut element = InlineElement::default();
-    element.content = InlineContent::Text(span.text.clone());
-
-    if span.bold {
-        element.fmt_font_bold = Some(true);
+    InlineElement {
+        content: InlineContent::Text(span.text.clone()),
+        fmt_font_bold: if span.bold { Some(true) } else { None },
+        fmt_font_italic: if span.italic { Some(true) } else { None },
+        fmt_font_underline: if span.underline { Some(true) } else { None },
+        fmt_font_strikeout: if span.strikeout { Some(true) } else { None },
+        fmt_font_family: if span.code || is_code_block {
+            Some("monospace".to_string())
+        } else {
+            None
+        },
+        fmt_anchor_href: span.link_href.clone(),
+        fmt_is_anchor: if span.link_href.is_some() { Some(true) } else { None },
+        ..InlineElement::default()
     }
-    if span.italic {
-        element.fmt_font_italic = Some(true);
-    }
-    if span.underline {
-        element.fmt_font_underline = Some(true);
-    }
-    if span.strikeout {
-        element.fmt_font_strikeout = Some(true);
-    }
-    if span.code || is_code_block {
-        element.fmt_font_family = Some("monospace".to_string());
-    }
-    if let Some(ref href) = span.link_href {
-        element.fmt_anchor_href = Some(href.clone());
-        element.fmt_is_anchor = Some(true);
-    }
-
-    element
 }
 
 fn import_parsed_blocks(
@@ -137,14 +128,13 @@ fn import_parsed_blocks(
         let line_len = plain_text.chars().count() as i64;
 
         // Create Block
-        let mut block = Block::default();
-        block.plain_text = plain_text;
-        block.text_length = line_len;
-        block.document_position = document_position;
-
-        if let Some(level) = parsed_block.heading_level {
-            block.fmt_heading_level = Some(level);
-        }
+        let block = Block {
+            plain_text,
+            text_length: line_len,
+            document_position,
+            fmt_heading_level: parsed_block.heading_level,
+            ..Block::default()
+        };
 
         let created_block = uow.create_block(&block, created_frame.id, -1)?;
 
@@ -156,14 +146,16 @@ fn import_parsed_blocks(
 
         // Handle list items
         if let Some(ref list_style) = parsed_block.list_style {
-            let mut list = List::default();
-            list.style = list_style.clone();
+            let list = List {
+                style: list_style.clone(),
+                ..List::default()
+            };
             let created_list = uow.create_list(&list, doc_id, -1)?;
 
             uow.set_block_relationship(
                 &created_block.id,
                 &common::direct_access::block::BlockRelationshipField::List,
-                &vec![created_list.id],
+                &[created_list.id],
             )?;
         }
 

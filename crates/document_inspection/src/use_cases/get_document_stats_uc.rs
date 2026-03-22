@@ -96,11 +96,9 @@ impl GetDocumentStatsUseCase {
 
         let elements_opt = uow.get_inline_element_multi(&all_element_ids)?;
         let mut image_count: i64 = 0;
-        for elem_opt in &elements_opt {
-            if let Some(elem) = elem_opt {
-                if matches!(elem.content, InlineContent::Image { .. }) {
-                    image_count += 1;
-                }
+        for elem in elements_opt.iter().flatten() {
+            if matches!(elem.content, InlineContent::Image { .. }) {
+                image_count += 1;
             }
         }
 

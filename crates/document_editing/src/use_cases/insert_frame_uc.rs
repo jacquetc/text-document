@@ -41,7 +41,7 @@ pub struct InsertFrameUseCase {
 /// frames -> blocks and checking document_position ranges.
 /// Returns the frame and the block index within it closest to position.
 fn find_frame_at_position(
-    uow: &Box<dyn InsertFrameUnitOfWorkTrait>,
+    uow: &dyn InsertFrameUnitOfWorkTrait,
     frame_ids: &[EntityId],
     position: i64,
 ) -> Result<Option<(Frame, usize)>> {
@@ -55,7 +55,7 @@ fn find_frame_at_position(
             continue;
         }
         let blocks_opt = uow.get_block_multi(&block_ids)?;
-        let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+        let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
         blocks.sort_by_key(|b| b.document_position);
 
         if let (Some(first), Some(last)) = (blocks.first(), blocks.last()) {
@@ -104,7 +104,7 @@ fn execute_insert_frame(
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
     let (parent_frame_id, child_order_insert_idx) =
-        match find_frame_at_position(uow, &frame_ids, dto.position)? {
+        match find_frame_at_position(&**uow, &frame_ids, dto.position)? {
             Some((parent_frame, block_idx)) => {
                 // Insert the new sub-frame into the parent's child_order
                 // after the block at block_idx

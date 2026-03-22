@@ -67,7 +67,7 @@ impl ExportHtmlUseCase {
             }
 
             let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
             blocks.sort_by_key(|b| b.document_position);
 
             // Group consecutive list items
@@ -113,7 +113,7 @@ impl ExportHtmlUseCase {
                         };
 
                         if b_list.is_some() {
-                            let inline_html = self.render_inline_html(&uow, b)?;
+                            let inline_html = self.render_inline_html(&*uow, b)?;
                             list_items.push(format!("<li>{}</li>", inline_html));
                             i += 1;
                         } else {
@@ -128,7 +128,7 @@ impl ExportHtmlUseCase {
                         list_tag
                     ));
                 } else {
-                    let inline_html = self.render_inline_html(&uow, block)?;
+                    let inline_html = self.render_inline_html(&*uow, block)?;
 
                     let style_attr = match block.fmt_alignment {
                         Some(Alignment::Left) => " style=\"text-align: left\"",
@@ -139,7 +139,7 @@ impl ExportHtmlUseCase {
                     };
 
                     if let Some(level) = block.fmt_heading_level {
-                        let level = level.min(6).max(1);
+                        let level = level.clamp(1, 6);
                         body_parts.push(format!("<h{}{}>{}</h{}>", level, style_attr, inline_html, level));
                     } else {
                         body_parts.push(format!("<p{}>{}</p>", style_attr, inline_html));
@@ -158,7 +158,7 @@ impl ExportHtmlUseCase {
 
     fn render_inline_html(
         &self,
-        uow: &Box<dyn ExportHtmlUnitOfWorkTrait>,
+        uow: &dyn ExportHtmlUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
         let element_ids = uow.get_block_relationship(
@@ -167,7 +167,7 @@ impl ExportHtmlUseCase {
         )?;
 
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().filter_map(|e| e).collect();
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
         let mut html = String::new();
 
