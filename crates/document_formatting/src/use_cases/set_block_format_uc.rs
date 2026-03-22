@@ -96,7 +96,7 @@ fn execute_set_block_format(
                 updated.fmt_alignment = Some(alignment_to_entity(a));
             }
             if let Some(v) = dto.heading_level {
-                updated.fmt_heading_level = Some(v);
+                updated.fmt_heading_level = Some(v.clamp(0, 6));
             }
             if let Some(v) = dto.indent {
                 updated.fmt_indent = Some(v);
