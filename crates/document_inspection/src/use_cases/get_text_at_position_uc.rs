@@ -41,6 +41,15 @@ impl GetTextAtPositionUseCase {
         let position = dto.position;
         let length = dto.length;
 
+        if length < 0 {
+            uow.end_transaction()?;
+            return Ok(TextAtPositionDto {
+                text: String::new(),
+                block_id: 0,
+                element_id: 0,
+            });
+        }
+
         // Get Root(1) -> Document -> Frames -> Blocks
         let root = uow
             .get_root(&ROOT_ENTITY_ID)?

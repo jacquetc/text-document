@@ -63,12 +63,16 @@ impl ExtractFragmentUseCase {
 
         let frame_ids =
             uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
-        let frame_id = *frame_ids
-            .first()
-            .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-        let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
-        let blocks_opt = uow.get_block_multi(&block_ids)?;
+        // Collect blocks from all frames, not just the first one
+        let mut all_block_ids: Vec<EntityId> = Vec::new();
+        for frame_id in &frame_ids {
+            let block_ids =
+                uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+            all_block_ids.extend(block_ids);
+        }
+
+        let blocks_opt = uow.get_block_multi(&all_block_ids)?;
         let mut blocks: Vec<Block> = blocks_opt.into_iter().filter_map(|b| b).collect();
         blocks.sort_by_key(|b| b.document_position);
 
