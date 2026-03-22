@@ -40,7 +40,6 @@ pub(crate) struct CallbackEntry {
 /// The shared document interior, behind `Arc<Mutex<>>`.
 pub(crate) struct TextDocumentInner {
     pub ctx: AppContext,
-    #[allow(dead_code)] // will be used for backend event wiring
     pub event_client: EventHubClient,
     pub stack_id: u64,
     #[allow(dead_code)] // will be used for entity tree access
@@ -76,6 +75,9 @@ pub(crate) struct TextDocumentInner {
     // Cached plain text for the entire document. Populated lazily, invalidated
     // on any edit or document reset. Avoids O(blocks) reconstruction per search.
     pub plain_text_cache: Option<String>,
+
+    // Last known block count, used to detect changes and emit BlockCountChanged.
+    pub last_block_count: usize,
 }
 
 impl TextDocumentInner {
@@ -191,6 +193,18 @@ impl TextDocumentInner {
         self.plain_text_cache = None;
     }
 
+    /// Check the current block count and queue a `BlockCountChanged` event if it changed.
+    pub fn check_block_count_changed(&mut self) {
+        let stats = frontend::commands::document_inspection_commands::get_document_stats(&self.ctx);
+        if let Ok(stats) = stats {
+            let new_count = stats.block_count as usize;
+            if new_count != self.last_block_count {
+                self.last_block_count = new_count;
+                self.queue_event(crate::DocumentEvent::BlockCountChanged(new_count));
+            }
+        }
+    }
+
     /// Get or lazily build the cached plain text.
     pub fn plain_text(&mut self) -> Result<&str> {
         if self.plain_text_cache.is_none() {
@@ -265,6 +279,7 @@ impl TextDocumentInner {
             poll_cursor: 0,
             resource_cache: HashMap::new(),
             plain_text_cache: None,
+            last_block_count: 1, // new document starts with one block
         })
     }
 }

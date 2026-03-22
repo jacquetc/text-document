@@ -85,7 +85,8 @@ impl TextCursor {
             chars_added: added,
             blocks_affected,
         });
-        inner.take_queued_events()
+        inner.check_block_count_changed();
+        self.queue_undo_redo_event(inner)
     }
 
     // ── Position & selection ─────────────────────────────────
@@ -548,7 +549,8 @@ impl TextCursor {
                 chars_added: 0,
                 blocks_affected: 1,
             });
-            inner.take_queued_events()
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
@@ -609,8 +611,9 @@ impl TextCursor {
                 chars_added: 0,
                 blocks_affected: 1,
             });
+            inner.check_block_count_changed();
             // Return the deleted text alongside the queued events
-            (result.deleted_text, inner.take_queued_events())
+            (result.deleted_text, self.queue_undo_redo_event(&mut inner))
         };
         crate::inner::dispatch_queued_events(queued.1);
         Ok(queued.0)
@@ -636,7 +639,7 @@ impl TextCursor {
                 chars_added: 0,
                 blocks_affected: 1,
             });
-            inner.take_queued_events()
+            self.queue_undo_redo_event(&mut inner)
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
@@ -698,36 +701,92 @@ impl TextCursor {
     /// Set the character format for the selection.
     pub fn set_char_format(&self, format: &TextFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock();
-        let dto = format.to_set_dto(pos, anchor);
-        document_formatting_commands::set_text_format(&inner.ctx, Some(inner.stack_id), &dto)?;
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = format.to_set_dto(pos, anchor);
+            document_formatting_commands::set_text_format(&inner.ctx, Some(inner.stack_id), &dto)?;
+            let start = pos.min(anchor);
+            let length = pos.max(anchor) - start;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::FormatChanged {
+                position: start,
+                length,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Merge a character format into the selection.
     pub fn merge_char_format(&self, format: &TextFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock();
-        let dto = format.to_merge_dto(pos, anchor);
-        document_formatting_commands::merge_text_format(&inner.ctx, Some(inner.stack_id), &dto)?;
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = format.to_merge_dto(pos, anchor);
+            document_formatting_commands::merge_text_format(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            let start = pos.min(anchor);
+            let length = pos.max(anchor) - start;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::FormatChanged {
+                position: start,
+                length,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Set the block format for the current block (or all blocks in selection).
     pub fn set_block_format(&self, format: &BlockFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock();
-        let dto = format.to_set_dto(pos, anchor);
-        document_formatting_commands::set_block_format(&inner.ctx, Some(inner.stack_id), &dto)?;
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = format.to_set_dto(pos, anchor);
+            document_formatting_commands::set_block_format(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            let start = pos.min(anchor);
+            let length = pos.max(anchor) - start;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::FormatChanged {
+                position: start,
+                length,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
     /// Set the frame format.
     pub fn set_frame_format(&self, frame_id: usize, format: &FrameFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
-        let inner = self.doc.lock();
-        let dto = format.to_set_dto(pos, anchor, frame_id);
-        document_formatting_commands::set_frame_format(&inner.ctx, Some(inner.stack_id), &dto)?;
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = format.to_set_dto(pos, anchor, frame_id);
+            document_formatting_commands::set_frame_format(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            let start = pos.min(anchor);
+            let length = pos.max(anchor) - start;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::FormatChanged {
+                position: start,
+                length,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
         Ok(())
     }
 
@@ -757,6 +816,19 @@ impl TextCursor {
 
     // ── Private helpers ─────────────────────────────────────
 
+    /// Queue an `UndoRedoChanged` event and return all queued events for dispatch.
+    fn queue_undo_redo_event(
+        &self,
+        inner: &mut TextDocumentInner,
+    ) -> Vec<(DocumentEvent, Vec<Arc<dyn Fn(DocumentEvent) + Send + Sync>>)> {
+        let can_undo =
+            undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
+        let can_redo =
+            undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
+        inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
+        inner.take_queued_events()
+    }
+
     fn do_delete(&self, pos: usize, anchor: usize) -> Result<()> {
         let queued = {
             let mut inner = self.doc.lock();
@@ -783,7 +855,8 @@ impl TextCursor {
                 chars_added: 0,
                 blocks_affected: 1,
             });
-            inner.take_queued_events()
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())

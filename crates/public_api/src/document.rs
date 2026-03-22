@@ -53,9 +53,90 @@ impl TextDocument {
     pub fn try_new() -> Result<Self> {
         let ctx = frontend::AppContext::new();
         let doc_inner = TextDocumentInner::initialize(ctx)?;
-        Ok(Self {
-            inner: Arc::new(Mutex::new(doc_inner)),
-        })
+        let inner = Arc::new(Mutex::new(doc_inner));
+
+        // Bridge backend long-operation events to public DocumentEvent.
+        Self::subscribe_long_operation_events(&inner);
+
+        Ok(Self { inner })
+    }
+
+    /// Subscribe to backend long-operation events and bridge them to DocumentEvent.
+    fn subscribe_long_operation_events(inner: &Arc<Mutex<TextDocumentInner>>) {
+        use frontend::common::event::{LongOperationEvent as LOE, Origin};
+
+        let weak = Arc::downgrade(inner);
+        {
+            let locked = inner.lock();
+            // Progress
+            let w = weak.clone();
+            locked.event_client.subscribe(
+                Origin::LongOperation(LOE::Progress),
+                move |event| {
+                    if let Some(inner) = w.upgrade() {
+                        let (op_id, percent, message) = parse_progress_data(&event.data);
+                        let mut inner = inner.lock();
+                        inner.queue_event(DocumentEvent::LongOperationProgress {
+                            operation_id: op_id,
+                            percent,
+                            message,
+                        });
+                    }
+                },
+            );
+
+            // Completed
+            let w = weak.clone();
+            locked.event_client.subscribe(
+                Origin::LongOperation(LOE::Completed),
+                move |event| {
+                    if let Some(inner) = w.upgrade() {
+                        let op_id = parse_id_data(&event.data);
+                        let mut inner = inner.lock();
+                        inner.queue_event(DocumentEvent::DocumentReset);
+                        inner.check_block_count_changed();
+                        inner.queue_event(DocumentEvent::LongOperationFinished {
+                            operation_id: op_id,
+                            success: true,
+                            error: None,
+                        });
+                    }
+                },
+            );
+
+            // Cancelled
+            let w = weak.clone();
+            locked.event_client.subscribe(
+                Origin::LongOperation(LOE::Cancelled),
+                move |event| {
+                    if let Some(inner) = w.upgrade() {
+                        let op_id = parse_id_data(&event.data);
+                        let mut inner = inner.lock();
+                        inner.queue_event(DocumentEvent::LongOperationFinished {
+                            operation_id: op_id,
+                            success: false,
+                            error: Some("cancelled".into()),
+                        });
+                    }
+                },
+            );
+
+            // Failed
+            locked.event_client.subscribe(
+                Origin::LongOperation(LOE::Failed),
+                move |event| {
+                    if let Some(inner) = weak.upgrade() {
+                        let (op_id, error) = parse_failed_data(&event.data);
+                        let mut inner = inner.lock();
+                        inner.queue_event(DocumentEvent::LongOperationFinished {
+                            operation_id: op_id,
+                            success: false,
+                            error: Some(error),
+                        });
+                    }
+                },
+            );
+        }
     }
 
     // ── Whole-document content ────────────────────────────────
@@ -71,6 +152,11 @@ impl TextDocument {
             undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
             inner.invalidate_text_cache();
             inner.queue_event(DocumentEvent::DocumentReset);
+            inner.check_block_count_changed();
+            inner.queue_event(DocumentEvent::UndoRedoChanged {
+                can_undo: false,
+                can_redo: false,
+            });
             inner.take_queued_events()
         };
         crate::inner::dispatch_queued_events(queued);
@@ -197,6 +283,11 @@ impl TextDocument {
             undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
             inner.invalidate_text_cache();
             inner.queue_event(DocumentEvent::DocumentReset);
+            inner.check_block_count_changed();
+            inner.queue_event(DocumentEvent::UndoRedoChanged {
+                can_undo: false,
+                can_redo: false,
+            });
             inner.take_queued_events()
         };
         crate::inner::dispatch_queued_events(queued);
@@ -319,12 +410,30 @@ impl TextDocument {
         replace_all: bool,
         options: &FindOptions,
     ) -> Result<usize> {
-        let mut inner = self.inner.lock();
-        let dto = options.to_replace_dto(query, replacement, replace_all);
-        let result =
-            document_search_commands::replace_text(&inner.ctx, Some(inner.stack_id), &dto)?;
-        inner.invalidate_text_cache();
-        Ok(to_usize(result.replacements_count))
+        let (count, queued) = {
+            let mut inner = self.inner.lock();
+            let dto = options.to_replace_dto(query, replacement, replace_all);
+            let result =
+                document_search_commands::replace_text(&inner.ctx, Some(inner.stack_id), &dto)?;
+            let count = to_usize(result.replacements_count);
+            inner.invalidate_text_cache();
+            if count > 0 {
+                inner.modified = true;
+                inner.queue_event(DocumentEvent::ContentsChanged {
+                    position: 0,
+                    chars_removed: 0,
+                    chars_added: 0,
+                    blocks_affected: 0,
+                });
+                inner.check_block_count_changed();
+                let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
+                let can_redo = undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
+                inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
+            }
+            (count, inner.take_queued_events())
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(count)
     }
 
     // ── Resources ────────────────────────────────────────────
@@ -390,18 +499,36 @@ impl TextDocument {
 
     /// Undo the last operation.
     pub fn undo(&self) -> Result<()> {
-        let mut inner = self.inner.lock();
-        let result = undo_redo_commands::undo(&inner.ctx, Some(inner.stack_id));
-        inner.invalidate_text_cache();
-        result
+        let queued = {
+            let mut inner = self.inner.lock();
+            let result = undo_redo_commands::undo(&inner.ctx, Some(inner.stack_id));
+            inner.invalidate_text_cache();
+            result?;
+            inner.check_block_count_changed();
+            let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
+            let can_redo = undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
+            inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
+            inner.take_queued_events()
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
     }
 
     /// Redo the last undone operation.
     pub fn redo(&self) -> Result<()> {
-        let mut inner = self.inner.lock();
-        let result = undo_redo_commands::redo(&inner.ctx, Some(inner.stack_id));
-        inner.invalidate_text_cache();
-        result
+        let queued = {
+            let mut inner = self.inner.lock();
+            let result = undo_redo_commands::redo(&inner.ctx, Some(inner.stack_id));
+            inner.invalidate_text_cache();
+            result?;
+            inner.check_block_count_changed();
+            let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
+            let can_redo = undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
+            inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
+            inner.take_queued_events()
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
     }
 
     /// Returns true if there are operations that can be undone.
@@ -548,4 +675,38 @@ impl Default for TextDocument {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Long-operation event data helpers ─────────────────────────
+
+/// Parse progress JSON: `{"id":"...", "percentage": 50.0, "message": "..."}`
+fn parse_progress_data(data: &Option<String>) -> (String, f64, String) {
+    let Some(json) = data else {
+        return (String::new(), 0.0, String::new());
+    };
+    let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    let id = v["id"].as_str().unwrap_or_default().to_string();
+    let pct = v["percentage"].as_f64().unwrap_or(0.0);
+    let msg = v["message"].as_str().unwrap_or_default().to_string();
+    (id, pct, msg)
+}
+
+/// Parse completed/cancelled JSON: `{"id":"..."}`
+fn parse_id_data(data: &Option<String>) -> String {
+    let Some(json) = data else {
+        return String::new();
+    };
+    let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    v["id"].as_str().unwrap_or_default().to_string()
+}
+
+/// Parse failed JSON: `{"id":"...", "error":"..."}`
+fn parse_failed_data(data: &Option<String>) -> (String, String) {
+    let Some(json) = data else {
+        return (String::new(), "unknown error".into());
+    };
+    let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    let id = v["id"].as_str().unwrap_or_default().to_string();
+    let error = v["error"].as_str().unwrap_or("unknown error").to_string();
+    (id, error)
 }
