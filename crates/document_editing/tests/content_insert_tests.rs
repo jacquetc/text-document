@@ -40,13 +40,12 @@ fn test_insert_markdown_simple_paragraph() -> Result<()> {
         let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
-            if let Some(elem) = elem {
-                if let common::entities::InlineContent::Text(ref t) = elem.content {
-                    if t == "world" {
-                        assert_eq!(elem.fmt_font_bold, Some(true));
-                        found_bold = true;
-                    }
-                }
+            if let Some(elem) = elem
+                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && t == "world"
+            {
+                assert_eq!(elem.fmt_font_bold, Some(true));
+                found_bold = true;
             }
         }
     }
@@ -101,11 +100,11 @@ fn test_insert_markdown_heading() -> Result<()> {
     let mut found_heading = false;
     for block_id in &block_ids {
         let block = block_controller::get(&db_context, block_id)?;
-        if let Some(block) = block {
-            if block.fmt_heading_level == Some(1) {
-                found_heading = true;
-                break;
-            }
+        if let Some(block) = block
+            && block.fmt_heading_level == Some(1)
+        {
+            found_heading = true;
+            break;
         }
     }
     assert!(found_heading, "Should find a block with heading_level=1");
@@ -134,10 +133,10 @@ fn test_insert_markdown_list() -> Result<()> {
     let mut list_blocks = 0;
     for block_id in &block_ids {
         let block = block_controller::get(&db_context, block_id)?;
-        if let Some(block) = block {
-            if block.list.is_some() {
-                list_blocks += 1;
-            }
+        if let Some(block) = block
+            && block.list.is_some()
+        {
+            list_blocks += 1;
         }
     }
     assert!(
@@ -208,13 +207,12 @@ fn test_insert_html_simple() -> Result<()> {
         let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
-            if let Some(elem) = elem {
-                if let common::entities::InlineContent::Text(ref t) = elem.content {
-                    if t == "world" {
-                        assert_eq!(elem.fmt_font_bold, Some(true));
-                        found_bold = true;
-                    }
-                }
+            if let Some(elem) = elem
+                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && t == "world"
+            {
+                assert_eq!(elem.fmt_font_bold, Some(true));
+                found_bold = true;
             }
         }
     }
@@ -349,10 +347,11 @@ fn test_insert_fragment_simple() -> Result<()> {
         )?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
-            if let common::entities::InlineContent::Text(ref t) = elem.content {
-                if t.contains("bold text") && elem.fmt_font_bold == Some(true) {
-                    found_bold = true;
-                }
+            if let common::entities::InlineContent::Text(ref t) = elem.content
+                && t.contains("bold text")
+                && elem.fmt_font_bold == Some(true)
+            {
+                found_bold = true;
             }
         }
     }
@@ -422,11 +421,11 @@ fn test_insert_markdown_code_block() -> Result<()> {
         )?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
-            if let common::entities::InlineContent::Text(ref t) = elem.content {
-                if t.contains("fn main") {
-                    assert_eq!(elem.fmt_font_family, Some("monospace".to_string()));
-                    found_code = true;
-                }
+            if let common::entities::InlineContent::Text(ref t) = elem.content
+                && t.contains("fn main")
+            {
+                assert_eq!(elem.fmt_font_family, Some("monospace".to_string()));
+                found_code = true;
             }
         }
     }

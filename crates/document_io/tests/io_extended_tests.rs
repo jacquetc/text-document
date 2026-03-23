@@ -8,13 +8,8 @@ use document_io::document_io_controller;
 use document_io::*;
 
 fn wait_for_long_operation(long_op_manager: &LongOperationManager, op_id: &str) {
-    loop {
-        match long_op_manager.get_operation_status(op_id) {
-            Some(OperationStatus::Running) => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            _ => break,
-        }
+    while let Some(OperationStatus::Running) = long_op_manager.get_operation_status(op_id) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

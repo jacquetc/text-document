@@ -21,7 +21,7 @@ impl<F: WriteUoWFactory> UpdateUseCase<F> {
     }
 
     pub fn execute(&mut self, entity: &F::Entity) -> Result<F::Entity> {
-        let results = self.execute_multi(&[entity.clone()])?;
+        let results = self.execute_multi(std::slice::from_ref(entity))?;
         results
             .into_iter()
             .next()
@@ -66,7 +66,7 @@ impl<F: WriteUoWFactory> UndoableUpdateUseCase<F> {
     }
 
     pub fn execute(&mut self, entity: &F::Entity) -> Result<F::Entity> {
-        let results = self.execute_multi(&[entity.clone()])?;
+        let results = self.execute_multi(std::slice::from_ref(entity))?;
         results
             .into_iter()
             .next()
@@ -149,7 +149,7 @@ impl<F: WriteUoWFactory> UpdateWithRelationshipsUseCase<F> {
     }
 
     pub fn execute(&mut self, entity: &F::Entity) -> Result<F::Entity> {
-        let results = self.execute_multi(&[entity.clone()])?;
+        let results = self.execute_multi(std::slice::from_ref(entity))?;
         results
             .into_iter()
             .next()
@@ -194,7 +194,7 @@ impl<F: WriteUoWFactory> UndoableUpdateWithRelationshipsUseCase<F> {
     }
 
     pub fn execute(&mut self, entity: &F::Entity) -> Result<F::Entity> {
-        let results = self.execute_multi(&[entity.clone()])?;
+        let results = self.execute_multi(std::slice::from_ref(entity))?;
         results
             .into_iter()
             .next()

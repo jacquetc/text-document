@@ -45,16 +45,16 @@ impl From<&TableDto> for Table {
     fn from(dto: &TableDto) -> Self {
         Table {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             cells: dto.cells.clone(),
-            rows: dto.rows.clone(),
-            columns: dto.columns.clone(),
+            rows: dto.rows,
+            columns: dto.columns,
             column_widths: dto.column_widths.clone(),
-            fmt_border: dto.fmt_border.clone(),
-            fmt_cell_spacing: dto.fmt_cell_spacing.clone(),
-            fmt_cell_padding: dto.fmt_cell_padding.clone(),
-            fmt_width: dto.fmt_width.clone(),
+            fmt_border: dto.fmt_border,
+            fmt_cell_spacing: dto.fmt_cell_spacing,
+            fmt_cell_padding: dto.fmt_cell_padding,
+            fmt_width: dto.fmt_width,
             fmt_alignment: dto.fmt_alignment.clone(),
         }
     }
@@ -117,16 +117,16 @@ impl From<&CreateTableDto> for Table {
     fn from(dto: &CreateTableDto) -> Self {
         Table {
             id: 0,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             cells: dto.cells.clone(),
-            rows: dto.rows.clone(),
-            columns: dto.columns.clone(),
+            rows: dto.rows,
+            columns: dto.columns,
             column_widths: dto.column_widths.clone(),
-            fmt_border: dto.fmt_border.clone(),
-            fmt_cell_spacing: dto.fmt_cell_spacing.clone(),
-            fmt_cell_padding: dto.fmt_cell_padding.clone(),
-            fmt_width: dto.fmt_width.clone(),
+            fmt_border: dto.fmt_border,
+            fmt_cell_spacing: dto.fmt_cell_spacing,
+            fmt_cell_padding: dto.fmt_cell_padding,
+            fmt_width: dto.fmt_width,
             fmt_alignment: dto.fmt_alignment.clone(),
         }
     }
@@ -188,15 +188,15 @@ impl From<&UpdateTableDto> for Table {
     fn from(dto: &UpdateTableDto) -> Self {
         Table {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
-            rows: dto.rows.clone(),
-            columns: dto.columns.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
+            rows: dto.rows,
+            columns: dto.columns,
             column_widths: dto.column_widths.clone(),
-            fmt_border: dto.fmt_border.clone(),
-            fmt_cell_spacing: dto.fmt_cell_spacing.clone(),
-            fmt_cell_padding: dto.fmt_cell_padding.clone(),
-            fmt_width: dto.fmt_width.clone(),
+            fmt_border: dto.fmt_border,
+            fmt_cell_spacing: dto.fmt_cell_spacing,
+            fmt_cell_padding: dto.fmt_cell_padding,
+            fmt_width: dto.fmt_width,
             fmt_alignment: dto.fmt_alignment.clone(),
             cells: Default::default(),
         }

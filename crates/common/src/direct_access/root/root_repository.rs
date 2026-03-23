@@ -240,7 +240,7 @@ impl<'a> RootRepository<'a> {
         };
         // get all strong forward relationship fields
 
-        let document = entity.document.clone();
+        let document = entity.document;
 
         // remove all strong relationships, initiating a cascade remove
 

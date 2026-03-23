@@ -86,7 +86,7 @@ fn many_cursors() {
     // Cursor 0 moved to 1
     assert_eq!(cursors[0].position(), 1);
     // All others shifted by +1
-    for i in 1..10 {
-        assert_eq!(cursors[i].position(), i + 1);
+    for (i, cursor) in cursors.iter().enumerate().skip(1) {
+        assert_eq!(cursor.position(), i + 1);
     }
 }

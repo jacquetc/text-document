@@ -297,18 +297,36 @@ impl From<Event> for FlatEvent {
 /// Returns `true` if this event kind represents an entity mutation (created, updated, or removed).
 pub fn is_mutation(kind: &FlatEventKind) -> bool {
     use FlatEventKind::*;
-    match kind {
-        RootCreated | RootUpdated | RootRemoved => true,
-        DocumentCreated | DocumentUpdated | DocumentRemoved => true,
-        FrameCreated | FrameUpdated | FrameRemoved => true,
-        BlockCreated | BlockUpdated | BlockRemoved => true,
-        InlineElementCreated | InlineElementUpdated | InlineElementRemoved => true,
-        ListCreated | ListUpdated | ListRemoved => true,
-        ResourceCreated | ResourceUpdated | ResourceRemoved => true,
-        TableCreated | TableUpdated | TableRemoved => true,
-        TableCellCreated | TableCellUpdated | TableCellRemoved => true,
-        _ => false,
-    }
+    matches!(
+        kind,
+        RootCreated
+            | RootUpdated
+            | RootRemoved
+            | DocumentCreated
+            | DocumentUpdated
+            | DocumentRemoved
+            | FrameCreated
+            | FrameUpdated
+            | FrameRemoved
+            | BlockCreated
+            | BlockUpdated
+            | BlockRemoved
+            | InlineElementCreated
+            | InlineElementUpdated
+            | InlineElementRemoved
+            | ListCreated
+            | ListUpdated
+            | ListRemoved
+            | ResourceCreated
+            | ResourceUpdated
+            | ResourceRemoved
+            | TableCreated
+            | TableUpdated
+            | TableRemoved
+            | TableCellCreated
+            | TableCellUpdated
+            | TableCellRemoved
+    )
 }
 
 #[cfg(test)]

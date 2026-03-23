@@ -351,7 +351,7 @@ pub fn remove_table(
 ) -> Result<()> {
     let uow_context = RemoveTableUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = RemoveTableUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
@@ -359,7 +359,7 @@ pub fn remove_table(
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
 
 pub fn insert_table_row(

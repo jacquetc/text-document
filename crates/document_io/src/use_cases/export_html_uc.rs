@@ -88,12 +88,12 @@ impl ExportHtmlUseCase {
 
             // Check if this is a table anchor frame
             let frame = uow.get_frame(frame_id)?;
-            if let Some(ref f) = frame {
-                if let Some(table_id) = f.table {
-                    let table_html = self.render_table_html(&*uow, &table_id)?;
-                    body_parts.push(table_html);
-                    continue;
-                }
+            if let Some(ref f) = frame
+                && let Some(table_id) = f.table
+            {
+                let table_html = self.render_table_html(&*uow, &table_id)?;
+                body_parts.push(table_html);
+                continue;
             }
 
             let block_ids = uow.get_frame_relationship(

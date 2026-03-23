@@ -238,12 +238,12 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
         )?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
-            if let Some(elem) = elem {
-                if let common::entities::InlineContent::Text(ref t) = elem.content {
-                    if t.contains("bold") && elem.fmt_font_bold == Some(true) {
-                        bold_count += 1;
-                    }
-                }
+            if let Some(elem) = elem
+                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && t.contains("bold")
+                && elem.fmt_font_bold == Some(true)
+            {
+                bold_count += 1;
             }
         }
     }
@@ -325,10 +325,10 @@ fn test_extract_insert_with_list() -> Result<()> {
     let mut list_block_positions: Vec<(i64, i64)> = Vec::new();
     for block_id in &block_ids {
         let block = block_controller::get(&db_context, block_id)?;
-        if let Some(block) = block {
-            if block.list.is_some() {
-                list_block_positions.push((block.document_position, block.text_length));
-            }
+        if let Some(block) = block
+            && block.list.is_some()
+        {
+            list_block_positions.push((block.document_position, block.text_length));
         }
     }
     assert!(
@@ -378,10 +378,10 @@ fn test_extract_insert_with_list() -> Result<()> {
     let mut final_list_count = 0;
     for block_id in &final_block_ids {
         let block = block_controller::get(&db_context, block_id)?;
-        if let Some(block) = block {
-            if block.list.is_some() {
-                final_list_count += 1;
-            }
+        if let Some(block) = block
+            && block.list.is_some()
+        {
+            final_list_count += 1;
         }
     }
     // Should have more list blocks now (original + inserted copies)

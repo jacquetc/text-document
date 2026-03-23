@@ -48,14 +48,14 @@ pub fn import_plain_text(
 ) -> Result<()> {
     let uow_context = ImportPlainTextUnitOfWorkFactory::new(db_context, event_hub);
     let mut uc = ImportPlainTextUseCase::new(Box::new(uow_context));
-    let return_dto = uc.execute(dto)?;
+    uc.execute(dto)?;
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
         origin: Origin::DocumentIo(ImportPlainText),
         ids: vec![],
         data: None,
     });
-    Ok(return_dto)
+    Ok(())
 }
 
 pub fn export_plain_text(

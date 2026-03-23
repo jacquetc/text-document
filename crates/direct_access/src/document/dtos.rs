@@ -46,8 +46,8 @@ impl From<&DocumentDto> for Document {
     fn from(dto: &DocumentDto) -> Self {
         Document {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             title: dto.title.clone(),
             frames: dto.frames.clone(),
             text_direction: dto.text_direction.clone(),
@@ -55,8 +55,8 @@ impl From<&DocumentDto> for Document {
             resources: dto.resources.clone(),
             lists: dto.lists.clone(),
             tables: dto.tables.clone(),
-            character_count: dto.character_count.clone(),
-            block_count: dto.block_count.clone(),
+            character_count: dto.character_count,
+            block_count: dto.block_count,
         }
     }
 }
@@ -118,8 +118,8 @@ impl From<&CreateDocumentDto> for Document {
     fn from(dto: &CreateDocumentDto) -> Self {
         Document {
             id: 0,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             title: dto.title.clone(),
             frames: dto.frames.clone(),
             text_direction: dto.text_direction.clone(),
@@ -127,8 +127,8 @@ impl From<&CreateDocumentDto> for Document {
             resources: dto.resources.clone(),
             lists: dto.lists.clone(),
             tables: dto.tables.clone(),
-            character_count: dto.character_count.clone(),
-            block_count: dto.block_count.clone(),
+            character_count: dto.character_count,
+            block_count: dto.block_count,
         }
     }
 }
@@ -186,13 +186,13 @@ impl From<&UpdateDocumentDto> for Document {
     fn from(dto: &UpdateDocumentDto) -> Self {
         Document {
             id: dto.id,
-            created_at: dto.created_at.clone(),
-            updated_at: dto.updated_at.clone(),
+            created_at: dto.created_at,
+            updated_at: dto.updated_at,
             title: dto.title.clone(),
             text_direction: dto.text_direction.clone(),
             default_wrap_mode: dto.default_wrap_mode.clone(),
-            character_count: dto.character_count.clone(),
-            block_count: dto.block_count.clone(),
+            character_count: dto.character_count,
+            block_count: dto.block_count,
             frames: Default::default(),
             resources: Default::default(),
             lists: Default::default(),

@@ -87,15 +87,15 @@ impl ExportMarkdownUseCase {
 
             // Check if this is a table anchor frame
             let frame = uow.get_frame(frame_id)?;
-            if let Some(ref f) = frame {
-                if let Some(table_id) = f.table {
-                    let table_md = self.render_table_markdown(&*uow, &table_id)?;
-                    if !output_parts.is_empty() {
-                        output_parts.push("\n\n".to_string());
-                    }
-                    output_parts.push(table_md);
-                    continue;
+            if let Some(ref f) = frame
+                && let Some(table_id) = f.table
+            {
+                let table_md = self.render_table_markdown(&*uow, &table_id)?;
+                if !output_parts.is_empty() {
+                    output_parts.push("\n\n".to_string());
                 }
+                output_parts.push(table_md);
+                continue;
             }
 
             let block_ids = uow.get_frame_relationship(

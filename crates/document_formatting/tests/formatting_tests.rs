@@ -601,16 +601,16 @@ fn test_set_text_format_cross_block() -> Result<()> {
         )?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
-            if let common::entities::InlineContent::Text(ref t) = elem.content {
-                if !t.is_empty() {
-                    assert_eq!(
-                        elem.fmt_font_bold,
-                        Some(true),
-                        "Element in block {:?} should be bold",
-                        block_id
-                    );
-                    assert_eq!(elem.fmt_font_italic, Some(true));
-                }
+            if let common::entities::InlineContent::Text(ref t) = elem.content
+                && !t.is_empty()
+            {
+                assert_eq!(
+                    elem.fmt_font_bold,
+                    Some(true),
+                    "Element in block {:?} should be bold",
+                    block_id
+                );
+                assert_eq!(elem.fmt_font_italic, Some(true));
             }
         }
     }

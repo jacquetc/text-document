@@ -88,12 +88,12 @@ impl ExportLatexUseCase {
 
             // Check if this is a table anchor frame
             let frame = uow.get_frame(frame_id)?;
-            if let Some(ref f) = frame {
-                if let Some(table_id) = f.table {
-                    let table_latex = self.render_table_latex(&*uow, &table_id)?;
-                    body_parts.push(table_latex);
-                    continue;
-                }
+            if let Some(ref f) = frame
+                && let Some(table_id) = f.table
+            {
+                let table_latex = self.render_table_latex(&*uow, &table_id)?;
+                body_parts.push(table_latex);
+                continue;
             }
 
             let block_ids = uow.get_frame_relationship(

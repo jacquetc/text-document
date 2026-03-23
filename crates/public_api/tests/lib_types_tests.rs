@@ -247,6 +247,7 @@ fn document_stats_debug_clone_eq() {
         frame_count: 1,
         image_count: 0,
         list_count: 0,
+        table_count: 0,
     };
     assert_eq!(stats, stats.clone());
     let _ = format!("{:?}", stats);
