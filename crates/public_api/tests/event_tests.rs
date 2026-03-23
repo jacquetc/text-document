@@ -128,8 +128,10 @@ fn format_changed_on_set_char_format() {
         1,
     );
 
-    let mut format = text_document::TextFormat::default();
-    format.font_bold = Some(true);
+    let format = text_document::TextFormat {
+        font_bold: Some(true),
+        ..Default::default()
+    };
     cursor.set_char_format(&format).unwrap();
 
     let events = doc.poll_events();
@@ -152,8 +154,10 @@ fn format_changed_on_merge_char_format() {
         1,
     );
 
-    let mut format = text_document::TextFormat::default();
-    format.font_italic = Some(true);
+    let format = text_document::TextFormat {
+        font_italic: Some(true),
+        ..Default::default()
+    };
     cursor.merge_char_format(&format).unwrap();
 
     let events = doc.poll_events();
@@ -171,8 +175,10 @@ fn format_changed_on_set_block_format() {
     let doc = new_doc_with_text("Hello world");
     let cursor = doc.cursor_at(0);
 
-    let mut format = text_document::BlockFormat::default();
-    format.alignment = Some(Alignment::Center);
+    let format = text_document::BlockFormat {
+        alignment: Some(Alignment::Center),
+        ..Default::default()
+    };
     cursor.set_block_format(&format).unwrap();
 
     let events = doc.poll_events();
@@ -329,8 +335,10 @@ fn undo_redo_changed_after_formatting() {
         1,
     );
 
-    let mut format = text_document::TextFormat::default();
-    format.font_bold = Some(true);
+    let format = text_document::TextFormat {
+        font_bold: Some(true),
+        ..Default::default()
+    };
     cursor.set_char_format(&format).unwrap();
 
     let events = doc.poll_events();
