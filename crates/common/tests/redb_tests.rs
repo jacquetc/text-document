@@ -4,10 +4,10 @@
 #![allow(unused_imports)]
 
 use anyhow::Result;
-use text_document_common::database::{db_context::DbContext, transactions::Transaction};
-use text_document_common::types::Savepoint;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use std::sync::Arc;
+use text_document_common::database::{db_context::DbContext, transactions::Transaction};
+use text_document_common::types::Savepoint;
 
 // Define a test table
 const TEST_TABLE: TableDefinition<&str, u64> = TableDefinition::new("test_table");

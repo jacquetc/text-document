@@ -4,9 +4,9 @@
 #![allow(unused_imports)]
 
 use anyhow::Result;
-use text_document_common::undo_redo::{CompositeCommand, UndoRedoCommand, UndoRedoManager};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
+use text_document_common::undo_redo::{CompositeCommand, UndoRedoCommand, UndoRedoManager};
 
 // A simple test command that increments or decrements a counter
 struct TestCommand {

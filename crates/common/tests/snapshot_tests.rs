@@ -3,7 +3,9 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use text_document_common::snapshot::{EntityTreeSnapshot, JunctionSnapshot, TableLevelSnapshot, TableSnapshot};
+use text_document_common::snapshot::{
+    EntityTreeSnapshot, JunctionSnapshot, TableLevelSnapshot, TableSnapshot,
+};
 use text_document_common::types::EntityId;
 
 #[test]
