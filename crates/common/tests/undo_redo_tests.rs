@@ -4,7 +4,7 @@
 #![allow(unused_imports)]
 
 use anyhow::Result;
-use common::undo_redo::{CompositeCommand, UndoRedoCommand, UndoRedoManager};
+use text_document_common::undo_redo::{CompositeCommand, UndoRedoCommand, UndoRedoManager};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 

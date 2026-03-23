@@ -4,8 +4,8 @@
 #![allow(unused_imports)]
 
 use anyhow::Result;
-use common::database::{db_context::DbContext, transactions::Transaction};
-use common::types::Savepoint;
+use text_document_common::database::{db_context::DbContext, transactions::Transaction};
+use text_document_common::types::Savepoint;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use std::sync::Arc;
 

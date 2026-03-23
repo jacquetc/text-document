@@ -3,8 +3,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use common::snapshot::{EntityTreeSnapshot, JunctionSnapshot, TableLevelSnapshot, TableSnapshot};
-use common::types::EntityId;
+use text_document_common::snapshot::{EntityTreeSnapshot, JunctionSnapshot, TableLevelSnapshot, TableSnapshot};
+use text_document_common::types::EntityId;
 
 #[test]
 fn test_snapshot_types_default() {
