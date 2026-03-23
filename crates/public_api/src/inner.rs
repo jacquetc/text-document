@@ -84,6 +84,10 @@ pub(crate) struct TextDocumentInner {
 
     // Last known block count, used to detect changes and emit BlockCountChanged.
     pub last_block_count: usize,
+
+    // Last known child_order of the main frame, used to detect flow changes
+    // and emit FlowElementsInserted/FlowElementsRemoved.
+    pub last_child_order: Vec<i64>,
 }
 
 impl TextDocumentInner {
@@ -209,6 +213,84 @@ impl TextDocumentInner {
         }
     }
 
+    /// Check whether the main frame's `child_order` changed and queue
+    /// `FlowElementsInserted` / `FlowElementsRemoved` events.
+    ///
+    /// Uses a simple diff: finds the first index where old and new diverge,
+    /// then determines whether elements were inserted, removed, or replaced.
+    pub fn check_flow_changed(&mut self) {
+        let current = self.main_frame_child_order();
+        if current == self.last_child_order {
+            return;
+        }
+
+        let old = &self.last_child_order;
+        let new = &current;
+
+        // Find first index of divergence
+        let prefix_len = old
+            .iter()
+            .zip(new.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+
+        // Find common suffix length (after the divergent region)
+        let old_remaining = old.len() - prefix_len;
+        let new_remaining = new.len() - prefix_len;
+        let suffix_len = old[prefix_len..]
+            .iter()
+            .rev()
+            .zip(new[prefix_len..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+
+        let removed_count = old_remaining - suffix_len;
+        let inserted_count = new_remaining - suffix_len;
+
+        if removed_count > 0 {
+            self.queue_event(crate::DocumentEvent::FlowElementsRemoved {
+                flow_index: prefix_len,
+                count: removed_count,
+            });
+        }
+        if inserted_count > 0 {
+            self.queue_event(crate::DocumentEvent::FlowElementsInserted {
+                flow_index: prefix_len,
+                count: inserted_count,
+            });
+        }
+
+        self.last_child_order = current;
+    }
+
+    /// Reset the cached child_order to the current state without emitting events.
+    /// Call after a `DocumentReset` event, since the layout engine will do a full
+    /// rebuild anyway.
+    pub fn reset_cached_child_order(&mut self) {
+        self.last_child_order = self.main_frame_child_order();
+    }
+
+    /// Read the main frame's current child_order from the database.
+    fn main_frame_child_order(&self) -> Vec<i64> {
+        let frames = frontend::commands::document_commands::get_document_relationship(
+            &self.ctx,
+            &self.document_id,
+            &frontend::document::dtos::DocumentRelationshipField::Frames,
+        )
+        .unwrap_or_default();
+
+        let main_frame_id = match frames.first() {
+            Some(&id) => id,
+            None => return Vec::new(),
+        };
+
+        frontend::commands::frame_commands::get_frame(&self.ctx, &(main_frame_id as u64))
+            .ok()
+            .flatten()
+            .map(|f| f.child_order)
+            .unwrap_or_default()
+    }
+
     /// Get or lazily build the cached plain text.
     pub fn plain_text(&mut self) -> Result<&str> {
         if self.plain_text_cache.is_none() {
@@ -266,6 +348,13 @@ impl TextDocumentInner {
             -1,
         )?;
 
+        // Fix child_order on the main frame — the generic create_block path
+        // adds the block to the blocks junction table but does not update
+        // child_order. We must set it so that flow() works correctly.
+        let mut frame_update: frontend::frame::dtos::UpdateFrameDto = frame.into();
+        frame_update.child_order = vec![block.id as i64];
+        frame_commands::update_frame(&ctx, Some(stack_id), &frame_update)?;
+
         // Clear undo stack — initialization shouldn't be undoable
         undo_redo_commands::clear_stack(&ctx, stack_id);
 
@@ -284,6 +373,7 @@ impl TextDocumentInner {
             resource_cache: HashMap::new(),
             plain_text_cache: None,
             last_block_count: 1, // new document starts with one block
+            last_child_order: vec![block.id as i64],
         })
     }
 }

@@ -299,3 +299,51 @@ impl FrameFormat {
         }
     }
 }
+
+// ── TableFormat ────────────────────────────────────────────────
+
+impl crate::flow::TableFormat {
+    pub(crate) fn to_set_dto(
+        &self,
+        table_id: usize,
+    ) -> frontend::document_formatting::SetTableFormatDto {
+        frontend::document_formatting::SetTableFormatDto {
+            table_id: to_i64(table_id),
+            border: self.border.map(|v| v as i64),
+            cell_spacing: self.cell_spacing.map(|v| v as i64),
+            cell_padding: self.cell_padding.map(|v| v as i64),
+            width: self.width.map(|v| v as i64),
+            alignment: self.alignment.as_ref().map(alignment_to_dto),
+        }
+    }
+}
+
+// ── CellFormat ─────────────────────────────────────────────────
+
+fn cell_vertical_alignment_to_dto(
+    v: &crate::flow::CellVerticalAlignment,
+) -> fmt_dto::CellVerticalAlignment {
+    match v {
+        crate::flow::CellVerticalAlignment::Top => fmt_dto::CellVerticalAlignment::Top,
+        crate::flow::CellVerticalAlignment::Middle => fmt_dto::CellVerticalAlignment::Middle,
+        crate::flow::CellVerticalAlignment::Bottom => fmt_dto::CellVerticalAlignment::Bottom,
+    }
+}
+
+impl crate::flow::CellFormat {
+    pub(crate) fn to_set_dto(
+        &self,
+        cell_id: usize,
+    ) -> frontend::document_formatting::SetTableCellFormatDto {
+        frontend::document_formatting::SetTableCellFormatDto {
+            cell_id: to_i64(cell_id),
+            padding: self.padding.map(|v| v as i64),
+            border: self.border.map(|v| v as i64),
+            vertical_alignment: self
+                .vertical_alignment
+                .as_ref()
+                .map(cell_vertical_alignment_to_dto),
+            background_color: self.background_color.clone(),
+        }
+    }
+}

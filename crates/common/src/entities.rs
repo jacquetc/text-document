@@ -79,7 +79,7 @@ impl HasId for Frame {
         self.id
     }
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum FramePosition {
     #[default]
     InFlow,
@@ -114,7 +114,7 @@ impl HasId for Block {
         self.id
     }
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum Alignment {
     #[default]
     Left,
@@ -122,7 +122,7 @@ pub enum Alignment {
     Center,
     Justify,
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum MarkerType {
     #[default]
     NoMarker,
@@ -159,7 +159,7 @@ impl HasId for InlineElement {
         self.id
     }
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum InlineContent {
     #[default]
     Empty,
@@ -171,7 +171,7 @@ pub enum InlineContent {
         quality: i64,
     },
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum UnderlineStyle {
     #[default]
     NoUnderline,
@@ -183,7 +183,7 @@ pub enum UnderlineStyle {
     WaveUnderline,
     SpellCheckUnderline,
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum CharVerticalAlignment {
     #[default]
     Normal,
@@ -211,7 +211,7 @@ impl HasId for List {
         self.id
     }
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum ListStyle {
     #[default]
     Disc,
@@ -292,7 +292,7 @@ impl HasId for TableCell {
         self.id
     }
 }
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum CellVerticalAlignment {
     #[default]
     Top,

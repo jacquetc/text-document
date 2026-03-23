@@ -28,9 +28,14 @@ mod convert;
 mod cursor;
 mod document;
 mod events;
+mod flow;
 mod fragment;
 mod inner;
 mod operation;
+mod text_block;
+mod text_frame;
+mod text_list;
+mod text_table;
 
 // ── Re-exports from entity DTOs (enums that consumers need) ──────
 pub use frontend::block::dtos::{Alignment, MarkerType};
@@ -50,13 +55,29 @@ pub use events::{DocumentEvent, Subscription};
 pub use fragment::DocumentFragment;
 pub use operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Operation};
 
-// TextDocument and TextCursor are Send + Sync (all fields are Arc<Mutex<...>>).
+// ── Layout engine API types ─────────────────────────────────────
+pub use flow::{
+    BlockSnapshot, CellFormat, CellSnapshot, CellVerticalAlignment, FlowElement,
+    FlowElementSnapshot, FlowSnapshot, FormatChangeKind, FragmentContent, FrameSnapshot, ListInfo,
+    TableCellRef, TableFormat, TableSnapshot,
+};
+pub use text_block::TextBlock;
+pub use text_frame::TextFrame;
+pub use text_list::TextList;
+pub use text_table::{TextTable, TextTableCell};
+
+// All public handle types are Send + Sync (all fields are Arc<Mutex<...>> + Copy).
 const _: () = {
     #[allow(dead_code)]
     fn assert_send_sync<T: Send + Sync>() {}
     fn _assert_all() {
         assert_send_sync::<TextDocument>();
         assert_send_sync::<TextCursor>();
+        assert_send_sync::<TextBlock>();
+        assert_send_sync::<TextFrame>();
+        assert_send_sync::<TextTable>();
+        assert_send_sync::<TextTableCell>();
+        assert_send_sync::<TextList>();
     }
 };
 
@@ -66,7 +87,7 @@ const _: () = {
 
 /// Character/text formatting. All fields are optional: `None` means
 /// "not set — inherit from the block's default or the document's default."
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextFormat {
     pub font_family: Option<String>,
     pub font_point_size: Option<u32>,
@@ -87,7 +108,7 @@ pub struct TextFormat {
 }
 
 /// Block (paragraph) formatting. All fields are optional.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockFormat {
     pub alignment: Option<Alignment>,
     pub top_margin: Option<i32>,
@@ -102,7 +123,7 @@ pub struct BlockFormat {
 }
 
 /// Frame formatting. All fields are optional.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FrameFormat {
     pub height: Option<i32>,
     pub width: Option<i32>,

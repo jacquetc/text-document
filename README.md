@@ -18,7 +18,9 @@ Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architectu
 - **Import/Export**: Plain text, Markdown, HTML, LaTeX, DOCX
 - **Search**: Find, find all, regex, replace (undoable)
 - **Formatting**: Character format (`bold`, `italic`, `underline`, ...), block format (`alignment`, `heading_level`, ...), frame format
-- **Event system**: Callback-based (`on_change`) and polling-based (`poll_events`)
+- **Tables**: Insert, remove, row/column operations, cell merge/split, table/cell formatting, cursor-position-based convenience methods
+- **Layout engine API**: Read-only handles (`TextBlock`, `TextFrame`, `TextTable`, `TextTableCell`, `TextList`), flow traversal, fragment-based text shaping, atomic snapshots, incremental change events
+- **Event system**: Callback-based (`on_change`) and polling-based (`poll_events`), with `FormatChangeKind` (Block vs Character) and flow-level insert/remove events
 - **Thread-safe**: `Send + Sync` throughout, `Arc<Mutex<...>>` interior mutability
 - **Resources**: Image and stylesheet storage with base64 encoding
 
@@ -51,6 +53,76 @@ let matches = doc.find_all("world", &FindOptions::default()).unwrap();
 // Export
 let html = doc.to_html().unwrap();
 let markdown = doc.to_markdown().unwrap();
+```
+
+## Layout engine API
+
+Read-only handles for building a layout/rendering engine on top of the document model:
+
+```rust
+use text_document::{TextDocument, FlowElement, FragmentContent};
+
+let doc = TextDocument::new();
+doc.set_plain_text("Hello\nWorld").unwrap();
+
+// Walk the document's visual flow
+for element in doc.flow() {
+    match element {
+        FlowElement::Block(block) => {
+            println!("Block {}: {:?}", block.id(), block.text());
+            // Get formatting runs for glyph shaping
+            for frag in block.fragments() {
+                match frag {
+                    FragmentContent::Text { text, format, offset, length } => {
+                        println!("  text at {offset}: {text} (len={length})");
+                    }
+                    FragmentContent::Image { name, width, height, offset, .. } => {
+                        println!("  image at {offset}: {name} ({width}x{height})");
+                    }
+                }
+            }
+        }
+        FlowElement::Table(table) => {
+            println!("Table {}x{}", table.rows(), table.columns());
+        }
+        FlowElement::Frame(frame) => {
+            // Nested frames have their own flow
+            let nested = frame.flow();
+        }
+    }
+}
+
+// Atomic snapshot for full layout
+let snap = doc.snapshot_flow();
+
+// Direct block access
+let block = doc.block_at_position(0).unwrap();
+let next = block.next(); // O(n) traversal
+let snap = block.snapshot(); // all data in one lock
+```
+
+## Table operations
+
+```rust
+use text_document::TextDocument;
+
+let doc = TextDocument::new();
+doc.set_plain_text("Before table").unwrap();
+
+let cursor = doc.cursor_at(12);
+
+// Insert a 3x2 table, get a handle back
+let table = cursor.insert_table(3, 2).unwrap();
+assert_eq!(table.rows(), 3);
+
+// Explicit-ID mutations
+cursor.insert_table_row(table.id(), 1).unwrap();   // insert row at index 1
+cursor.remove_table_column(table.id(), 0).unwrap(); // remove first column
+
+// Position-based convenience (cursor must be inside a table cell)
+// cursor.insert_row_above().unwrap();
+// cursor.remove_current_column().unwrap();
+// cursor.set_current_table_format(&format).unwrap();
 ```
 
 ## CLI
@@ -97,17 +169,38 @@ Root
      |   |   +-- InlineElement (Image { name, width, height })
      |   +-- Block
      |       +-- InlineElement (Text "Second paragraph")
+     +-- Table (rows: 2, columns: 3)
+     |   +-- TableCell (row: 0, col: 0)
+     |   |   +-- Frame (cell frame)
+     |   |       +-- Block
+     |   |           +-- InlineElement (Text "Cell content")
+     |   +-- TableCell (row: 0, col: 1) ...
      +-- List (style: Decimal, indent: 1)
      +-- Resource (image data, stylesheets)
 ```
 
-- **Frame**: contains Blocks and child Frames. `child_order` interleaves them.
+- **Frame**: contains Blocks and child Frames. `child_order` interleaves them (positive = block ID, negative = sub-frame ID).
 - **Block**: a paragraph. Contains InlineElements. Has `document_position` for O(log n) lookup.
 - **InlineElement**: either `Text(String)`, `Image { name, width, height, quality }`, or `Empty`.
 - **List**: styling for list items (Disc, Decimal, LowerAlpha, ...). Blocks reference lists via weak relationship.
+- **Table**: grid of TableCells, each with an optional cell frame containing Blocks.
 - **Resource**: binary data (images, stylesheets) stored as base64.
 
 All format fields are `Option<T>` — `None` means "inherit from parent/default", `Some(value)` means "explicitly set".
+
+### Public API handles
+
+| Handle | Obtained from | Purpose |
+|--------|---------------|---------|
+| `TextDocument` | `TextDocument::new()` | Document-level operations, flow traversal |
+| `TextCursor` | `doc.cursor()` / `doc.cursor_at(pos)` | All mutations (text, formatting, tables, lists) |
+| `TextBlock` | `doc.flow()`, `doc.block_at_position()`, etc. | Read-only block data, fragments, list membership |
+| `TextFrame` | `block.frame()`, `FlowElement::Frame` | Read-only frame data, nested flow |
+| `TextTable` | `cursor.insert_table()`, `FlowElement::Table` | Read-only table structure, cell access, snapshot |
+| `TextTableCell` | `table.cell(row, col)` | Read-only cell data, blocks within cell |
+| `TextList` | `block.list()` | Read-only list properties, item markers |
+
+All handles are `Clone + Send + Sync` (backed by `Arc<Mutex<...>>` + entity ID).
 
 ## Architecture
 
@@ -121,8 +214,8 @@ crates/
 +-- common/           # Entities, database (redb), events, undo/redo, repositories
 +-- macros/           # #[uow_action] proc macro
 +-- direct_access/    # Entity CRUD controllers + DTOs
-+-- document_editing/ # 11 use cases (insert, delete, block, image, frame, list, fragment, ...)
-+-- document_formatting/ # 4 use cases (set/merge text format, block format, frame format)
++-- document_editing/ # 19 use cases (insert, delete, block, image, frame, list, fragment, table CRUD, merge/split cells, ...)
++-- document_formatting/ # 6 use cases (set/merge text format, block format, frame format, table format, cell format)
 +-- document_io/      # 8 use cases (import/export plain text, markdown, HTML, LaTeX, DOCX)
 +-- document_search/  # 3 use cases (find, find_all, replace)
 +-- document_inspection/ # 4 use cases (stats, text at position, block at position, extract fragment)

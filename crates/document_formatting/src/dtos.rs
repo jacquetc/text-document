@@ -20,7 +20,7 @@ pub struct SetTextFormatDto {
     pub vertical_alignment: Option<CharVerticalAlignment>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum UnderlineStyle {
     #[default]
     NoUnderline,
@@ -33,7 +33,7 @@ pub enum UnderlineStyle {
     SpellCheckUnderline,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum CharVerticalAlignment {
     #[default]
     Normal,
@@ -63,7 +63,7 @@ pub struct SetBlockFormatDto {
     pub marker: Option<MarkerType>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum Alignment {
     #[default]
     Left,
@@ -72,7 +72,7 @@ pub enum Alignment {
     Justify,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum MarkerType {
     #[default]
     NoMarker,
@@ -111,7 +111,7 @@ pub struct SetTableCellFormatDto {
     pub background_color: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum CellVerticalAlignment {
     #[default]
     Top,

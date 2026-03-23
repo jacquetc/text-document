@@ -12,7 +12,7 @@ use crate::inner::{CallbackEntry, TextDocumentInner};
 ///
 /// These events carry enough information for a UI to do incremental updates —
 /// repaint only the affected region, not the entire document.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DocumentEvent {
     /// Text content changed at a specific region.
     ///
@@ -27,10 +27,28 @@ pub enum DocumentEvent {
     },
 
     /// Formatting changed without text content change.
-    FormatChanged { position: usize, length: usize },
+    FormatChanged {
+        position: usize,
+        length: usize,
+        /// Distinguishes block-level changes (relayout needed) from
+        /// character-level changes (reshaping only).
+        kind: crate::flow::FormatChangeKind,
+    },
 
     /// Block count changed. Carries the new count.
     BlockCountChanged(usize),
+
+    /// Flow elements were inserted at the given index in the main
+    /// frame's `child_order`.
+    ///
+    /// This is a performance optimization — the layout engine can
+    /// update incrementally instead of re-querying
+    /// [`TextDocument::flow()`](crate::TextDocument::flow).
+    FlowElementsInserted { flow_index: usize, count: usize },
+
+    /// Flow elements were removed starting at the given index in the
+    /// main frame's `child_order`.
+    FlowElementsRemoved { flow_index: usize, count: usize },
 
     /// The document was completely replaced (import, clear).
     DocumentReset,

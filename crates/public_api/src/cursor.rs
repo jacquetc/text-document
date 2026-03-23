@@ -16,8 +16,10 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::convert::{to_i64, to_usize};
 use crate::events::DocumentEvent;
+use crate::flow::TableCellRef;
 use crate::fragment::DocumentFragment;
 use crate::inner::{CursorData, QueuedEvents, TextDocumentInner};
+use crate::text_table::TextTable;
 use crate::{BlockFormat, FrameFormat, MoveMode, MoveOperation, SelectionType, TextFormat};
 
 /// A cursor into a [`TextDocument`](crate::TextDocument).
@@ -86,6 +88,7 @@ impl TextCursor {
             blocks_affected,
         });
         inner.check_block_count_changed();
+        inner.check_flow_changed();
         self.queue_undo_redo_event(inner)
     }
 
@@ -568,10 +571,426 @@ impl TextCursor {
                 blocks_affected: 1,
             });
             inner.check_block_count_changed();
+            inner.check_flow_changed();
             self.queue_undo_redo_event(&mut inner)
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
+    }
+
+    /// Insert a table at the cursor position.
+    ///
+    /// Creates a `rows × columns` table with empty cells.
+    /// The cursor moves to after the table.
+    /// Returns a handle to the created table.
+    pub fn insert_table(&self, rows: usize, columns: usize) -> Result<TextTable> {
+        let (pos, anchor) = self.read_cursor();
+        let (table_id, queued) = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertTableDto {
+                position: to_i64(pos),
+                anchor: to_i64(anchor),
+                rows: to_i64(rows),
+                columns: to_i64(columns),
+            };
+            let result =
+                document_editing_commands::insert_table(&inner.ctx, Some(inner.stack_id), &dto)?;
+            let new_pos = to_usize(result.new_position);
+            let table_id = to_usize(result.table_id);
+            inner.adjust_cursors(pos.min(anchor), 0, new_pos - pos.min(anchor));
+            {
+                let mut d = self.data.lock();
+                d.position = new_pos;
+                d.anchor = new_pos;
+            }
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: pos.min(anchor),
+                chars_removed: 0,
+                chars_added: new_pos - pos.min(anchor),
+                blocks_affected: 1,
+            });
+            inner.check_block_count_changed();
+            inner.check_flow_changed();
+            (table_id, self.queue_undo_redo_event(&mut inner))
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(TextTable {
+            doc: self.doc.clone(),
+            table_id,
+        })
+    }
+
+    /// Returns the table the cursor is currently inside, if any.
+    ///
+    /// Returns `None` if the cursor is in the main document flow
+    /// (not inside a table cell).
+    pub fn current_table(&self) -> Option<TextTable> {
+        self.current_table_cell().map(|c| c.table)
+    }
+
+    /// Returns the table cell the cursor is currently inside, if any.
+    ///
+    /// Returns `None` if the cursor is not inside a table cell.
+    /// When `Some`, provides the table, row, and column.
+    pub fn current_table_cell(&self) -> Option<TableCellRef> {
+        let pos = self.position();
+        let inner = self.doc.lock();
+        // Find the block at cursor position
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos),
+        };
+        let block_info =
+            document_inspection_commands::get_block_at_position(&inner.ctx, &dto).ok()?;
+        let block = crate::text_block::TextBlock {
+            doc: self.doc.clone(),
+            block_id: block_info.block_id as usize,
+        };
+        // Release inner lock before calling table_cell() which also locks
+        drop(inner);
+        block.table_cell()
+    }
+
+    // ── Table structure mutations (explicit-ID) ──────────
+
+    /// Remove a table from the document by its ID.
+    pub fn remove_table(&self, table_id: usize) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::RemoveTableDto {
+                table_id: to_i64(table_id),
+            };
+            document_editing_commands::remove_table(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.check_block_count_changed();
+            inner.check_flow_changed();
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Insert a row into a table at the given index.
+    pub fn insert_table_row(&self, table_id: usize, row_index: usize) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertTableRowDto {
+                table_id: to_i64(table_id),
+                row_index: to_i64(row_index),
+            };
+            document_editing_commands::insert_table_row(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Insert a column into a table at the given index.
+    pub fn insert_table_column(&self, table_id: usize, column_index: usize) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::InsertTableColumnDto {
+                table_id: to_i64(table_id),
+                column_index: to_i64(column_index),
+            };
+            document_editing_commands::insert_table_column(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Remove a row from a table. Fails if only one row remains.
+    pub fn remove_table_row(&self, table_id: usize, row_index: usize) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::RemoveTableRowDto {
+                table_id: to_i64(table_id),
+                row_index: to_i64(row_index),
+            };
+            document_editing_commands::remove_table_row(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Remove a column from a table. Fails if only one column remains.
+    pub fn remove_table_column(&self, table_id: usize, column_index: usize) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::RemoveTableColumnDto {
+                table_id: to_i64(table_id),
+                column_index: to_i64(column_index),
+            };
+            document_editing_commands::remove_table_column(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Merge a rectangular range of cells within a table.
+    pub fn merge_table_cells(
+        &self,
+        table_id: usize,
+        start_row: usize,
+        start_column: usize,
+        end_row: usize,
+        end_column: usize,
+    ) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::MergeTableCellsDto {
+                table_id: to_i64(table_id),
+                start_row: to_i64(start_row),
+                start_column: to_i64(start_column),
+                end_row: to_i64(end_row),
+                end_column: to_i64(end_column),
+            };
+            document_editing_commands::merge_table_cells(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Split a previously merged cell.
+    pub fn split_table_cell(
+        &self,
+        cell_id: usize,
+        split_rows: usize,
+        split_columns: usize,
+    ) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::SplitTableCellDto {
+                cell_id: to_i64(cell_id),
+                split_rows: to_i64(split_rows),
+                split_columns: to_i64(split_columns),
+            };
+            document_editing_commands::split_table_cell(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.invalidate_text_cache();
+            inner.check_block_count_changed();
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    // ── Table formatting (explicit-ID) ───────────────────
+
+    /// Set formatting on a table.
+    pub fn set_table_format(
+        &self,
+        table_id: usize,
+        format: &crate::flow::TableFormat,
+    ) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = format.to_set_dto(table_id);
+            document_formatting_commands::set_table_format(&inner.ctx, Some(inner.stack_id), &dto)?;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::FormatChanged {
+                position: 0,
+                length: 0,
+                kind: crate::flow::FormatChangeKind::Block,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Set formatting on a table cell.
+    pub fn set_table_cell_format(
+        &self,
+        cell_id: usize,
+        format: &crate::flow::CellFormat,
+    ) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = format.to_set_dto(cell_id);
+            document_formatting_commands::set_table_cell_format(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::FormatChanged {
+                position: 0,
+                length: 0,
+                kind: crate::flow::FormatChangeKind::Block,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    // ── Table convenience (position-based) ───────────────
+
+    /// Remove the table the cursor is currently inside.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn remove_current_table(&self) -> Result<()> {
+        let table = self
+            .current_table()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.remove_table(table.id())
+    }
+
+    /// Insert a row above the cursor's current row.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn insert_row_above(&self) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.insert_table_row(cell_ref.table.id(), cell_ref.row)
+    }
+
+    /// Insert a row below the cursor's current row.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn insert_row_below(&self) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.insert_table_row(cell_ref.table.id(), cell_ref.row + 1)
+    }
+
+    /// Insert a column before the cursor's current column.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn insert_column_before(&self) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.insert_table_column(cell_ref.table.id(), cell_ref.column)
+    }
+
+    /// Insert a column after the cursor's current column.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn insert_column_after(&self) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.insert_table_column(cell_ref.table.id(), cell_ref.column + 1)
+    }
+
+    /// Remove the row at the cursor's current position.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn remove_current_row(&self) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.remove_table_row(cell_ref.table.id(), cell_ref.row)
+    }
+
+    /// Remove the column at the cursor's current position.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn remove_current_column(&self) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.remove_table_column(cell_ref.table.id(), cell_ref.column)
+    }
+
+    /// Merge cells spanned by the current selection.
+    ///
+    /// Both cursor position and anchor must be inside the same table.
+    /// The cell range is derived from the cells at position and anchor.
+    /// Returns an error if the cursor is not inside a table or position
+    /// and anchor are in different tables.
+    pub fn merge_selected_cells(&self) -> Result<()> {
+        let pos_cell = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor position is not inside a table"))?;
+
+        // Get anchor cell
+        let (_pos, anchor) = self.read_cursor();
+        let anchor_cell = {
+            // Create a temporary block handle at the anchor position
+            let inner = self.doc.lock();
+            let dto = frontend::document_inspection::GetBlockAtPositionDto {
+                position: to_i64(anchor),
+            };
+            let block_info = document_inspection_commands::get_block_at_position(&inner.ctx, &dto)
+                .map_err(|_| anyhow::anyhow!("cursor anchor is not inside a table"))?;
+            let block = crate::text_block::TextBlock {
+                doc: self.doc.clone(),
+                block_id: block_info.block_id as usize,
+            };
+            drop(inner);
+            block
+                .table_cell()
+                .ok_or_else(|| anyhow::anyhow!("cursor anchor is not inside a table"))?
+        };
+
+        if pos_cell.table.id() != anchor_cell.table.id() {
+            return Err(anyhow::anyhow!(
+                "position and anchor are in different tables"
+            ));
+        }
+
+        let start_row = pos_cell.row.min(anchor_cell.row);
+        let start_col = pos_cell.column.min(anchor_cell.column);
+        let end_row = pos_cell.row.max(anchor_cell.row);
+        let end_col = pos_cell.column.max(anchor_cell.column);
+
+        self.merge_table_cells(pos_cell.table.id(), start_row, start_col, end_row, end_col)
+    }
+
+    /// Split the cell at the cursor's current position.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn split_current_cell(&self, split_rows: usize, split_columns: usize) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        // Get the cell entity ID from the table handle
+        let cell = cell_ref
+            .table
+            .cell(cell_ref.row, cell_ref.column)
+            .ok_or_else(|| anyhow::anyhow!("cell not found"))?;
+        // TextTableCell stores cell_id
+        self.split_table_cell(cell.id(), split_rows, split_columns)
+    }
+
+    /// Set formatting on the table the cursor is currently inside.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn set_current_table_format(&self, format: &crate::flow::TableFormat) -> Result<()> {
+        let table = self
+            .current_table()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        self.set_table_format(table.id(), format)
+    }
+
+    /// Set formatting on the cell the cursor is currently inside.
+    /// Returns an error if the cursor is not inside a table.
+    pub fn set_current_cell_format(&self, format: &crate::flow::CellFormat) -> Result<()> {
+        let cell_ref = self
+            .current_table_cell()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a table"))?;
+        let cell = cell_ref
+            .table
+            .cell(cell_ref.row, cell_ref.column)
+            .ok_or_else(|| anyhow::anyhow!("cell not found"))?;
+        self.set_table_cell_format(cell.id(), format)
     }
 
     /// Delete the character after the cursor (Delete key).
@@ -630,6 +1049,7 @@ impl TextCursor {
                 blocks_affected: 1,
             });
             inner.check_block_count_changed();
+            inner.check_flow_changed();
             // Return the deleted text alongside the queued events
             (result.deleted_text, self.queue_undo_redo_event(&mut inner))
         };
@@ -735,6 +1155,7 @@ impl TextCursor {
             inner.queue_event(DocumentEvent::FormatChanged {
                 position: start,
                 length,
+                kind: crate::flow::FormatChangeKind::Character,
             });
             self.queue_undo_redo_event(&mut inner)
         };
@@ -759,6 +1180,7 @@ impl TextCursor {
             inner.queue_event(DocumentEvent::FormatChanged {
                 position: start,
                 length,
+                kind: crate::flow::FormatChangeKind::Character,
             });
             self.queue_undo_redo_event(&mut inner)
         };
@@ -779,6 +1201,7 @@ impl TextCursor {
             inner.queue_event(DocumentEvent::FormatChanged {
                 position: start,
                 length,
+                kind: crate::flow::FormatChangeKind::Block,
             });
             self.queue_undo_redo_event(&mut inner)
         };
@@ -799,6 +1222,7 @@ impl TextCursor {
             inner.queue_event(DocumentEvent::FormatChanged {
                 position: start,
                 length,
+                kind: crate::flow::FormatChangeKind::Block,
             });
             self.queue_undo_redo_event(&mut inner)
         };
@@ -867,6 +1291,7 @@ impl TextCursor {
                 blocks_affected: 1,
             });
             inner.check_block_count_changed();
+            inner.check_flow_changed();
             self.queue_undo_redo_event(&mut inner)
         };
         crate::inner::dispatch_queued_events(queued);

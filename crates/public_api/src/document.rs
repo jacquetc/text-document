@@ -94,6 +94,7 @@ impl TextDocument {
                         let mut inner = inner.lock();
                         inner.queue_event(DocumentEvent::DocumentReset);
                         inner.check_block_count_changed();
+                        inner.reset_cached_child_order();
                         inner.queue_event(DocumentEvent::LongOperationFinished {
                             operation_id: op_id,
                             success: true,
@@ -149,6 +150,7 @@ impl TextDocument {
             inner.invalidate_text_cache();
             inner.queue_event(DocumentEvent::DocumentReset);
             inner.check_block_count_changed();
+            inner.reset_cached_child_order();
             inner.queue_event(DocumentEvent::UndoRedoChanged {
                 can_undo: false,
                 can_redo: false,
@@ -280,6 +282,7 @@ impl TextDocument {
             inner.invalidate_text_cache();
             inner.queue_event(DocumentEvent::DocumentReset);
             inner.check_block_count_changed();
+            inner.reset_cached_child_order();
             inner.queue_event(DocumentEvent::UndoRedoChanged {
                 can_undo: false,
                 can_redo: false,
@@ -375,6 +378,90 @@ impl TextDocument {
         Ok(BlockFormat::from(&block_dto))
     }
 
+    // ── Flow traversal (layout engine API) ─────────────────
+
+    /// Walk the main frame's visual flow in document order.
+    ///
+    /// Returns the top-level flow elements — blocks, tables, and
+    /// sub-frames — in the order defined by the main frame's
+    /// `child_order`. Table cell contents are NOT included here;
+    /// access them through [`TextTableCell::blocks()`](crate::TextTableCell::blocks).
+    ///
+    /// This is the primary entry point for layout initialization.
+    pub fn flow(&self) -> Vec<crate::flow::FlowElement> {
+        let inner = self.inner.lock();
+        let main_frame_id = get_main_frame_id(&inner);
+        crate::text_frame::build_flow_elements(&inner, &self.inner, main_frame_id)
+    }
+
+    /// Get a read-only handle to a block by its entity ID.
+    ///
+    /// Entity IDs are stable across insertions and deletions.
+    /// Returns `None` if no block with this ID exists.
+    pub fn block_by_id(&self, block_id: usize) -> Option<crate::text_block::TextBlock> {
+        let inner = self.inner.lock();
+        let exists = frontend::commands::block_commands::get_block(&inner.ctx, &(block_id as u64))
+            .ok()
+            .flatten()
+            .is_some();
+
+        if exists {
+            Some(crate::text_block::TextBlock {
+                doc: self.inner.clone(),
+                block_id,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Get a read-only handle to the block containing the given
+    /// character position. Returns `None` if position is out of range.
+    pub fn block_at_position(&self, position: usize) -> Option<crate::text_block::TextBlock> {
+        let inner = self.inner.lock();
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(position),
+        };
+        let result = document_inspection_commands::get_block_at_position(&inner.ctx, &dto).ok()?;
+        Some(crate::text_block::TextBlock {
+            doc: self.inner.clone(),
+            block_id: result.block_id as usize,
+        })
+    }
+
+    /// Get a read-only handle to a block by its 0-indexed global
+    /// block number.
+    ///
+    /// **O(n)**: requires scanning all blocks sorted by
+    /// `document_position` to find the nth one. Prefer
+    /// [`block_at_position()`](TextDocument::block_at_position) or
+    /// [`block_by_id()`](TextDocument::block_by_id) in
+    /// performance-sensitive paths.
+    pub fn block_by_number(&self, block_number: usize) -> Option<crate::text_block::TextBlock> {
+        let inner = self.inner.lock();
+        let all_blocks = frontend::commands::block_commands::get_all_block(&inner.ctx).ok()?;
+        let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        sorted.sort_by_key(|b| b.document_position);
+
+        sorted
+            .get(block_number)
+            .map(|b| crate::text_block::TextBlock {
+                doc: self.inner.clone(),
+                block_id: b.id as usize,
+            })
+    }
+
+    /// Snapshot the entire main flow in a single lock acquisition.
+    ///
+    /// Returns a [`FlowSnapshot`](crate::FlowSnapshot) containing snapshots
+    /// for every element in the flow.
+    pub fn snapshot_flow(&self) -> crate::flow::FlowSnapshot {
+        let inner = self.inner.lock();
+        let main_frame_id = get_main_frame_id(&inner);
+        let elements = crate::text_frame::build_flow_snapshot(&inner, main_frame_id);
+        crate::flow::FlowSnapshot { elements }
+    }
+
     // ── Search ───────────────────────────────────────────────
 
     /// Find the next (or previous) occurrence. Returns `None` if not found.
@@ -415,13 +502,18 @@ impl TextDocument {
             inner.invalidate_text_cache();
             if count > 0 {
                 inner.modified = true;
+                // Replacements are scattered across the document — we can't
+                // provide a single position/chars delta. Signal "content changed
+                // from position 0, affecting `count` sites" so the consumer
+                // knows to re-read.
                 inner.queue_event(DocumentEvent::ContentsChanged {
                     position: 0,
                     chars_removed: 0,
                     chars_added: 0,
-                    blocks_affected: 0,
+                    blocks_affected: count,
                 });
                 inner.check_block_count_changed();
+                inner.check_flow_changed();
                 let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
                 let can_redo = undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
                 inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
@@ -501,6 +593,7 @@ impl TextDocument {
             inner.invalidate_text_cache();
             result?;
             inner.check_block_count_changed();
+            inner.check_flow_changed();
             let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
             let can_redo = undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
             inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
@@ -518,6 +611,7 @@ impl TextDocument {
             inner.invalidate_text_cache();
             result?;
             inner.check_block_count_changed();
+            inner.check_flow_changed();
             let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
             let can_redo = undo_redo_commands::can_redo(&inner.ctx, Some(inner.stack_id));
             inner.queue_event(DocumentEvent::UndoRedoChanged { can_undo, can_redo });
@@ -671,6 +765,21 @@ impl Default for TextDocument {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Flow helpers ──────────────────────────────────────────────
+
+/// Get the main frame ID for the document.
+fn get_main_frame_id(inner: &TextDocumentInner) -> frontend::common::types::EntityId {
+    // The document's first frame is the main frame.
+    let frames = frontend::commands::document_commands::get_document_relationship(
+        &inner.ctx,
+        &inner.document_id,
+        &frontend::document::dtos::DocumentRelationshipField::Frames,
+    )
+    .unwrap_or_default();
+
+    frames.first().copied().unwrap_or(0)
 }
 
 // ── Long-operation event data helpers ─────────────────────────
