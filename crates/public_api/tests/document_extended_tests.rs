@@ -166,6 +166,70 @@ fn set_block_format_full() {
     c.set_block_format(&fmt).unwrap();
 }
 
+// ── New BlockFormat fields ──────────────────────────────────────
+
+#[test]
+fn set_block_format_line_height() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    let fmt = BlockFormat {
+        line_height: Some(1.5),
+        ..Default::default()
+    };
+    c.set_block_format(&fmt).unwrap();
+    let read = c.block_format().unwrap();
+    assert_eq!(read.line_height, Some(1.5));
+}
+
+#[test]
+fn set_block_format_non_breakable_lines() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    let fmt = BlockFormat {
+        non_breakable_lines: Some(true),
+        ..Default::default()
+    };
+    c.set_block_format(&fmt).unwrap();
+    let read = c.block_format().unwrap();
+    assert_eq!(read.non_breakable_lines, Some(true));
+}
+
+#[test]
+fn set_block_format_direction_rtl() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    let fmt = BlockFormat {
+        direction: Some(TextDirection::RightToLeft),
+        ..Default::default()
+    };
+    c.set_block_format(&fmt).unwrap();
+    let read = c.block_format().unwrap();
+    assert_eq!(read.direction, Some(TextDirection::RightToLeft));
+}
+
+#[test]
+fn set_block_format_background_color() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    let fmt = BlockFormat {
+        background_color: Some("#ff0000".to_string()),
+        ..Default::default()
+    };
+    c.set_block_format(&fmt).unwrap();
+    let read = c.block_format().unwrap();
+    assert_eq!(read.background_color, Some("#ff0000".to_string()));
+}
+
+#[test]
+fn block_format_new_fields_default_none() {
+    let doc = new_doc("Hello");
+    let fmt = doc.block_format_at(0).unwrap();
+    assert_eq!(fmt.line_height, None);
+    assert_eq!(fmt.non_breakable_lines, None);
+    assert_eq!(fmt.direction, None);
+    assert_eq!(fmt.background_color, None);
+}
+
 // ── Import/export roundtrips ────────────────────────────────────
 
 #[test]

@@ -1,4 +1,4 @@
-use crate::entities::ListStyle;
+use crate::entities::{ListStyle, TextDirection};
 
 /// A parsed inline span with formatting info
 #[derive(Debug, Clone, Default)]
@@ -19,6 +19,10 @@ pub struct ParsedBlock {
     pub heading_level: Option<i64>,
     pub list_style: Option<ListStyle>,
     pub is_code_block: bool,
+    pub line_height: Option<i64>,
+    pub non_breakable_lines: Option<bool>,
+    pub direction: Option<TextDirection>,
+    pub background_color: Option<String>,
 }
 
 // ─── Markdown parsing ────────────────────────────────────────────────
@@ -60,6 +64,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
                         is_code_block: false,
+                        line_height: None,
+                        non_breakable_lines: None,
+                        direction: None,
+                        background_color: None,
                     });
                 }
                 in_block = false;
@@ -76,6 +84,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     heading_level: current_heading.take(),
                     list_style: None,
                     is_code_block: false,
+                    line_height: None,
+                    non_breakable_lines: None,
+                    direction: None,
+                    background_color: None,
                 });
                 in_block = false;
             }
@@ -103,6 +115,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         heading_level: None,
                         list_style: current_list_style.clone(),
                         is_code_block: false,
+                        line_height: None,
+                        non_breakable_lines: None,
+                        direction: None,
+                        background_color: None,
                     });
                 }
                 in_block = false;
@@ -118,6 +134,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     heading_level: None,
                     list_style: None,
                     is_code_block: true,
+                    line_height: None,
+                    non_breakable_lines: None,
+                    direction: None,
+                    background_color: None,
                 });
                 in_block = false;
                 is_code_block = false;
@@ -195,6 +215,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
                         is_code_block,
+                        line_height: None,
+                        non_breakable_lines: None,
+                        direction: None,
+                        background_color: None,
                     });
                 }
             }
@@ -209,6 +233,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             heading_level: current_heading,
             list_style: current_list_style,
             is_code_block,
+            line_height: None,
+            non_breakable_lines: None,
+            direction: None,
+            background_color: None,
         });
     }
 
@@ -222,6 +250,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             heading_level: None,
             list_style: None,
             is_code_block: false,
+            line_height: None,
+            non_breakable_lines: None,
+            direction: None,
+            background_color: None,
         });
     }
 
@@ -243,6 +275,53 @@ fn heading_level_to_i64(level: pulldown_cmark::HeadingLevel) -> i64 {
 // ─── HTML parsing ────────────────────────────────────────────────────
 
 use scraper::Node;
+
+/// Parsed CSS block-level styles from an inline `style` attribute.
+#[derive(Debug, Clone, Default)]
+struct BlockStyles {
+    line_height: Option<i64>,
+    non_breakable_lines: Option<bool>,
+    direction: Option<TextDirection>,
+    background_color: Option<String>,
+}
+
+/// Parse relevant CSS properties from an inline style string.
+/// Handles: line-height, white-space, direction, background-color.
+fn parse_block_styles(style: &str) -> BlockStyles {
+    let mut result = BlockStyles::default();
+    for part in style.split(';') {
+        let part = part.trim();
+        if let Some((prop, val)) = part.split_once(':') {
+            let prop = prop.trim().to_ascii_lowercase();
+            let val = val.trim();
+            match prop.as_str() {
+                "line-height" => {
+                    // Try parsing as a plain number (multiplier)
+                    if let Ok(v) = val.parse::<f64>() {
+                        result.line_height = Some((v * 1000.0) as i64);
+                    }
+                }
+                "white-space" => {
+                    if val == "pre" || val == "nowrap" || val == "pre-wrap" {
+                        result.non_breakable_lines = Some(true);
+                    }
+                }
+                "direction" => {
+                    if val.eq_ignore_ascii_case("rtl") {
+                        result.direction = Some(TextDirection::RightToLeft);
+                    } else if val.eq_ignore_ascii_case("ltr") {
+                        result.direction = Some(TextDirection::LeftToRight);
+                    }
+                }
+                "background-color" | "background" => {
+                    result.background_color = Some(val.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    result
+}
 
 pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
     use scraper::Html;
@@ -331,6 +410,13 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
 
                 let is_code_block = tag == "pre";
 
+                // Extract CSS styles from block-level elements
+                let css = if is_block_tag {
+                    el.attr("style").map(parse_block_styles).unwrap_or_default()
+                } else {
+                    BlockStyles::default()
+                };
+
                 if tag == "br" {
                     // <br> creates a new block
                     blocks.push(ParsedBlock {
@@ -341,6 +427,10 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         heading_level: None,
                         list_style: None,
                         is_code_block: false,
+                        line_height: None,
+                        non_breakable_lines: None,
+                        direction: None,
+                        background_color: None,
                     });
                     return;
                 }
@@ -369,6 +459,10 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             heading_level,
                             list_style: list_style_for_block,
                             is_code_block,
+                            line_height: css.line_height,
+                            non_breakable_lines: css.non_breakable_lines,
+                            direction: css.direction,
+                            background_color: css.background_color,
                         });
                     }
                 } else if matches!(tag, "ul" | "ol" | "table" | "thead" | "tbody" | "tr") {
@@ -401,6 +495,10 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         heading_level: None,
                         list_style: None,
                         is_code_block: false,
+                        line_height: None,
+                        non_breakable_lines: None,
+                        direction: None,
+                        background_color: None,
                     });
                 }
             }
@@ -520,6 +618,10 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
             heading_level: None,
             list_style: None,
             is_code_block: false,
+            line_height: None,
+            non_breakable_lines: None,
+            direction: None,
+            background_color: None,
         });
     }
 
@@ -667,5 +769,65 @@ mod tests {
     fn test_parse_html_blockquote_nested() {
         let blocks = parse_html("<p>before</p><blockquote>quoted</blockquote><p>after</p>");
         assert!(blocks.len() >= 3);
+    }
+
+    #[test]
+    fn test_parse_block_styles_line_height() {
+        let styles = parse_block_styles("line-height: 1.5");
+        assert_eq!(styles.line_height, Some(1500));
+    }
+
+    #[test]
+    fn test_parse_block_styles_direction_rtl() {
+        let styles = parse_block_styles("direction: rtl");
+        assert_eq!(styles.direction, Some(TextDirection::RightToLeft));
+    }
+
+    #[test]
+    fn test_parse_block_styles_background_color() {
+        let styles = parse_block_styles("background-color: #ff0000");
+        assert_eq!(styles.background_color, Some("#ff0000".to_string()));
+    }
+
+    #[test]
+    fn test_parse_block_styles_white_space_pre() {
+        let styles = parse_block_styles("white-space: pre");
+        assert_eq!(styles.non_breakable_lines, Some(true));
+    }
+
+    #[test]
+    fn test_parse_block_styles_multiple() {
+        let styles = parse_block_styles("line-height: 2.0; direction: rtl; background-color: blue");
+        assert_eq!(styles.line_height, Some(2000));
+        assert_eq!(styles.direction, Some(TextDirection::RightToLeft));
+        assert_eq!(styles.background_color, Some("blue".to_string()));
+    }
+
+    #[test]
+    fn test_parse_html_block_styles_extracted() {
+        let blocks = parse_html(
+            r#"<p style="line-height: 1.5; direction: rtl; background-color: #ccc">text</p>"#,
+        );
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].line_height, Some(1500));
+        assert_eq!(blocks[0].direction, Some(TextDirection::RightToLeft));
+        assert_eq!(blocks[0].background_color, Some("#ccc".to_string()));
+    }
+
+    #[test]
+    fn test_parse_html_white_space_pre() {
+        let blocks = parse_html(r#"<p style="white-space: pre">code</p>"#);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].non_breakable_lines, Some(true));
+    }
+
+    #[test]
+    fn test_parse_html_no_styles_returns_none() {
+        let blocks = parse_html("<p>plain</p>");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].line_height, None);
+        assert_eq!(blocks[0].direction, None);
+        assert_eq!(blocks[0].background_color, None);
+        assert_eq!(blocks[0].non_breakable_lines, None);
     }
 }

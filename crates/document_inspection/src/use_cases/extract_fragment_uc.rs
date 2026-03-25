@@ -177,6 +177,26 @@ impl ExtractFragmentUseCase {
                 } else {
                     vec![]
                 },
+                line_height: if is_full_block {
+                    block.fmt_line_height
+                } else {
+                    None
+                },
+                non_breakable_lines: if is_full_block {
+                    block.fmt_non_breakable_lines
+                } else {
+                    None
+                },
+                direction: if is_full_block {
+                    block.fmt_direction.clone()
+                } else {
+                    None
+                },
+                background_color: if is_full_block {
+                    block.fmt_background_color.clone()
+                } else {
+                    None
+                },
             };
 
             plain_texts.push(extracted_text);

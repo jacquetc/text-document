@@ -5,6 +5,7 @@ use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
     Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
+    TextDirection,
 };
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
@@ -167,17 +168,40 @@ impl ExportLatexUseCase {
                 } else {
                     let inline_latex = self.render_inline_latex(&*uow, block)?;
 
-                    if let Some(level) = block.fmt_heading_level {
+                    let mut content = if let Some(level) = block.fmt_heading_level {
                         let cmd = match level {
                             1 => "section",
                             2 => "subsection",
                             3 => "subsubsection",
                             _ => "paragraph",
                         };
-                        body_parts.push(format!("\\{}{{{}}}", cmd, inline_latex));
+                        format!("\\{}{{{}}}", cmd, inline_latex)
                     } else {
-                        body_parts.push(inline_latex);
+                        inline_latex
+                    };
+
+                    // Wrap with line-height
+                    if let Some(lh) = block.fmt_line_height {
+                        let spacing = lh as f64 / 1000.0;
+                        content = format!("{{\\setstretch{{{:.2}}}{}}}", spacing, content);
                     }
+                    // Wrap with direction
+                    if block.fmt_direction == Some(TextDirection::RightToLeft) {
+                        content = format!("\\RL{{{}}}", content);
+                    }
+                    // Wrap with background color
+                    if let Some(ref c) = block.fmt_background_color {
+                        content = format!(
+                            "\\colorbox{{{}}}{{\\parbox{{\\linewidth}}{{{}}}}}",
+                            c, content
+                        );
+                    }
+                    // Wrap with non-breakable lines
+                    if block.fmt_non_breakable_lines == Some(true) {
+                        content = format!("\\mbox{{{}}}", content);
+                    }
+
+                    body_parts.push(content);
                     i += 1;
                 }
             }
@@ -194,7 +218,7 @@ impl ExportLatexUseCase {
                 &dto.document_class
             };
             format!(
-                "\\documentclass{{{}}}\n\\usepackage{{hyperref}}\n\\usepackage{{ulem}}\n\\usepackage{{graphicx}}\n\\begin{{document}}\n\n{}\n\n\\end{{document}}",
+                "\\documentclass{{{}}}\n\\usepackage{{hyperref}}\n\\usepackage{{ulem}}\n\\usepackage{{graphicx}}\n\\usepackage{{setspace}}\n\\usepackage{{xcolor}}\n\\begin{{document}}\n\n{}\n\n\\end{{document}}",
                 doc_class, body
             )
         } else {

@@ -236,6 +236,10 @@ fn execute_insert_fragment(
             fmt_text_indent: frag_block.text_indent,
             fmt_marker: frag_block.marker.clone(),
             fmt_tab_positions: frag_block.tab_positions.clone(),
+            fmt_line_height: frag_block.line_height,
+            fmt_non_breakable_lines: frag_block.non_breakable_lines,
+            fmt_direction: frag_block.direction.clone(),
+            fmt_background_color: frag_block.background_color.clone(),
         };
 
         let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
@@ -284,6 +288,10 @@ fn execute_insert_fragment(
         fmt_text_indent: current_block.fmt_text_indent,
         fmt_marker: current_block.fmt_marker.clone(),
         fmt_tab_positions: current_block.fmt_tab_positions.clone(),
+        fmt_line_height: current_block.fmt_line_height,
+        fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
+        fmt_direction: current_block.fmt_direction.clone(),
+        fmt_background_color: current_block.fmt_background_color.clone(),
     };
 
     let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;

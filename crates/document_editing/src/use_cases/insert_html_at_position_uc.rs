@@ -234,6 +234,10 @@ macro_rules! impl_content_insert {
                     fmt_text_indent: None,
                     fmt_marker: None,
                     fmt_tab_positions: vec![],
+                    fmt_line_height: parsed.line_height,
+                    fmt_non_breakable_lines: parsed.non_breakable_lines,
+                    fmt_direction: parsed.direction.clone(),
+                    fmt_background_color: parsed.background_color.clone(),
                 };
 
                 let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
@@ -303,6 +307,10 @@ macro_rules! impl_content_insert {
                 fmt_text_indent: current_block.fmt_text_indent,
                 fmt_marker: current_block.fmt_marker.clone(),
                 fmt_tab_positions: current_block.fmt_tab_positions.clone(),
+                fmt_line_height: current_block.fmt_line_height,
+                fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
+                fmt_direction: current_block.fmt_direction.clone(),
+                fmt_background_color: current_block.fmt_background_color.clone(),
             };
 
             let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;

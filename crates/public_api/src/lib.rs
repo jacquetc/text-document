@@ -148,7 +148,7 @@ pub struct TextFormat {
 }
 
 /// Block (paragraph) formatting. All fields are optional.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BlockFormat {
     pub alignment: Option<Alignment>,
     pub top_margin: Option<i32>,
@@ -160,6 +160,10 @@ pub struct BlockFormat {
     pub text_indent: Option<i32>,
     pub marker: Option<MarkerType>,
     pub tab_positions: Vec<i32>,
+    pub line_height: Option<f32>,
+    pub non_breakable_lines: Option<bool>,
+    pub direction: Option<TextDirection>,
+    pub background_color: Option<String>,
 }
 
 /// Frame formatting. All fields are optional.

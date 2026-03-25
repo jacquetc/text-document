@@ -225,6 +225,10 @@ fn execute_insert_block(
         fmt_text_indent: current_block.fmt_text_indent,
         fmt_marker: current_block.fmt_marker.clone(),
         fmt_tab_positions: current_block.fmt_tab_positions.clone(),
+        fmt_line_height: current_block.fmt_line_height,
+        fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
+        fmt_direction: current_block.fmt_direction.clone(),
+        fmt_background_color: current_block.fmt_background_color.clone(),
     };
 
     let insert_index = (block_idx + 1) as i32;

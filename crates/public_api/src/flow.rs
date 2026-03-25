@@ -85,7 +85,7 @@ pub enum FragmentContent {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// All layout-relevant data for one block, captured atomically.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockSnapshot {
     pub block_id: usize,
     pub position: usize,
@@ -178,7 +178,7 @@ pub enum CellVerticalAlignment {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Consistent snapshot of a table's structure and all cell content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TableSnapshot {
     pub table_id: usize,
     pub rows: usize,
@@ -189,7 +189,7 @@ pub struct TableSnapshot {
 }
 
 /// Snapshot of one table cell including its block content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CellSnapshot {
     pub row: usize,
     pub column: usize,
@@ -205,13 +205,13 @@ pub struct CellSnapshot {
 
 /// Consistent snapshot of the entire document flow, captured in a
 /// single lock acquisition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FlowSnapshot {
     pub elements: Vec<FlowElementSnapshot>,
 }
 
 /// Snapshot of one flow element.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FlowElementSnapshot {
     Block(BlockSnapshot),
     Table(TableSnapshot),
@@ -219,7 +219,7 @@ pub enum FlowElementSnapshot {
 }
 
 /// Snapshot of a sub-frame and its contents.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FrameSnapshot {
     pub frame_id: usize,
     pub format: FrameFormat,

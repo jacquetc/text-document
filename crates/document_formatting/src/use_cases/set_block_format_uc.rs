@@ -104,6 +104,18 @@ fn execute_set_block_format(
             if let Some(ref m) = dto.marker {
                 updated.fmt_marker = Some(marker_to_entity(m));
             }
+            if let Some(v) = dto.line_height {
+                updated.fmt_line_height = Some(v);
+            }
+            if let Some(v) = dto.non_breakable_lines {
+                updated.fmt_non_breakable_lines = Some(v);
+            }
+            if let Some(ref d) = dto.direction {
+                updated.fmt_direction = Some(d.clone());
+            }
+            if let Some(ref c) = dto.background_color {
+                updated.fmt_background_color = Some(c.clone());
+            }
             updated.updated_at = chrono::Utc::now();
             blocks_to_update.push(updated);
         }

@@ -180,6 +180,21 @@ impl LongOperation for ExportDocxUseCase {
                     let style_name = format!("Heading{}", level.clamp(1, 6));
                     paragraph = paragraph.style(&style_name);
                 }
+                // Apply line height (thousandths → 240ths: 1000 = 240, 1500 = 360)
+                if let Some(lh) = block.fmt_line_height {
+                    let twips = (lh as f64 / 1000.0 * 240.0) as i32;
+                    paragraph = paragraph.line_spacing(
+                        LineSpacing::new()
+                            .line_rule(LineSpacingType::Auto)
+                            .line(twips),
+                    );
+                }
+                // Apply non-breakable lines
+                if block.fmt_non_breakable_lines == Some(true) {
+                    paragraph = paragraph.keep_lines(true);
+                }
+                // Note: bidi (RTL direction) and paragraph shading (background_color)
+                // are not directly exposed on Paragraph in docx-rs 0.4.
 
                 for elem in &elements {
                     let text = match &elem.content {

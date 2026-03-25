@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
     Alignment, Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table,
-    TableCell,
+    TableCell, TextDirection,
 };
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
@@ -169,12 +169,30 @@ impl ExportHtmlUseCase {
                 } else {
                     let inline_html = self.render_inline_html(&*uow, block)?;
 
-                    let style_attr = match block.fmt_alignment {
-                        Some(Alignment::Left) => " style=\"text-align: left\"",
-                        Some(Alignment::Right) => " style=\"text-align: right\"",
-                        Some(Alignment::Center) => " style=\"text-align: center\"",
-                        Some(Alignment::Justify) => " style=\"text-align: justify\"",
-                        None => "",
+                    let mut styles: Vec<String> = Vec::new();
+                    match block.fmt_alignment {
+                        Some(Alignment::Left) => styles.push("text-align: left".into()),
+                        Some(Alignment::Right) => styles.push("text-align: right".into()),
+                        Some(Alignment::Center) => styles.push("text-align: center".into()),
+                        Some(Alignment::Justify) => styles.push("text-align: justify".into()),
+                        None => {}
+                    }
+                    if let Some(lh) = block.fmt_line_height {
+                        styles.push(format!("line-height: {}", lh as f64 / 1000.0));
+                    }
+                    if block.fmt_non_breakable_lines == Some(true) {
+                        styles.push("white-space: pre".into());
+                    }
+                    if block.fmt_direction == Some(TextDirection::RightToLeft) {
+                        styles.push("direction: rtl".into());
+                    }
+                    if let Some(ref c) = block.fmt_background_color {
+                        styles.push(format!("background-color: {}", c));
+                    }
+                    let style_attr = if styles.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" style=\"{}\"", styles.join("; "))
                     };
 
                     if let Some(level) = block.fmt_heading_level {

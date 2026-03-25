@@ -64,6 +64,10 @@ impl DocumentFragment {
                 left_margin: None,
                 right_margin: None,
                 tab_positions: vec![],
+                line_height: None,
+                non_breakable_lines: None,
+                direction: None,
+                background_color: None,
             })
             .collect();
 
@@ -564,6 +568,10 @@ fn parsed_blocks_to_fragment(
                 left_margin: None,
                 right_margin: None,
                 tab_positions: vec![],
+                line_height: pb.line_height,
+                non_breakable_lines: pb.non_breakable_lines,
+                direction: pb.direction,
+                background_color: pb.background_color,
             }
         })
         .collect();

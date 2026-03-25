@@ -1,6 +1,8 @@
 //! Tests that exercise import/export paths with richer content.
 
-use text_document::{ListStyle, SelectionType, TextDocument, TextFormat};
+use text_document::{
+    BlockFormat, ListStyle, SelectionType, TextDirection, TextDocument, TextFormat,
+};
 
 fn new_doc(text: &str) -> TextDocument {
     let doc = TextDocument::new();
@@ -69,6 +71,75 @@ fn html_export_with_list() {
     c.create_list(ListStyle::Disc).unwrap();
     let html = doc.to_html().unwrap();
     assert!(html.contains("Item A"));
+}
+
+// ── HTML export with new block format fields ────────────────────
+
+#[test]
+fn html_export_block_format_line_height() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    c.set_block_format(&BlockFormat {
+        line_height: Some(1.5),
+        ..Default::default()
+    })
+    .unwrap();
+    let html = doc.to_html().unwrap();
+    assert!(html.contains("line-height: 1.5"), "HTML: {}", html);
+}
+
+#[test]
+fn html_export_block_format_direction_rtl() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    c.set_block_format(&BlockFormat {
+        direction: Some(TextDirection::RightToLeft),
+        ..Default::default()
+    })
+    .unwrap();
+    let html = doc.to_html().unwrap();
+    assert!(html.contains("direction: rtl"), "HTML: {}", html);
+}
+
+#[test]
+fn html_export_block_format_background_color() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    c.set_block_format(&BlockFormat {
+        background_color: Some("#ff0000".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+    let html = doc.to_html().unwrap();
+    assert!(html.contains("background-color: #ff0000"), "HTML: {}", html);
+}
+
+#[test]
+fn html_export_block_format_non_breakable() {
+    let doc = new_doc("Hello");
+    let c = doc.cursor();
+    c.set_block_format(&BlockFormat {
+        non_breakable_lines: Some(true),
+        ..Default::default()
+    })
+    .unwrap();
+    let html = doc.to_html().unwrap();
+    assert!(html.contains("white-space: pre"), "HTML: {}", html);
+}
+
+#[test]
+fn html_import_block_format_styles() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_html(
+            r#"<html><body><p style="line-height: 2.0; direction: rtl; background-color: blue">Styled</p></body></html>"#,
+        )
+        .unwrap();
+    op.wait().unwrap();
+    let fmt = doc.block_format_at(0).unwrap();
+    assert_eq!(fmt.line_height, Some(2.0));
+    assert_eq!(fmt.direction, Some(TextDirection::RightToLeft));
+    assert_eq!(fmt.background_color, Some("blue".to_string()));
 }
 
 // ── LaTeX export with formatting ────────────────────────────────

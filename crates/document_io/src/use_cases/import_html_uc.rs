@@ -153,6 +153,10 @@ impl LongOperation for ImportHtmlUseCase {
                 text_length: line_len,
                 document_position,
                 fmt_heading_level: parsed_block.heading_level,
+                fmt_line_height: parsed_block.line_height,
+                fmt_non_breakable_lines: parsed_block.non_breakable_lines,
+                fmt_direction: parsed_block.direction.clone(),
+                fmt_background_color: parsed_block.background_color.clone(),
                 ..Block::default()
             };
 

@@ -3,6 +3,7 @@
 pub use common::entities::Alignment;
 use common::entities::Block;
 pub use common::entities::MarkerType;
+pub use common::entities::TextDirection;
 use common::types::EntityId;
 use serde::{Deserialize, Serialize};
 use std::convert::From;
@@ -27,6 +28,10 @@ pub struct BlockDto {
     pub fmt_text_indent: Option<i64>,
     pub fmt_marker: Option<MarkerType>,
     pub fmt_tab_positions: Vec<i64>,
+    pub fmt_line_height: Option<i64>,
+    pub fmt_non_breakable_lines: Option<bool>,
+    pub fmt_direction: Option<TextDirection>,
+    pub fmt_background_color: Option<String>,
 }
 
 impl From<BlockDto> for Block {
@@ -50,6 +55,10 @@ impl From<BlockDto> for Block {
             fmt_text_indent: dto.fmt_text_indent,
             fmt_marker: dto.fmt_marker,
             fmt_tab_positions: dto.fmt_tab_positions,
+            fmt_line_height: dto.fmt_line_height,
+            fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
+            fmt_direction: dto.fmt_direction,
+            fmt_background_color: dto.fmt_background_color,
         }
     }
 }
@@ -75,6 +84,10 @@ impl From<&BlockDto> for Block {
             fmt_text_indent: dto.fmt_text_indent,
             fmt_marker: dto.fmt_marker.clone(),
             fmt_tab_positions: dto.fmt_tab_positions.clone(),
+            fmt_line_height: dto.fmt_line_height,
+            fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
+            fmt_direction: dto.fmt_direction.clone(),
+            fmt_background_color: dto.fmt_background_color.clone(),
         }
     }
 }
@@ -100,6 +113,10 @@ impl From<Block> for BlockDto {
             fmt_text_indent: entity.fmt_text_indent,
             fmt_marker: entity.fmt_marker,
             fmt_tab_positions: entity.fmt_tab_positions,
+            fmt_line_height: entity.fmt_line_height,
+            fmt_non_breakable_lines: entity.fmt_non_breakable_lines,
+            fmt_direction: entity.fmt_direction,
+            fmt_background_color: entity.fmt_background_color,
         }
     }
 }
@@ -123,6 +140,10 @@ pub struct CreateBlockDto {
     pub fmt_text_indent: Option<i64>,
     pub fmt_marker: Option<MarkerType>,
     pub fmt_tab_positions: Vec<i64>,
+    pub fmt_line_height: Option<i64>,
+    pub fmt_non_breakable_lines: Option<bool>,
+    pub fmt_direction: Option<TextDirection>,
+    pub fmt_background_color: Option<String>,
 }
 
 impl From<CreateBlockDto> for Block {
@@ -146,6 +167,10 @@ impl From<CreateBlockDto> for Block {
             fmt_text_indent: dto.fmt_text_indent,
             fmt_marker: dto.fmt_marker,
             fmt_tab_positions: dto.fmt_tab_positions,
+            fmt_line_height: dto.fmt_line_height,
+            fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
+            fmt_direction: dto.fmt_direction,
+            fmt_background_color: dto.fmt_background_color,
         }
     }
 }
@@ -171,6 +196,10 @@ impl From<&CreateBlockDto> for Block {
             fmt_text_indent: dto.fmt_text_indent,
             fmt_marker: dto.fmt_marker.clone(),
             fmt_tab_positions: dto.fmt_tab_positions.clone(),
+            fmt_line_height: dto.fmt_line_height,
+            fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
+            fmt_direction: dto.fmt_direction.clone(),
+            fmt_background_color: dto.fmt_background_color.clone(),
         }
     }
 }
@@ -195,6 +224,10 @@ impl From<Block> for CreateBlockDto {
             fmt_text_indent: entity.fmt_text_indent,
             fmt_marker: entity.fmt_marker,
             fmt_tab_positions: entity.fmt_tab_positions,
+            fmt_line_height: entity.fmt_line_height,
+            fmt_non_breakable_lines: entity.fmt_non_breakable_lines,
+            fmt_direction: entity.fmt_direction,
+            fmt_background_color: entity.fmt_background_color,
         }
     }
 }
@@ -217,6 +250,10 @@ pub struct UpdateBlockDto {
     pub fmt_text_indent: Option<i64>,
     pub fmt_marker: Option<MarkerType>,
     pub fmt_tab_positions: Vec<i64>,
+    pub fmt_line_height: Option<i64>,
+    pub fmt_non_breakable_lines: Option<bool>,
+    pub fmt_direction: Option<TextDirection>,
+    pub fmt_background_color: Option<String>,
 }
 
 impl From<UpdateBlockDto> for Block {
@@ -238,6 +275,10 @@ impl From<UpdateBlockDto> for Block {
             fmt_text_indent: dto.fmt_text_indent,
             fmt_marker: dto.fmt_marker,
             fmt_tab_positions: dto.fmt_tab_positions,
+            fmt_line_height: dto.fmt_line_height,
+            fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
+            fmt_direction: dto.fmt_direction,
+            fmt_background_color: dto.fmt_background_color,
             elements: Default::default(),
             list: Default::default(),
         }
@@ -263,6 +304,10 @@ impl From<&UpdateBlockDto> for Block {
             fmt_text_indent: dto.fmt_text_indent,
             fmt_marker: dto.fmt_marker.clone(),
             fmt_tab_positions: dto.fmt_tab_positions.clone(),
+            fmt_line_height: dto.fmt_line_height,
+            fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
+            fmt_direction: dto.fmt_direction.clone(),
+            fmt_background_color: dto.fmt_background_color.clone(),
             elements: Default::default(),
             list: Default::default(),
         }
@@ -288,6 +333,10 @@ impl From<Block> for UpdateBlockDto {
             fmt_text_indent: entity.fmt_text_indent,
             fmt_marker: entity.fmt_marker,
             fmt_tab_positions: entity.fmt_tab_positions,
+            fmt_line_height: entity.fmt_line_height,
+            fmt_non_breakable_lines: entity.fmt_non_breakable_lines,
+            fmt_direction: entity.fmt_direction,
+            fmt_background_color: entity.fmt_background_color,
         }
     }
 }
@@ -311,6 +360,10 @@ impl From<BlockDto> for UpdateBlockDto {
             fmt_text_indent: dto.fmt_text_indent,
             fmt_marker: dto.fmt_marker,
             fmt_tab_positions: dto.fmt_tab_positions,
+            fmt_line_height: dto.fmt_line_height,
+            fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
+            fmt_direction: dto.fmt_direction,
+            fmt_background_color: dto.fmt_background_color,
         }
     }
 }

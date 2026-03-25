@@ -43,6 +43,7 @@ fn test_set_block_format_single_block() -> Result<()> {
             heading_level: Some(2),
             indent: Some(1),
             marker: Some(MarkerType::Checked),
+            ..Default::default()
         },
     )?;
 
@@ -81,6 +82,7 @@ fn test_set_block_format_multiple_blocks() -> Result<()> {
             heading_level: Some(1),
             indent: Some(3),
             marker: Some(MarkerType::Unchecked),
+            ..Default::default()
         },
     )?;
 
@@ -128,6 +130,7 @@ fn test_set_block_format_undo() -> Result<()> {
             heading_level: Some(3),
             indent: Some(2),
             marker: Some(MarkerType::NoMarker),
+            ..Default::default()
         },
     )?;
 
@@ -635,6 +638,7 @@ fn test_set_block_format_empty_range() -> Result<()> {
             heading_level: Some(1),
             indent: Some(0),
             marker: Some(MarkerType::NoMarker),
+            ..Default::default()
         },
     )?;
 

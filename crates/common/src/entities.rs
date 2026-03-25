@@ -107,6 +107,10 @@ pub struct Block {
     pub fmt_text_indent: Option<i64>,
     pub fmt_marker: Option<MarkerType>,
     pub fmt_tab_positions: Vec<i64>,
+    pub fmt_line_height: Option<i64>,
+    pub fmt_non_breakable_lines: Option<bool>,
+    pub fmt_direction: Option<TextDirection>,
+    pub fmt_background_color: Option<String>,
 }
 
 impl HasId for Block {

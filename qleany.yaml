@@ -208,6 +208,22 @@ entities:
       - name: fmt_tab_positions
         type: integer
         is_list: true
+      - name: fmt_line_height
+        type: integer
+        optional: true
+      - name: fmt_non_breakable_lines
+        type: bool
+        optional: true
+      - name: fmt_direction
+        type: enum
+        enum_name: TextDirection
+        enum_values:
+          - LeftToRight
+          - RightToLeft
+        optional: true
+      - name: fmt_background_color
+        type: string
+        optional: true
 
   # ── InlineElement (text run or image within a block) ────────
   #    The content field is a complex Rust enum that carries the

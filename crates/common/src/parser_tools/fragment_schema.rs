@@ -22,6 +22,10 @@ pub struct FragmentBlock {
     pub left_margin: Option<i64>,
     pub right_margin: Option<i64>,
     pub tab_positions: Vec<i64>,
+    pub line_height: Option<i64>,
+    pub non_breakable_lines: Option<bool>,
+    pub direction: Option<TextDirection>,
+    pub background_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +122,10 @@ impl FragmentBlock {
             left_margin: block.fmt_left_margin,
             right_margin: block.fmt_right_margin,
             tab_positions: block.fmt_tab_positions.clone(),
+            line_height: block.fmt_line_height,
+            non_breakable_lines: block.fmt_non_breakable_lines,
+            direction: block.fmt_direction.clone(),
+            background_color: block.fmt_background_color.clone(),
         }
     }
 }
