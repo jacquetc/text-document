@@ -17,9 +17,9 @@ use frontend::commands::{
 use crate::convert::{self, to_i64, to_usize};
 use crate::cursor::TextCursor;
 use crate::events::{self, DocumentEvent, Subscription};
+use crate::flow::FormatChangeKind;
 use crate::inner::TextDocumentInner;
 use crate::operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Operation};
-use crate::flow::FormatChangeKind;
 use crate::{BlockFormat, BlockInfo, DocumentStats, FindMatch, FindOptions};
 
 /// A rich text document.
@@ -897,8 +897,7 @@ fn emit_undo_redo_change_events(inner: &mut TextDocumentInner, before: &[UndoBlo
                     before_state.position.max(0) as usize
                         + before_state.text_length.max(0) as usize,
                 );
-                new_end =
-                    new_end.max(pos + after_state.text_length.max(0) as usize);
+                new_end = new_end.max(pos + after_state.text_length.max(0) as usize);
             } else if format_changed {
                 let pos = after_state.position.max(0) as usize;
                 let len = after_state.text_length.max(0) as usize;
@@ -921,8 +920,7 @@ fn emit_undo_redo_change_events(inner: &mut TextDocumentInner, before: &[UndoBlo
             blocks_affected += 1;
             let pos = before_state.position.max(0) as usize;
             earliest_pos = Some(earliest_pos.map_or(pos, |p: usize| p.min(pos)));
-            old_end =
-                old_end.max(pos + before_state.text_length.max(0) as usize);
+            old_end = old_end.max(pos + before_state.text_length.max(0) as usize);
         }
     }
 

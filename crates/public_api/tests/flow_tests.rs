@@ -392,3 +392,85 @@ fn flow_cache_reset_on_document_reset() {
     let flow = doc.flow();
     assert_eq!(flow.len(), 1);
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TextDocument::blocks()
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn blocks_returns_all_blocks_sorted() {
+    let doc = new_doc_with_text("A\nB\nC");
+    let blocks = doc.blocks();
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks[0].text(), "A");
+    assert_eq!(blocks[1].text(), "B");
+    assert_eq!(blocks[2].text(), "C");
+}
+
+#[test]
+fn blocks_includes_table_cell_blocks() {
+    let doc = new_doc_with_text("Before");
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(2, 2).unwrap();
+
+    let blocks = doc.blocks();
+    // Should have more than just "Before" — table cells have blocks too
+    assert!(
+        blocks.len() > 1,
+        "blocks() should include table cell blocks, got {} blocks",
+        blocks.len()
+    );
+}
+
+#[test]
+fn blocks_empty_doc() {
+    let doc = new_doc();
+    let blocks = doc.blocks();
+    assert_eq!(blocks.len(), 1, "empty doc should have one block");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TextDocument::blocks_in_range()
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn blocks_in_range_single_block() {
+    let doc = new_doc_with_text("Hello world");
+    let blocks = doc.blocks_in_range(0, 5);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].text(), "Hello world");
+}
+
+#[test]
+fn blocks_in_range_multiple_blocks() {
+    let doc = new_doc_with_text("AAA\nBBB\nCCC");
+    // "AAA" is at position 0, length 3
+    // "BBB" is at position 4, length 3
+    // "CCC" is at position 8, length 3
+    // Range [0, 8) should intersect "AAA" and "BBB"
+    let blocks = doc.blocks_in_range(0, 8);
+    assert!(
+        blocks.len() >= 2,
+        "range [0..8) should intersect at least 2 blocks, got {}",
+        blocks.len()
+    );
+}
+
+#[test]
+fn blocks_in_range_point_query() {
+    let doc = new_doc_with_text("AAA\nBBB\nCCC");
+    // Point query at position 5 (inside "BBB")
+    let blocks = doc.blocks_in_range(5, 0);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].text(), "BBB");
+}
+
+#[test]
+fn blocks_in_range_out_of_bounds() {
+    let doc = new_doc_with_text("Hello");
+    let blocks = doc.blocks_in_range(100, 10);
+    assert!(
+        blocks.is_empty(),
+        "should return empty for out-of-bounds range"
+    );
+}

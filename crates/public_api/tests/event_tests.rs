@@ -351,6 +351,108 @@ fn undo_redo_changed_after_formatting() {
     );
 }
 
+// ── Undo/redo ContentsChanged / FormatChanged events ────────
+
+#[test]
+fn undo_emits_contents_changed() {
+    let doc = new_doc_with_text("Hello");
+    let cursor = doc.cursor_at(5);
+    cursor.insert_text(" world").unwrap();
+    doc.poll_events(); // drain edit events
+
+    doc.undo().unwrap();
+
+    let events = doc.poll_events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, DocumentEvent::ContentsChanged { .. })),
+        "undo should emit ContentsChanged, got: {:?}",
+        events
+    );
+}
+
+#[test]
+fn redo_emits_contents_changed() {
+    let doc = new_doc_with_text("Hello");
+    let cursor = doc.cursor_at(5);
+    cursor.insert_text(" world").unwrap();
+    doc.undo().unwrap();
+    doc.poll_events(); // drain
+
+    doc.redo().unwrap();
+
+    let events = doc.poll_events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, DocumentEvent::ContentsChanged { .. })),
+        "redo should emit ContentsChanged, got: {:?}",
+        events
+    );
+}
+
+#[test]
+fn undo_contents_changed_reports_affected_region() {
+    let doc = new_doc_with_text("Hello");
+    let cursor = doc.cursor_at(5);
+    cursor.insert_text(" world").unwrap();
+    doc.poll_events(); // drain
+
+    doc.undo().unwrap();
+
+    let events = doc.poll_events();
+    let content_event = events.iter().find_map(|e| match e {
+        DocumentEvent::ContentsChanged {
+            position,
+            chars_removed,
+            chars_added,
+            blocks_affected,
+        } => Some((*position, *chars_removed, *chars_added, *blocks_affected)),
+        _ => None,
+    });
+    assert!(content_event.is_some(), "should have ContentsChanged event");
+    let (pos, removed, added, affected) = content_event.unwrap();
+    // The insertion of " world" (6 chars) at position 5 was undone,
+    // so we expect the affected region to cover position 5 or earlier.
+    assert!(pos <= 5, "position should be at or before the edit point");
+    assert!(affected >= 1, "at least one block should be affected");
+    // After undo, content went from "Hello world" (11 chars) back to "Hello" (5 chars)
+    assert!(
+        removed > 0 || added > 0,
+        "should report non-zero chars_removed or chars_added"
+    );
+}
+
+#[test]
+fn undo_format_change_emits_format_changed() {
+    let doc = new_doc_with_text("Hello");
+    let cursor = doc.cursor_at(0);
+    let fmt = text_document::BlockFormat {
+        heading_level: Some(2),
+        ..Default::default()
+    };
+    cursor.set_block_format(&fmt).unwrap();
+    doc.poll_events(); // drain
+
+    doc.undo().unwrap();
+
+    let events = doc.poll_events();
+    // Should have either FormatChanged or ContentsChanged
+    // (the undo restores the block format, which may also change text layout)
+    let has_change_event = events.iter().any(|e| {
+        matches!(
+            e,
+            DocumentEvent::FormatChanged { .. } | DocumentEvent::ContentsChanged { .. }
+        )
+    });
+    assert!(
+        has_change_event,
+        "undo of format change should emit FormatChanged or ContentsChanged, got: {:?}",
+        events
+    );
+}
+
 // ── LongOperationProgress / LongOperationFinished tests ─────
 
 #[test]

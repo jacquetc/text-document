@@ -507,6 +507,69 @@ fn snapshot_block_format() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Snapshot parent context
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn snapshot_has_parent_frame_id() {
+    let doc = new_doc_with_text("Hello");
+    let block = first_block(&doc);
+    let snap = block.snapshot();
+    assert!(
+        snap.parent_frame_id.is_some(),
+        "snapshot should have parent_frame_id"
+    );
+    // The parent frame should match the block's frame
+    assert_eq!(snap.parent_frame_id.unwrap(), block.frame().id());
+}
+
+#[test]
+fn snapshot_non_table_block_has_no_table_cell() {
+    let doc = new_doc_with_text("Hello");
+    let block = first_block(&doc);
+    let snap = block.snapshot();
+    assert!(
+        snap.table_cell.is_none(),
+        "non-table block should have no table_cell context"
+    );
+}
+
+#[test]
+fn snapshot_table_cell_block_has_table_cell_context() {
+    let doc = new_doc_with_text("Before");
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(2, 2).unwrap();
+
+    // Find the table in the flow
+    let flow = doc.flow();
+    let table = flow
+        .iter()
+        .find_map(|e| match e {
+            FlowElement::Table(t) => Some(t.clone()),
+            _ => None,
+        })
+        .expect("should have a table");
+
+    // Get a cell's block
+    let cell = table.cell(0, 0).expect("cell (0,0) should exist");
+    let cell_blocks = cell.blocks();
+    assert!(
+        !cell_blocks.is_empty(),
+        "cell should have at least one block"
+    );
+
+    let snap = cell_blocks[0].snapshot();
+    assert!(
+        snap.table_cell.is_some(),
+        "block inside table cell should have table_cell context"
+    );
+    let ctx = snap.table_cell.unwrap();
+    assert_eq!(ctx.table_id, table.id());
+    assert_eq!(ctx.row, 0);
+    assert_eq!(ctx.column, 0);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Clone / Send / Sync
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -1,4 +1,4 @@
-use text_document::{FlowElement, TextDocument};
+use text_document::{FlowElement, FlowElementSnapshot, TextDocument};
 
 fn new_doc_with_text(text: &str) -> TextDocument {
     let doc = TextDocument::new();
@@ -79,6 +79,79 @@ fn frame_is_clone() {
     let frame = first_block_frame(&doc);
     let cloned = frame.clone();
     assert_eq!(frame.id(), cloned.id());
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TextFrame::snapshot()
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn frame_snapshot_captures_id_and_elements() {
+    let doc = new_doc_with_text("A\nB\nC");
+    let frame = first_block_frame(&doc);
+    let snap = frame.snapshot();
+    assert_eq!(snap.frame_id, frame.id());
+    assert_eq!(
+        snap.elements.len(),
+        3,
+        "frame snapshot should have 3 block elements"
+    );
+    // All elements should be Block snapshots
+    for el in &snap.elements {
+        assert!(
+            matches!(el, FlowElementSnapshot::Block(_)),
+            "expected Block snapshot"
+        );
+    }
+}
+
+#[test]
+fn frame_snapshot_captures_format() {
+    let doc = new_doc_with_text("Hello");
+    let frame = first_block_frame(&doc);
+    let snap = frame.snapshot();
+    // Default format — all None
+    assert_eq!(snap.format.height, None);
+    assert_eq!(snap.format.width, None);
+    assert_eq!(snap.format.border, None);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FlowElement::snapshot()
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn flow_element_snapshot_block() {
+    let doc = new_doc_with_text("Hello");
+    let flow = doc.flow();
+    let snap = flow[0].snapshot();
+    match snap {
+        FlowElementSnapshot::Block(b) => {
+            assert_eq!(b.text, "Hello");
+        }
+        _ => panic!("expected Block snapshot"),
+    }
+}
+
+#[test]
+fn flow_element_snapshot_table() {
+    let doc = new_doc_with_text("Before");
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(2, 2).unwrap();
+
+    let flow = doc.flow();
+    let table_elem = flow
+        .iter()
+        .find(|e| matches!(e, FlowElement::Table(_)))
+        .expect("should have a table");
+    let snap = table_elem.snapshot();
+    match snap {
+        FlowElementSnapshot::Table(t) => {
+            assert_eq!(t.rows, 2);
+            assert_eq!(t.columns, 2);
+        }
+        _ => panic!("expected Table snapshot"),
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
