@@ -48,6 +48,24 @@ impl TextFrame {
         let inner = self.doc.lock();
         build_flow_elements(&inner, &self.doc, self.frame_id as EntityId)
     }
+
+    /// Snapshot of this frame and all its contents, captured in a single
+    /// lock acquisition. Thread-safe — the returned [`FrameSnapshot`]
+    /// contains only plain data.
+    pub fn snapshot(&self) -> FrameSnapshot {
+        let inner = self.doc.lock();
+        let format = frame_commands::get_frame(&inner.ctx, &(self.frame_id as EntityId))
+            .ok()
+            .flatten()
+            .map(|f| frame_dto_to_format(&f))
+            .unwrap_or_default();
+        let elements = build_flow_snapshot(&inner, self.frame_id as EntityId);
+        FrameSnapshot {
+            frame_id: self.frame_id,
+            format,
+            elements,
+        }
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
