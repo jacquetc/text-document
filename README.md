@@ -19,8 +19,8 @@ Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architectu
 - **Search**: Find, find all, regex, replace (undoable)
 - **Formatting**: Character format (`bold`, `italic`, `underline`, ...), block format (`alignment`, `heading_level`, ...), frame format
 - **Tables**: Insert, remove, row/column operations, cell merge/split, table/cell formatting, cursor-position-based convenience methods
-- **Layout engine API**: Read-only handles (`TextBlock`, `TextFrame`, `TextTable`, `TextTableCell`, `TextList`), flow traversal, fragment-based text shaping, atomic snapshots, incremental change events
-- **Event system**: Callback-based (`on_change`) and polling-based (`poll_events`), with `FormatChangeKind` (Block vs Character) and flow-level insert/remove events
+- **Layout engine API**: Read-only handles (`TextBlock`, `TextFrame`, `TextTable`, `TextTableCell`, `TextList`), flow traversal, fragment-based text shaping, atomic snapshots (`TextFrame::snapshot()`, `FlowElement::snapshot()`), block parent context (`parent_frame_id`, `TableCellContext`), efficient block queries (`blocks()`, `blocks_in_range()`), incremental change events
+- **Event system**: Callback-based (`on_change`) and polling-based (`poll_events`), with `FormatChangeKind` (Block vs Character), flow-level insert/remove events, and granular `ContentsChanged`/`FormatChanged` on undo/redo
 - **Thread-safe**: `Send + Sync` throughout, `Arc<Mutex<...>>` interior mutability
 - **Resources**: Image and stylesheet storage with base64 encoding
 
@@ -99,6 +99,17 @@ let snap = doc.snapshot_flow();
 let block = doc.block_at_position(0).unwrap();
 let next = block.next(); // O(n) traversal
 let snap = block.snapshot(); // all data in one lock
+// snap.parent_frame_id  — which frame owns this block
+// snap.table_cell        — Some(TableCellContext) if inside a table cell
+
+// Efficient block iteration (O(n) instead of O(n²))
+let all_blocks = doc.blocks();
+let affected = doc.blocks_in_range(10, 50); // blocks in char range [10..60)
+
+// Frame and flow element snapshots
+let frame = block.frame();
+let frame_snap = frame.snapshot(); // FrameSnapshot with nested content
+let elem_snap = doc.flow()[0].snapshot(); // FlowElementSnapshot
 ```
 
 ## Table operations
@@ -192,10 +203,10 @@ All format fields are `Option<T>` — `None` means "inherit from parent/default"
 
 | Handle | Obtained from | Purpose |
 |--------|---------------|---------|
-| `TextDocument` | `TextDocument::new()` | Document-level operations, flow traversal |
+| `TextDocument` | `TextDocument::new()` | Document-level operations, flow traversal, `blocks()`, `blocks_in_range()` |
 | `TextCursor` | `doc.cursor()` / `doc.cursor_at(pos)` | All mutations (text, formatting, tables, lists) |
-| `TextBlock` | `doc.flow()`, `doc.block_at_position()`, etc. | Read-only block data, fragments, list membership |
-| `TextFrame` | `block.frame()`, `FlowElement::Frame` | Read-only frame data, nested flow |
+| `TextBlock` | `doc.flow()`, `doc.blocks()`, etc. | Read-only block data, fragments, list membership, `snapshot()` with parent context |
+| `TextFrame` | `block.frame()`, `FlowElement::Frame` | Read-only frame data, nested flow, `snapshot()` |
 | `TextTable` | `cursor.insert_table()`, `FlowElement::Table` | Read-only table structure, cell access, snapshot |
 | `TextTableCell` | `table.cell(row, col)` | Read-only cell data, blocks within cell |
 | `TextList` | `block.list()` | Read-only list properties, item markers |
