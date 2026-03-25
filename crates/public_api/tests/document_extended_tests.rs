@@ -143,6 +143,9 @@ fn set_text_format_full() {
         anchor_names: vec![],
         is_anchor: None,
         tooltip: None,
+        foreground_color: None,
+        background_color: None,
+        underline_color: None,
     };
     c.set_char_format(&fmt).unwrap();
 }

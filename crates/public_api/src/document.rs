@@ -149,6 +149,7 @@ impl TextDocument {
             document_io_commands::import_plain_text(&inner.ctx, &dto)?;
             undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.queue_event(DocumentEvent::DocumentReset);
             inner.check_block_count_changed();
             inner.reset_cached_child_order();
@@ -281,6 +282,7 @@ impl TextDocument {
             document_io_commands::import_plain_text(&inner.ctx, &dto)?;
             undo_redo_commands::clear_stack(&inner.ctx, inner.stack_id);
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.queue_event(DocumentEvent::DocumentReset);
             inner.check_block_count_changed();
             inner.reset_cached_child_order();
@@ -563,6 +565,7 @@ impl TextDocument {
             inner.invalidate_text_cache();
             if count > 0 {
                 inner.modified = true;
+                inner.rehighlight_all();
                 // Replacements are scattered across the document — we can't
                 // provide a single position/chars delta. Signal "content changed
                 // from position 0, affecting `count` sites" so the consumer
@@ -654,6 +657,7 @@ impl TextDocument {
             let result = undo_redo_commands::undo(&inner.ctx, Some(inner.stack_id));
             inner.invalidate_text_cache();
             result?;
+            inner.rehighlight_all();
             emit_undo_redo_change_events(&mut inner, &before);
             inner.check_block_count_changed();
             inner.check_flow_changed();
@@ -674,6 +678,7 @@ impl TextDocument {
             let result = undo_redo_commands::redo(&inner.ctx, Some(inner.stack_id));
             inner.invalidate_text_cache();
             result?;
+            inner.rehighlight_all();
             emit_undo_redo_change_events(&mut inner, &before);
             inner.check_block_count_changed();
             inner.check_flow_changed();
@@ -823,6 +828,45 @@ impl TextDocument {
     pub fn poll_events(&self) -> Vec<DocumentEvent> {
         let mut inner = self.inner.lock();
         inner.drain_poll_events()
+    }
+
+    // ── Syntax highlighting ──────────────────────────────────
+
+    /// Attach a syntax highlighter to this document.
+    ///
+    /// Immediately re-highlights the entire document. Replaces any
+    /// previously attached highlighter. Pass `None` to remove the
+    /// highlighter and clear all highlight formatting.
+    pub fn set_syntax_highlighter(&self, highlighter: Option<Arc<dyn crate::SyntaxHighlighter>>) {
+        let mut inner = self.inner.lock();
+        match highlighter {
+            Some(hl) => {
+                inner.highlight = Some(crate::highlight::HighlightData {
+                    highlighter: hl,
+                    blocks: std::collections::HashMap::new(),
+                });
+                inner.rehighlight_all();
+            }
+            None => {
+                inner.highlight = None;
+            }
+        }
+    }
+
+    /// Re-highlight the entire document.
+    ///
+    /// Call this when the highlighter's rules change (e.g., new keywords
+    /// were added, spellcheck dictionary updated).
+    pub fn rehighlight(&self) {
+        let mut inner = self.inner.lock();
+        inner.rehighlight_all();
+    }
+
+    /// Re-highlight a single block and cascade to subsequent blocks if
+    /// the block state changes.
+    pub fn rehighlight_block(&self, block_id: usize) {
+        let mut inner = self.inner.lock();
+        inner.rehighlight_from_block(block_id);
     }
 }
 

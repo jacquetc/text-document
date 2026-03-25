@@ -392,8 +392,23 @@ fn compute_block_number(inner: &TextDocumentInner, block_id: u64) -> usize {
     sorted.iter().position(|b| b.id == block_id).unwrap_or(0)
 }
 
-/// Build fragments for a block from its InlineElements.
+/// Build fragments for a block from its InlineElements, with highlight
+/// spans merged in when a syntax highlighter is attached.
 pub(crate) fn build_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<FragmentContent> {
+    let fragments = build_raw_fragments(inner, block_id);
+
+    if let Some(ref hl) = inner.highlight
+        && let Some(block_hl) = hl.blocks.get(&(block_id as usize))
+        && !block_hl.spans.is_empty()
+    {
+        return crate::highlight::merge_highlight_spans(fragments, &block_hl.spans);
+    }
+
+    fragments
+}
+
+/// Build raw fragments from InlineElements (no highlight merge).
+fn build_raw_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<FragmentContent> {
     let block_dto = match block_commands::get_block(&inner.ctx, &block_id)
         .ok()
         .flatten()

@@ -235,6 +235,9 @@ impl From<&frontend::inline_element::dtos::InlineElementDto> for TextFormat {
             anchor_names: el.fmt_anchor_names.clone(),
             is_anchor: el.fmt_is_anchor,
             tooltip: el.fmt_tooltip.clone(),
+            foreground_color: None,
+            background_color: None,
+            underline_color: None,
         }
     }
 }

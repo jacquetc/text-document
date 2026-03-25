@@ -81,6 +81,7 @@ impl TextCursor {
         }
         inner.modified = true;
         inner.invalidate_text_cache();
+        inner.rehighlight_affected(edit_pos);
         inner.queue_event(DocumentEvent::ContentsChanged {
             position: edit_pos,
             chars_removed: removed,
@@ -564,6 +565,7 @@ impl TextCursor {
             // The backend doesn't return a new_position, so the cursor stays put.
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_affected(pos.min(anchor));
             inner.queue_event(DocumentEvent::ContentsChanged {
                 position: pos.min(anchor),
                 chars_removed: 0,
@@ -605,6 +607,7 @@ impl TextCursor {
             }
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_affected(pos.min(anchor));
             inner.queue_event(DocumentEvent::ContentsChanged {
                 position: pos.min(anchor),
                 chars_removed: 0,
@@ -664,6 +667,7 @@ impl TextCursor {
             document_editing_commands::remove_table(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.check_block_count_changed();
             inner.check_flow_changed();
             self.queue_undo_redo_event(&mut inner)
@@ -683,6 +687,7 @@ impl TextCursor {
             document_editing_commands::insert_table_row(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.check_block_count_changed();
             self.queue_undo_redo_event(&mut inner)
         };
@@ -701,6 +706,7 @@ impl TextCursor {
             document_editing_commands::insert_table_column(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.check_block_count_changed();
             self.queue_undo_redo_event(&mut inner)
         };
@@ -719,6 +725,7 @@ impl TextCursor {
             document_editing_commands::remove_table_row(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.check_block_count_changed();
             self.queue_undo_redo_event(&mut inner)
         };
@@ -737,6 +744,7 @@ impl TextCursor {
             document_editing_commands::remove_table_column(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.check_block_count_changed();
             self.queue_undo_redo_event(&mut inner)
         };
@@ -765,6 +773,7 @@ impl TextCursor {
             document_editing_commands::merge_table_cells(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.check_block_count_changed();
             self.queue_undo_redo_event(&mut inner)
         };
@@ -789,6 +798,7 @@ impl TextCursor {
             document_editing_commands::split_table_cell(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_all();
             inner.check_block_count_changed();
             self.queue_undo_redo_event(&mut inner)
         };
@@ -1042,6 +1052,7 @@ impl TextCursor {
             }
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_affected(edit_pos);
             inner.queue_event(DocumentEvent::ContentsChanged {
                 position: edit_pos,
                 chars_removed: removed,
@@ -1071,6 +1082,7 @@ impl TextCursor {
             };
             document_editing_commands::create_list(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
+            inner.rehighlight_affected(pos.min(anchor));
             inner.queue_event(DocumentEvent::ContentsChanged {
                 position: pos.min(anchor),
                 chars_removed: 0,
@@ -1284,6 +1296,7 @@ impl TextCursor {
             }
             inner.modified = true;
             inner.invalidate_text_cache();
+            inner.rehighlight_affected(edit_pos);
             inner.queue_event(DocumentEvent::ContentsChanged {
                 position: edit_pos,
                 chars_removed: removed,

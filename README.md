@@ -18,6 +18,7 @@ Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architectu
 - **Import/Export**: Plain text, Markdown, HTML, LaTeX, DOCX
 - **Search**: Find, find all, regex, replace (undoable)
 - **Formatting**: Character format (`bold`, `italic`, `underline`, ...), block format (`alignment`, `heading_level`, ...), frame format
+- **Syntax highlighting**: Generic `SyntaxHighlighter` trait (Qt's QSyntaxHighlighter-style) — shadow formatting layer visible to layout but invisible to export/cursor/undo. Multi-block state, per-block user data, full format control (colors, bold, italic, underline styles, ...). Auto re-highlights on edits with cascade.
 - **Tables**: Insert, remove, row/column operations, cell merge/split, table/cell formatting, cursor-position-based convenience methods
 - **Layout engine API**: Read-only handles (`TextBlock`, `TextFrame`, `TextTable`, `TextTableCell`, `TextList`), flow traversal, fragment-based text shaping, atomic snapshots (`TextFrame::snapshot()`, `FlowElement::snapshot()`), block parent context (`parent_frame_id`, `TableCellContext`), efficient block queries (`blocks()`, `blocks_in_range()`), incremental change events
 - **Event system**: Callback-based (`on_change`) and polling-based (`poll_events`), with `FormatChangeKind` (Block vs Character), flow-level insert/remove events, and granular `ContentsChanged`/`FormatChanged` on undo/redo
@@ -134,6 +135,48 @@ cursor.remove_table_column(table.id(), 0).unwrap(); // remove first column
 // cursor.insert_row_above().unwrap();
 // cursor.remove_current_column().unwrap();
 // cursor.set_current_table_format(&format).unwrap();
+```
+
+## Syntax highlighting
+
+Attach a `SyntaxHighlighter` to apply visual-only formatting (spellcheck underlines, code coloring, search highlights, ...) that the layout engine sees but export/cursor/undo ignore:
+
+```rust
+use std::sync::Arc;
+use text_document::{
+    TextDocument, SyntaxHighlighter, HighlightContext, HighlightFormat,
+    Color, UnderlineStyle,
+};
+
+// Spellcheck highlighter example
+struct SpellChecker;
+
+impl SyntaxHighlighter for SpellChecker {
+    fn highlight_block(&self, text: &str, ctx: &mut HighlightContext) {
+        // Mark "wrold" as misspelled wherever it appears
+        for (i, _) in text.match_indices("wrold") {
+            let char_offset = text[..i].chars().count();
+            ctx.set_format(char_offset, 5, HighlightFormat {
+                underline_style: Some(UnderlineStyle::SpellCheckUnderline),
+                underline_color: Some(Color::rgb(255, 0, 0)),
+                ..Default::default()
+            });
+        }
+    }
+}
+
+let doc = TextDocument::new();
+doc.set_plain_text("Hello wrold").unwrap();
+doc.set_syntax_highlighter(Some(Arc::new(SpellChecker)));
+
+// Layout sees the wavy underline; export/undo don't
+assert_eq!(doc.to_plain_text().unwrap(), "Hello wrold");
+
+// Multi-block state for constructs like /* ... */ comments:
+// use ctx.previous_block_state() and ctx.set_current_block_state(n)
+
+// Force re-highlight after rule changes (e.g. dictionary update):
+doc.rehighlight();
 ```
 
 ## CLI

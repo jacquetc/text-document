@@ -30,6 +30,7 @@ mod document;
 mod events;
 mod flow;
 mod fragment;
+mod highlight;
 mod inner;
 mod operation;
 mod text_block;
@@ -53,6 +54,7 @@ pub use cursor::TextCursor;
 pub use document::TextDocument;
 pub use events::{DocumentEvent, Subscription};
 pub use fragment::DocumentFragment;
+pub use highlight::{HighlightContext, HighlightFormat, HighlightSpan, SyntaxHighlighter};
 pub use operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Operation};
 
 // ── Layout engine API types ─────────────────────────────────────
@@ -82,6 +84,41 @@ const _: () = {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Color
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// An RGBA color value. Each component is 0–255.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Color {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub alpha: u8,
+}
+
+impl Color {
+    /// Create an opaque color (alpha = 255).
+    pub fn rgb(red: u8, green: u8, blue: u8) -> Self {
+        Self {
+            red,
+            green,
+            blue,
+            alpha: 255,
+        }
+    }
+
+    /// Create a color with explicit alpha.
+    pub fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> Self {
+        Self {
+            red,
+            green,
+            blue,
+            alpha,
+        }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Public format types
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -105,6 +142,9 @@ pub struct TextFormat {
     pub anchor_names: Vec<String>,
     pub is_anchor: Option<bool>,
     pub tooltip: Option<String>,
+    pub foreground_color: Option<Color>,
+    pub background_color: Option<Color>,
+    pub underline_color: Option<Color>,
 }
 
 /// Block (paragraph) formatting. All fields are optional.

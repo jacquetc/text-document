@@ -30,6 +30,7 @@ use frontend::EventHubClient;
 use frontend::common::types::EntityId;
 
 use crate::DocumentEvent;
+use crate::highlight::HighlightData;
 
 /// Cursor position data stored inside the document for automatic adjustment.
 pub(crate) struct CursorData {
@@ -88,6 +89,9 @@ pub(crate) struct TextDocumentInner {
     // Last known child_order of the main frame, used to detect flow changes
     // and emit FlowElementsInserted/FlowElementsRemoved.
     pub last_child_order: Vec<i64>,
+
+    // Syntax highlighting state (shadow formatting layer).
+    pub highlight: Option<HighlightData>,
 }
 
 impl TextDocumentInner {
@@ -374,6 +378,7 @@ impl TextDocumentInner {
             plain_text_cache: None,
             last_block_count: 1, // new document starts with one block
             last_child_order: vec![block.id as i64],
+            highlight: None,
         })
     }
 }
