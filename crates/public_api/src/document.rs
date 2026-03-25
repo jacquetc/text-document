@@ -19,6 +19,7 @@ use crate::cursor::TextCursor;
 use crate::events::{self, DocumentEvent, Subscription};
 use crate::inner::TextDocumentInner;
 use crate::operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Operation};
+use crate::flow::FormatChangeKind;
 use crate::{BlockFormat, BlockInfo, DocumentStats, FindMatch, FindOptions};
 
 /// A rich text document.
@@ -451,6 +452,66 @@ impl TextDocument {
             })
     }
 
+    /// All blocks in the document, sorted by `document_position`. **O(n)**.
+    ///
+    /// Returns blocks from all frames, including those inside table cells.
+    /// This is the efficient way to iterate all blocks — avoids the O(n^2)
+    /// cost of calling `block_by_number(i)` in a loop.
+    pub fn blocks(&self) -> Vec<crate::text_block::TextBlock> {
+        let inner = self.inner.lock();
+        let all_blocks =
+            frontend::commands::block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+        let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        sorted.sort_by_key(|b| b.document_position);
+        sorted
+            .iter()
+            .map(|b| crate::text_block::TextBlock {
+                doc: self.inner.clone(),
+                block_id: b.id as usize,
+            })
+            .collect()
+    }
+
+    /// All blocks whose character range intersects `[position, position + length)`.
+    ///
+    /// **O(n)**: scans all blocks once. Returns them sorted by `document_position`.
+    /// A block intersects if its range `[block.position, block.position + block.length)`
+    /// overlaps the query range. An empty query range (`length == 0`) returns the
+    /// block containing that position, if any.
+    pub fn blocks_in_range(
+        &self,
+        position: usize,
+        length: usize,
+    ) -> Vec<crate::text_block::TextBlock> {
+        let inner = self.inner.lock();
+        let all_blocks =
+            frontend::commands::block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+        let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        sorted.sort_by_key(|b| b.document_position);
+
+        let range_start = position;
+        let range_end = position + length;
+
+        sorted
+            .iter()
+            .filter(|b| {
+                let block_start = b.document_position.max(0) as usize;
+                let block_end = block_start + b.text_length.max(0) as usize;
+                // Overlap check: block intersects [range_start, range_end)
+                if length == 0 {
+                    // Point query: block contains the position
+                    range_start >= block_start && range_start < block_end
+                } else {
+                    block_start < range_end && block_end > range_start
+                }
+            })
+            .map(|b| crate::text_block::TextBlock {
+                doc: self.inner.clone(),
+                block_id: b.id as usize,
+            })
+            .collect()
+    }
+
     /// Snapshot the entire main flow in a single lock acquisition.
     ///
     /// Returns a [`FlowSnapshot`](crate::FlowSnapshot) containing snapshots
@@ -589,9 +650,11 @@ impl TextDocument {
     pub fn undo(&self) -> Result<()> {
         let queued = {
             let mut inner = self.inner.lock();
+            let before = capture_block_state(&inner);
             let result = undo_redo_commands::undo(&inner.ctx, Some(inner.stack_id));
             inner.invalidate_text_cache();
             result?;
+            emit_undo_redo_change_events(&mut inner, &before);
             inner.check_block_count_changed();
             inner.check_flow_changed();
             let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
@@ -607,9 +670,11 @@ impl TextDocument {
     pub fn redo(&self) -> Result<()> {
         let queued = {
             let mut inner = self.inner.lock();
+            let before = capture_block_state(&inner);
             let result = undo_redo_commands::redo(&inner.ctx, Some(inner.stack_id));
             inner.invalidate_text_cache();
             result?;
+            emit_undo_redo_change_events(&mut inner, &before);
             inner.check_block_count_changed();
             inner.check_flow_changed();
             let can_undo = undo_redo_commands::can_undo(&inner.ctx, Some(inner.stack_id));
@@ -764,6 +829,120 @@ impl TextDocument {
 impl Default for TextDocument {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Undo/redo change detection helpers ─────────────────────────
+
+/// Lightweight block state for before/after comparison during undo/redo.
+struct UndoBlockState {
+    id: u64,
+    position: i64,
+    text_length: i64,
+    plain_text: String,
+    format: BlockFormat,
+}
+
+/// Capture the state of all blocks, sorted by document_position.
+fn capture_block_state(inner: &TextDocumentInner) -> Vec<UndoBlockState> {
+    let all_blocks =
+        frontend::commands::block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+    let mut states: Vec<UndoBlockState> = all_blocks
+        .into_iter()
+        .map(|b| UndoBlockState {
+            id: b.id,
+            position: b.document_position,
+            text_length: b.text_length,
+            plain_text: b.plain_text.clone(),
+            format: BlockFormat::from(&b),
+        })
+        .collect();
+    states.sort_by_key(|s| s.position);
+    states
+}
+
+/// Compare block state before and after undo/redo and emit
+/// ContentsChanged / FormatChanged events for affected regions.
+fn emit_undo_redo_change_events(inner: &mut TextDocumentInner, before: &[UndoBlockState]) {
+    let after = capture_block_state(inner);
+
+    // Build a map of block id → state for the "before" set.
+    let before_map: std::collections::HashMap<u64, &UndoBlockState> =
+        before.iter().map(|s| (s.id, s)).collect();
+    let after_map: std::collections::HashMap<u64, &UndoBlockState> =
+        after.iter().map(|s| (s.id, s)).collect();
+
+    // Track the affected content region (earliest position, total old/new length).
+    let mut content_changed = false;
+    let mut earliest_pos: Option<usize> = None;
+    let mut old_end: usize = 0;
+    let mut new_end: usize = 0;
+    let mut blocks_affected: usize = 0;
+
+    let mut format_only_changes: Vec<(usize, usize)> = Vec::new(); // (position, length)
+
+    // Check blocks present in both before and after.
+    for after_state in &after {
+        if let Some(before_state) = before_map.get(&after_state.id) {
+            let text_changed = before_state.plain_text != after_state.plain_text
+                || before_state.text_length != after_state.text_length;
+            let format_changed = before_state.format != after_state.format;
+
+            if text_changed {
+                content_changed = true;
+                blocks_affected += 1;
+                let pos = after_state.position.max(0) as usize;
+                earliest_pos = Some(earliest_pos.map_or(pos, |p: usize| p.min(pos)));
+                old_end = old_end.max(
+                    before_state.position.max(0) as usize
+                        + before_state.text_length.max(0) as usize,
+                );
+                new_end =
+                    new_end.max(pos + after_state.text_length.max(0) as usize);
+            } else if format_changed {
+                let pos = after_state.position.max(0) as usize;
+                let len = after_state.text_length.max(0) as usize;
+                format_only_changes.push((pos, len));
+            }
+        } else {
+            // Block exists in after but not in before — new block from undo/redo.
+            content_changed = true;
+            blocks_affected += 1;
+            let pos = after_state.position.max(0) as usize;
+            earliest_pos = Some(earliest_pos.map_or(pos, |p: usize| p.min(pos)));
+            new_end = new_end.max(pos + after_state.text_length.max(0) as usize);
+        }
+    }
+
+    // Check blocks that were removed (present in before but not after).
+    for before_state in before {
+        if !after_map.contains_key(&before_state.id) {
+            content_changed = true;
+            blocks_affected += 1;
+            let pos = before_state.position.max(0) as usize;
+            earliest_pos = Some(earliest_pos.map_or(pos, |p: usize| p.min(pos)));
+            old_end =
+                old_end.max(pos + before_state.text_length.max(0) as usize);
+        }
+    }
+
+    if content_changed {
+        let position = earliest_pos.unwrap_or(0);
+        inner.queue_event(DocumentEvent::ContentsChanged {
+            position,
+            chars_removed: old_end.saturating_sub(position),
+            chars_added: new_end.saturating_sub(position),
+            blocks_affected,
+        });
+    }
+
+    // Emit FormatChanged for blocks where only formatting changed (not content).
+    for (position, length) in format_only_changes {
+        inner.queue_event(DocumentEvent::FormatChanged {
+            position,
+            length,
+            kind: FormatChangeKind::Block,
+        });
     }
 }
 
