@@ -32,6 +32,20 @@ pub enum FlowElement {
     Frame(TextFrame),
 }
 
+impl FlowElement {
+    /// Snapshot this element into a thread-safe, plain-data representation.
+    ///
+    /// Dispatches to [`TextBlock::snapshot()`], [`TextTable::snapshot()`],
+    /// or [`TextFrame::snapshot()`] as appropriate.
+    pub fn snapshot(&self) -> FlowElementSnapshot {
+        match self {
+            FlowElement::Block(b) => FlowElementSnapshot::Block(b.snapshot()),
+            FlowElement::Table(t) => FlowElementSnapshot::Table(t.snapshot()),
+            FlowElement::Frame(f) => FlowElementSnapshot::Frame(f.snapshot()),
+        }
+    }
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // FragmentContent
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -80,6 +94,21 @@ pub struct BlockSnapshot {
     pub fragments: Vec<FragmentContent>,
     pub block_format: BlockFormat,
     pub list_info: Option<ListInfo>,
+    /// Parent frame ID. Needed to know where this block lives in the
+    /// frame tree (e.g. main frame vs. a sub-frame or table cell frame).
+    pub parent_frame_id: Option<usize>,
+    /// If this block is inside a table cell, the cell coordinates.
+    /// Needed so the typesetter can propagate height changes to the
+    /// enclosing table row.
+    pub table_cell: Option<TableCellContext>,
+}
+
+/// Snapshot-friendly reference to a table cell (plain IDs, no live handles).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableCellContext {
+    pub table_id: usize,
+    pub row: usize,
+    pub column: usize,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

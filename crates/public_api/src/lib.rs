@@ -59,7 +59,7 @@ pub use operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Op
 pub use flow::{
     BlockSnapshot, CellFormat, CellSnapshot, CellVerticalAlignment, FlowElement,
     FlowElementSnapshot, FlowSnapshot, FormatChangeKind, FragmentContent, FrameSnapshot, ListInfo,
-    TableCellRef, TableFormat, TableSnapshot,
+    TableCellContext, TableCellRef, TableFormat, TableSnapshot,
 };
 pub use text_block::TextBlock;
 pub use text_frame::TextFrame;

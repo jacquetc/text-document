@@ -9,7 +9,7 @@ use frontend::common::types::EntityId;
 use frontend::inline_element::dtos::InlineContent;
 
 use crate::convert::to_usize;
-use crate::flow::{BlockSnapshot, FragmentContent, ListInfo, TableCellRef};
+use crate::flow::{BlockSnapshot, FragmentContent, ListInfo, TableCellContext, TableCellRef};
 use crate::inner::TextDocumentInner;
 use crate::text_frame::TextFrame;
 use crate::text_list::TextList;
@@ -308,6 +308,8 @@ impl TextBlock {
             fragments: Vec::new(),
             block_format: BlockFormat::default(),
             list_info: None,
+            parent_frame_id: None,
+            table_cell: None,
         })
     }
 }
@@ -325,6 +327,60 @@ fn find_parent_frame(inner: &TextDocumentInner, block_id: u64) -> Option<EntityI
             return Some(frame.id as EntityId);
         }
     }
+    None
+}
+
+/// Find table cell context for a block (snapshot-friendly, no live handles).
+/// Returns `None` if the block is not inside a table cell.
+fn find_table_cell_context(inner: &TextDocumentInner, block_id: u64) -> Option<TableCellContext> {
+    let frame_id = find_parent_frame(inner, block_id)?;
+
+    let frame_dto = frame_commands::get_frame(&inner.ctx, &frame_id)
+        .ok()
+        .flatten()?;
+
+    // Fast path: anchor frame with `table` field set
+    if let Some(table_entity_id) = frame_dto.table {
+        let table_dto =
+            frontend::commands::table_commands::get_table(&inner.ctx, &{ table_entity_id })
+                .ok()
+                .flatten()?;
+        for &cell_id in &table_dto.cells {
+            if let Some(cell_dto) =
+                frontend::commands::table_cell_commands::get_table_cell(&inner.ctx, &{ cell_id })
+                    .ok()
+                    .flatten()
+                && cell_dto.cell_frame == Some(frame_id)
+            {
+                return Some(TableCellContext {
+                    table_id: table_entity_id as usize,
+                    row: to_usize(cell_dto.row),
+                    column: to_usize(cell_dto.column),
+                });
+            }
+        }
+    }
+
+    // Slow path: scan all tables for a cell referencing this frame
+    let all_tables =
+        frontend::commands::table_commands::get_all_table(&inner.ctx).unwrap_or_default();
+    for table_dto in &all_tables {
+        for &cell_id in &table_dto.cells {
+            if let Some(cell_dto) =
+                frontend::commands::table_cell_commands::get_table_cell(&inner.ctx, &{ cell_id })
+                    .ok()
+                    .flatten()
+                && cell_dto.cell_frame == Some(frame_id)
+            {
+                return Some(TableCellContext {
+                    table_id: table_dto.id as usize,
+                    row: to_usize(cell_dto.row),
+                    column: to_usize(cell_dto.column),
+                });
+            }
+        }
+    }
+
     None
 }
 
@@ -507,6 +563,9 @@ pub(crate) fn build_block_snapshot(
     let block_format = BlockFormat::from(&block_dto);
     let list_info = build_list_info(inner, &block_dto);
 
+    let parent_frame_id = find_parent_frame(inner, block_id).map(|id| id as usize);
+    let table_cell = find_table_cell_context(inner, block_id);
+
     Some(BlockSnapshot {
         block_id: block_id as usize,
         position: to_usize(block_dto.document_position),
@@ -515,6 +574,8 @@ pub(crate) fn build_block_snapshot(
         fragments,
         block_format,
         list_info,
+        parent_frame_id,
+        table_cell,
     })
 }
 
