@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Root {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub document: EntityId,
 }
@@ -21,7 +23,9 @@ impl HasId for Root {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Document {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub title: String,
     pub frames: Vec<EntityId>,
@@ -57,7 +61,9 @@ pub enum WrapMode {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Frame {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub parent_frame: Option<EntityId>,
     pub blocks: Vec<EntityId>,
@@ -90,7 +96,9 @@ pub enum FramePosition {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Block {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub elements: Vec<EntityId>,
     pub list: Option<EntityId>,
@@ -137,7 +145,9 @@ pub enum MarkerType {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct InlineElement {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub content: InlineContent,
     pub fmt_font_family: Option<String>,
@@ -202,7 +212,9 @@ pub enum CharVerticalAlignment {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct List {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub style: ListStyle,
     pub indent: i64,
@@ -231,7 +243,9 @@ pub enum ListStyle {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Resource {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub resource_type: ResourceType,
     pub name: String,
@@ -256,7 +270,9 @@ pub enum ResourceType {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Table {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub cells: Vec<EntityId>,
     pub rows: i64,
@@ -278,7 +294,9 @@ impl HasId for Table {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TableCell {
     pub id: EntityId,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub row: i64,
     pub column: i64,
