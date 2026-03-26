@@ -61,8 +61,13 @@ test_harness = { version = "0.0.20", path = "crates/test_harness", package = "te
 [profile.release]
 lto = "fat"
 panic = "abort"
-strip = true
+strip = false
 codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true
+lto = false
 
 [workspace.lints.rust]
 
