@@ -379,12 +379,13 @@ impl TextCursor {
 
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(
+            self.finish_edit_ext(
                 &mut inner,
                 edit_pos,
                 removed,
                 to_usize(result.new_position),
                 to_usize(result.blocks_affected),
+                false,
             )
         };
         crate::inner::dispatch_queued_events(queued);
