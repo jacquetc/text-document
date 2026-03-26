@@ -6,3 +6,5 @@ files.extend-exclude = [
 # Acronyms
 als = "als"
 lits = "lits"
+ths = "ths"
+wrold = "wrold"
