@@ -445,3 +445,385 @@ fn test_insert_block_undo() -> Result<()> {
 
     Ok(())
 }
+
+// ── InsertText merge tests ─────────────────────────────────────
+
+#[test]
+fn test_insert_text_merge_consecutive_chars() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Type "a", "b", "c" consecutively at positions 5, 6, 7
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 5,
+            text: "a".to_string(),
+        },
+    )?;
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 6,
+            anchor: 6,
+            text: "b".to_string(),
+        },
+    )?;
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 7,
+            anchor: 7,
+            text: "c".to_string(),
+        },
+    )?;
+
+    let text = export_text(&db_context, &event_hub)?;
+    assert_eq!(text, "Helloabc");
+
+    // All three should have merged into 1 undo command
+    assert_eq!(undo_redo_manager.get_stack_size(0), 1);
+
+    // Single undo restores original
+    undo_redo_manager.undo(None)?;
+    let text = export_text(&db_context, &event_hub)?;
+    assert_eq!(text, "Hello");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_text_merge_undo_redo() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Type "W", "o", "r", "l", "d" consecutively
+    for (i, ch) in "World".chars().enumerate() {
+        document_editing_controller::insert_text(
+            &db_context,
+            &event_hub,
+            &mut undo_redo_manager,
+            None,
+            &InsertTextDto {
+                position: 5 + i as i64,
+                anchor: 5 + i as i64,
+                text: ch.to_string(),
+            },
+        )?;
+    }
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "HelloWorld");
+    assert_eq!(undo_redo_manager.get_stack_size(0), 1);
+
+    // Undo restores original
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    // Redo replays the combined insert
+    undo_redo_manager.redo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "HelloWorld");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_text_no_merge_non_contiguous() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Insert "a" at position 5
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 5,
+            text: "a".to_string(),
+        },
+    )?;
+
+    // Insert "b" at position 0 (non-contiguous)
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 0,
+            anchor: 0,
+            text: "b".to_string(),
+        },
+    )?;
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "bHelloa");
+    // Should NOT merge — 2 separate commands
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    // Undo the second insert
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Helloa");
+
+    // Undo the first insert
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_text_no_merge_with_selection() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Insert "a" at position 5
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 5,
+            text: "a".to_string(),
+        },
+    )?;
+
+    // Replace selection [5..6) with "b" (selection replacement)
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 6,
+            text: "b".to_string(),
+        },
+    )?;
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hellob");
+    // Should NOT merge — 2 separate commands
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_text_merge_word_boundary() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Type "a", "b" at positions 5, 6
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 5,
+            text: "a".to_string(),
+        },
+    )?;
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 6,
+            anchor: 6,
+            text: "b".to_string(),
+        },
+    )?;
+
+    // Type " " (space) at position 7 — merges because accumulated "ab" ends with "b" (not a boundary)
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 7,
+            anchor: 7,
+            text: " ".to_string(),
+        },
+    )?;
+
+    // Type "c" at position 8 — should NOT merge because accumulated "ab " ends with space
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 8,
+            anchor: 8,
+            text: "c".to_string(),
+        },
+    )?;
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "Helloab c");
+    // 2 groups: "ab " and "c"
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    // Undo removes "c"
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Helloab ");
+
+    // Undo removes "ab "
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_text_merge_max_length() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("")?;
+
+    // Insert a 200-char string as one insert (fills the merge limit)
+    let long_text: String = "x".repeat(200);
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 0,
+            anchor: 0,
+            text: long_text.clone(),
+        },
+    )?;
+
+    // Insert one more char — should NOT merge (would exceed 200)
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 200,
+            anchor: 200,
+            text: "y".to_string(),
+        },
+    )?;
+
+    // 2 separate commands
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_text_no_merge_after_delete() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Insert "a" at position 5
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 5,
+            text: "a".to_string(),
+        },
+    )?;
+
+    // Delete a character (different command type breaks the merge chain)
+    document_editing_controller::delete_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &DeleteTextDto {
+            position: 5,
+            anchor: 6,
+        },
+    )?;
+
+    // Insert "b" at position 5 — should NOT merge with the first insert
+    // because a DeleteText command sits between them
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 5,
+            text: "b".to_string(),
+        },
+    )?;
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hellob");
+    // 3 commands: insert "a", delete "a", insert "b"
+    assert_eq!(undo_redo_manager.get_stack_size(0), 3);
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_text_merge_punctuation_boundary() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Type "a", "." consecutively
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 5,
+            anchor: 5,
+            text: "a".to_string(),
+        },
+    )?;
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 6,
+            anchor: 6,
+            text: ".".to_string(),
+        },
+    )?;
+
+    // "a" and "." merge (accumulated "a" doesn't end with boundary)
+    assert_eq!(undo_redo_manager.get_stack_size(0), 1);
+
+    // Type "b" — should NOT merge because accumulated "a." ends with "."
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 7,
+            anchor: 7,
+            text: "b".to_string(),
+        },
+    )?;
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "Helloa.b");
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    // Undo removes "b", then "a."
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Helloa.");
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    Ok(())
+}

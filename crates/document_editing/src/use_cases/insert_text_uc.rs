@@ -12,6 +12,16 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
+use std::time::Instant;
+
+/// Returns true for punctuation characters that should break undo merge groups.
+fn is_word_boundary_punct(c: char) -> bool {
+    matches!(
+        c,
+        '.' | ',' | ';' | ':' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\''
+            | '-'
+    )
+}
 
 pub trait InsertTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertTextUnitOfWorkTrait>;
@@ -40,6 +50,9 @@ pub struct InsertTextUseCase {
     uow_factory: Box<dyn InsertTextUnitOfWorkFactoryTrait>,
     undo_snapshot: Option<EntityTreeSnapshot>,
     last_dto: Option<InsertTextDto>,
+    last_result: Option<InsertTextResultDto>,
+    last_merge_time: Option<Instant>,
+    was_selection_replacement: bool,
 }
 
 /// Delete a character range within a single block's inline elements.
@@ -302,6 +315,9 @@ impl InsertTextUseCase {
             uow_factory,
             undo_snapshot: None,
             last_dto: None,
+            last_result: None,
+            last_merge_time: None,
+            was_selection_replacement: false,
         }
     }
 
@@ -312,6 +328,9 @@ impl InsertTextUseCase {
         let (result, snapshot) = execute_insert(&mut uow, dto)?;
         self.undo_snapshot = Some(snapshot);
         self.last_dto = Some(dto.clone());
+        self.last_result = Some(result.clone());
+        self.last_merge_time = Some(Instant::now());
+        self.was_selection_replacement = dto.position != dto.anchor;
 
         uow.commit()?;
         Ok(result)
@@ -346,6 +365,87 @@ impl UndoRedoCommand for InsertTextUseCase {
         self.undo_snapshot = Some(snapshot);
         uow.commit()?;
         Ok(())
+    }
+
+    fn can_merge(&self, other: &dyn UndoRedoCommand) -> bool {
+        let Some(other_cmd) = other.as_any().downcast_ref::<InsertTextUseCase>() else {
+            return false;
+        };
+
+        let (Some(self_result), Some(self_time), Some(self_dto)) =
+            (&self.last_result, &self.last_merge_time, &self.last_dto)
+        else {
+            return false;
+        };
+        let (Some(other_dto), Some(other_time)) =
+            (&other_cmd.last_dto, &other_cmd.last_merge_time)
+        else {
+            return false;
+        };
+
+        // Rule 1: Time limit — 2 seconds between keystrokes
+        if other_time.duration_since(*self_time) > std::time::Duration::from_secs(2) {
+            return false;
+        }
+
+        // Rule 2: The new command must NOT be a selection replacement
+        if other_cmd.was_selection_replacement {
+            return false;
+        }
+
+        // Rule 3: Contiguity — the new insert must start exactly where
+        // the previous insert ended (forward typing)
+        if other_dto.position != self_result.new_position {
+            return false;
+        }
+
+        // Rule 4: Max merged length — cap at 200 chars
+        let merged_len = self_dto.text.chars().count() + other_dto.text.chars().count();
+        if merged_len > 200 {
+            return false;
+        }
+
+        // Rule 5: Word boundary — break after space/punctuation
+        if let Some(last_char) = self_dto.text.chars().last()
+            && (last_char.is_whitespace() || is_word_boundary_punct(last_char))
+        {
+            return false;
+        }
+
+        true
+    }
+
+    fn merge(&mut self, other: &dyn UndoRedoCommand) -> bool {
+        let Some(other_cmd) = other.as_any().downcast_ref::<InsertTextUseCase>() else {
+            return false;
+        };
+
+        let Some(self_dto) = &self.last_dto else {
+            return false;
+        };
+        let Some(other_dto) = &other_cmd.last_dto else {
+            return false;
+        };
+        let Some(other_result) = &other_cmd.last_result else {
+            return false;
+        };
+        let Some(other_time) = &other_cmd.last_merge_time else {
+            return false;
+        };
+
+        // Build combined DTO: insert all accumulated text at the original position
+        let combined_dto = InsertTextDto {
+            position: self_dto.position,
+            anchor: self_dto.anchor,
+            text: format!("{}{}", self_dto.text, other_dto.text),
+        };
+
+        // Keep self.undo_snapshot unchanged — state before the typing burst started
+        self.last_dto = Some(combined_dto);
+        self.last_result = Some(other_result.clone());
+        self.last_merge_time = Some(*other_time);
+
+        true
     }
 
     fn as_any(&self) -> &dyn Any {
