@@ -10,7 +10,6 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
-use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
@@ -39,13 +38,23 @@ pub trait InsertTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 pub trait InsertTextUnitOfWorkTrait: CommandUnitOfWork {}
 
-pub struct InsertTextUseCase {
-    uow_factory: Box<dyn InsertTextUnitOfWorkFactoryTrait>,
-    undo_snapshot: Option<EntityTreeSnapshot>,
-    last_dto: Option<InsertTextDto>,
-    last_result: Option<InsertTextResultDto>,
-    last_merge_time: Option<Instant>,
-    was_selection_replacement: bool,
+/// Lightweight undo data for the no-selection insert path.
+struct UndoData {
+    original_element: InlineElement,
+    original_block: Block,
+    doc_id: EntityId,
+    original_character_count: i64,
+    text_len: i64,
+    frame_id: EntityId,
+    block_id: EntityId,
+}
+
+/// Undo data for the selection-replacement path (needs full snapshot).
+enum InsertTextUndo {
+    /// Fast path: simple insert, no selection. Clone-based undo.
+    Simple(UndoData),
+    /// Slow path: selection replacement. Uses full document snapshot.
+    SelectionReplacement(common::snapshot::EntityTreeSnapshot),
 }
 
 /// Delete a character range within a single block's inline elements.
@@ -111,11 +120,11 @@ fn delete_range_in_block(
     Ok(chars_removed)
 }
 
-fn execute_insert(
+/// Execute insert with selection replacement — uses full document snapshot for undo.
+fn execute_insert_with_selection(
     uow: &mut Box<dyn InsertTextUnitOfWorkTrait>,
     dto: &InsertTextDto,
-) -> Result<(InsertTextResultDto, EntityTreeSnapshot)> {
-    // Get Root -> Document
+) -> Result<(InsertTextResultDto, InsertTextUndo)> {
     let root = uow
         .get_root(&ROOT_ENTITY_ID)?
         .ok_or_else(|| anyhow!("Root entity not found"))?;
@@ -128,77 +137,63 @@ fn execute_insert(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    // Snapshot for undo before mutation
+    // Full snapshot needed for selection replacement undo
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
-    // Get frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-    // Get block IDs from frame
     let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
-
-    // Get all blocks
     let blocks_opt = uow.get_block_multi(&block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    // Handle selection deletion (position != anchor) — same-block only
-    let position;
-    if dto.position != dto.anchor {
-        let sel_start = std::cmp::min(dto.position, dto.anchor);
-        let sel_end = std::cmp::max(dto.position, dto.anchor);
-        position = sel_start;
+    let sel_start = std::cmp::min(dto.position, dto.anchor);
+    let sel_end = std::cmp::max(dto.position, dto.anchor);
+    let position = sel_start;
 
-        let (sel_block, sel_block_idx, sel_start_offset) =
-            find_block_at_position(&blocks, sel_start)?;
-        let (_, sel_end_block_idx, sel_end_offset) = find_block_at_position(&blocks, sel_end)?;
+    let (sel_block, sel_block_idx, sel_start_offset) =
+        find_block_at_position(&blocks, sel_start)?;
+    let (_, sel_end_block_idx, sel_end_offset) = find_block_at_position(&blocks, sel_end)?;
 
-        if sel_block_idx != sel_end_block_idx {
-            return Err(anyhow!(
-                "Cross-block selection replacement is not supported by insert_text. \
-                 Use delete_text first, then insert_text."
-            ));
-        }
-
-        let chars_removed =
-            delete_range_in_block(uow, &sel_block, sel_start_offset, sel_end_offset)?;
-
-        // Update document character_count
-        document.character_count -= chars_removed;
-        document.updated_at = chrono::Utc::now();
-        uow.update_document(&document)?;
-
-        // Shift subsequent blocks
-        let shift = chars_removed;
-        let mut to_update = Vec::new();
-        for b in &blocks[(sel_block_idx + 1)..] {
-            let mut ub = b.clone();
-            ub.document_position -= shift;
-            ub.updated_at = chrono::Utc::now();
-            to_update.push(ub);
-        }
-        if !to_update.is_empty() {
-            uow.update_block_multi(&to_update)?;
-        }
-
-        // Re-read blocks after deletion
-        let blocks_opt = uow.get_block_multi(&block_ids)?;
-        blocks = blocks_opt.into_iter().flatten().collect();
-        blocks.sort_by_key(|b| b.document_position);
-        document = uow
-            .get_document(&doc_id)?
-            .ok_or_else(|| anyhow!("Document not found"))?;
-    } else {
-        position = dto.position;
+    if sel_block_idx != sel_end_block_idx {
+        return Err(anyhow!(
+            "Cross-block selection replacement is not supported by insert_text. \
+             Use delete_text first, then insert_text."
+        ));
     }
 
-    // Find block at position
-    let (block, block_idx, offset) = find_block_at_position(&blocks, position)?;
+    let chars_removed =
+        delete_range_in_block(uow, &sel_block, sel_start_offset, sel_end_offset)?;
 
-    // Get elements for this block
+    document.character_count -= chars_removed;
+    document.updated_at = chrono::Utc::now();
+    uow.update_document(&document)?;
+
+    let shift = chars_removed;
+    let mut to_update = Vec::new();
+    for b in &blocks[(sel_block_idx + 1)..] {
+        let mut ub = b.clone();
+        ub.document_position -= shift;
+        ub.updated_at = chrono::Utc::now();
+        to_update.push(ub);
+    }
+    if !to_update.is_empty() {
+        uow.update_block_multi(&to_update)?;
+    }
+
+    // Re-read blocks after deletion
+    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    blocks = blocks_opt.into_iter().flatten().collect();
+    blocks.sort_by_key(|b| b.document_position);
+    document = uow
+        .get_document(&doc_id)?
+        .ok_or_else(|| anyhow!("Document not found"))?;
+
+    // Now insert text (same as no-selection path)
+    let (block, block_idx, offset) = find_block_at_position(&blocks, position)?;
     let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
     let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
@@ -207,33 +202,13 @@ fn execute_insert(
         return Err(anyhow!("Block has no inline elements"));
     }
 
-    // Find element at offset
     let (element, _elem_idx, elem_offset) = find_element_at_offset(&elements, offset)?;
 
-    // Insert text into the element
     let mut updated_element = element.clone();
     match &updated_element.content {
         InlineContent::Text(s) => {
             let mut new_text = s.clone();
-            let byte_offset = if elem_offset as usize > new_text.len() {
-                new_text.len()
-            } else {
-                // Find char boundary
-                let mut idx = 0;
-                let mut char_count = 0i64;
-                for (ci, ch) in new_text.char_indices() {
-                    if char_count == elem_offset {
-                        idx = ci;
-                        break;
-                    }
-                    char_count += 1;
-                    idx = ci + ch.len_utf8();
-                }
-                if char_count < elem_offset {
-                    idx = new_text.len();
-                }
-                idx
-            };
+            let byte_offset = char_to_byte_offset(&new_text, elem_offset);
             new_text.insert_str(byte_offset, &dto.text);
             updated_element.content = InlineContent::Text(new_text);
         }
@@ -241,41 +216,22 @@ fn execute_insert(
             updated_element.content = InlineContent::Text(dto.text.clone());
         }
         InlineContent::Image { .. } => {
-            // Cannot insert text into an image element
             return Err(anyhow!("Cannot insert text into an image element"));
         }
     }
     updated_element.updated_at = chrono::Utc::now();
     uow.update_inline_element(&updated_element)?;
 
-    // Update block cached fields
     let text_len = dto.text.chars().count() as i64;
     let mut updated_block = block.clone();
     updated_block.text_length += text_len;
-    // Rebuild plain_text: insert at the offset
     let mut plain = updated_block.plain_text.clone();
-    let byte_pos = {
-        let mut idx = 0;
-        let mut char_count = 0i64;
-        for (ci, ch) in plain.char_indices() {
-            if char_count == offset {
-                idx = ci;
-                break;
-            }
-            char_count += 1;
-            idx = ci + ch.len_utf8();
-        }
-        if char_count < offset {
-            idx = plain.len();
-        }
-        idx
-    };
+    let byte_pos = char_to_byte_offset(&plain, offset);
     plain.insert_str(byte_pos, &dto.text);
     updated_block.plain_text = plain;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
-    // Update subsequent blocks' document_position
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for b in &blocks[(block_idx + 1)..] {
         let mut ub = b.clone();
@@ -287,7 +243,6 @@ fn execute_insert(
         uow.update_block_multi(&blocks_to_update)?;
     }
 
-    // Update Document.character_count
     let mut updated_doc = document.clone();
     updated_doc.character_count += text_len;
     updated_doc.updated_at = chrono::Utc::now();
@@ -298,15 +253,220 @@ fn execute_insert(
             new_position: position + text_len,
             blocks_affected: 1,
         },
-        snapshot,
+        InsertTextUndo::SelectionReplacement(snapshot),
     ))
+}
+
+/// Execute insert without selection — optimized path with clone-based undo.
+fn execute_insert_simple(
+    uow: &mut Box<dyn InsertTextUnitOfWorkTrait>,
+    dto: &InsertTextDto,
+) -> Result<(InsertTextResultDto, InsertTextUndo)> {
+    let position = dto.position;
+
+    // Get Root -> Document
+    let root = uow
+        .get_root(&ROOT_ENTITY_ID)?
+        .ok_or_else(|| anyhow!("Root entity not found"))?;
+    let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+    let doc_id = *doc_ids
+        .first()
+        .ok_or_else(|| anyhow!("Root has no document"))?;
+
+    let document = uow
+        .get_document(&doc_id)?
+        .ok_or_else(|| anyhow!("Document not found"))?;
+
+    // Get frame and its child_order (block IDs in document order)
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_id = *frame_ids
+        .first()
+        .ok_or_else(|| anyhow!("Document has no frames"))?;
+
+    let frame = uow
+        .get_frame(&frame_id)?
+        .ok_or_else(|| anyhow!("Frame not found"))?;
+
+    // Get ordered block IDs — prefer child_order for binary search
+    let ordered_block_ids: Vec<EntityId> = if !frame.child_order.is_empty() {
+        frame
+            .child_order
+            .iter()
+            .filter(|&&id| id > 0)
+            .map(|&id| id as EntityId)
+            .collect()
+    } else {
+        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?
+    };
+
+    if ordered_block_ids.is_empty() {
+        return Err(anyhow!("No blocks in document"));
+    }
+
+    // Binary search to find the block at position
+    let (block, block_idx) =
+        find_block_at_position_binary(uow, &ordered_block_ids, position)?;
+    let offset = position - block.document_position;
+
+    // Save originals for undo (cheap clones, no serialization)
+    let original_block = block.clone();
+
+    // Get elements for this block
+    let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+    let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+
+    if elements.is_empty() {
+        return Err(anyhow!("Block has no inline elements"));
+    }
+
+    let (element, _elem_idx, elem_offset) = find_element_at_offset(&elements, offset)?;
+    let original_element = element.clone();
+
+    // Insert text into the element
+    let mut updated_element = element.clone();
+    match &updated_element.content {
+        InlineContent::Text(s) => {
+            let mut new_text = s.clone();
+            let byte_offset = char_to_byte_offset(&new_text, elem_offset);
+            new_text.insert_str(byte_offset, &dto.text);
+            updated_element.content = InlineContent::Text(new_text);
+        }
+        InlineContent::Empty => {
+            updated_element.content = InlineContent::Text(dto.text.clone());
+        }
+        InlineContent::Image { .. } => {
+            return Err(anyhow!("Cannot insert text into an image element"));
+        }
+    }
+    updated_element.updated_at = chrono::Utc::now();
+    uow.update_inline_element(&updated_element)?;
+
+    // Update block cached fields
+    let text_len = dto.text.chars().count() as i64;
+    let mut updated_block = block.clone();
+    updated_block.text_length += text_len;
+    let mut plain = updated_block.plain_text.clone();
+    let byte_pos = char_to_byte_offset(&plain, offset);
+    plain.insert_str(byte_pos, &dto.text);
+    updated_block.plain_text = plain;
+    updated_block.updated_at = chrono::Utc::now();
+    uow.update_block(&updated_block)?;
+
+    // Update subsequent blocks' document_position — only read blocks AFTER the target
+    let subsequent_ids: Vec<EntityId> = ordered_block_ids[(block_idx + 1)..].to_vec();
+    if !subsequent_ids.is_empty() {
+        let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
+        let now = chrono::Utc::now();
+        let mut blocks_to_update: Vec<Block> = Vec::new();
+        for b in subsequent_opt.into_iter().flatten() {
+            let mut ub = b;
+            ub.document_position += text_len;
+            ub.updated_at = now;
+            blocks_to_update.push(ub);
+        }
+        if !blocks_to_update.is_empty() {
+            uow.update_block_multi(&blocks_to_update)?;
+        }
+    }
+
+    // Update Document.character_count
+    let mut updated_doc = document.clone();
+    updated_doc.character_count += text_len;
+    updated_doc.updated_at = chrono::Utc::now();
+    uow.update_document(&updated_doc)?;
+
+    let undo_data = UndoData {
+        original_element,
+        original_block,
+        doc_id,
+        original_character_count: document.character_count,
+        text_len,
+        frame_id,
+        block_id: block.id,
+    };
+
+    Ok((
+        InsertTextResultDto {
+            new_position: position + text_len,
+            blocks_affected: 1,
+        },
+        InsertTextUndo::Simple(undo_data),
+    ))
+}
+
+/// Binary search through ordered block IDs to find the block containing `position`.
+fn find_block_at_position_binary(
+    uow: &Box<dyn InsertTextUnitOfWorkTrait>,
+    ordered_block_ids: &[EntityId],
+    position: i64,
+) -> Result<(Block, usize)> {
+    if ordered_block_ids.is_empty() {
+        return Err(anyhow!("No blocks in document"));
+    }
+
+    let mut left = 0usize;
+    let mut right = ordered_block_ids.len() - 1;
+
+    while left <= right {
+        let mid = left + (right - left) / 2;
+        let block = uow
+            .get_block(&ordered_block_ids[mid])?
+            .ok_or_else(|| anyhow!("Block not found"))?;
+        let block_end = block.document_position + block.text_length;
+
+        if position >= block.document_position && position <= block_end {
+            return Ok((block, mid));
+        } else if position < block.document_position {
+            if mid == 0 {
+                return Ok((block, mid));
+            }
+            right = mid - 1;
+        } else {
+            left = mid + 1;
+        }
+    }
+
+    // Fallback to last block
+    let last_idx = ordered_block_ids.len() - 1;
+    let block = uow
+        .get_block(&ordered_block_ids[last_idx])?
+        .ok_or_else(|| anyhow!("Block not found"))?;
+    Ok((block, last_idx))
+}
+
+/// Convert a char offset to a byte offset in a string.
+fn char_to_byte_offset(s: &str, char_offset: i64) -> usize {
+    let mut idx = 0;
+    let mut count = 0i64;
+    for (ci, ch) in s.char_indices() {
+        if count == char_offset {
+            return ci;
+        }
+        count += 1;
+        idx = ci + ch.len_utf8();
+    }
+    if count < char_offset {
+        s.len()
+    } else {
+        idx
+    }
+}
+
+pub struct InsertTextUseCase {
+    uow_factory: Box<dyn InsertTextUnitOfWorkFactoryTrait>,
+    undo_data: Option<InsertTextUndo>,
+    last_dto: Option<InsertTextDto>,
+    last_result: Option<InsertTextResultDto>,
+    last_merge_time: Option<Instant>,
+    was_selection_replacement: bool,
 }
 
 impl InsertTextUseCase {
     pub fn new(uow_factory: Box<dyn InsertTextUnitOfWorkFactoryTrait>) -> Self {
         InsertTextUseCase {
             uow_factory,
-            undo_snapshot: None,
+            undo_data: None,
             last_dto: None,
             last_result: None,
             last_merge_time: None,
@@ -318,12 +478,18 @@ impl InsertTextUseCase {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        let (result, snapshot) = execute_insert(&mut uow, dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let has_selection = dto.position != dto.anchor;
+        let (result, undo) = if has_selection {
+            execute_insert_with_selection(&mut uow, dto)?
+        } else {
+            execute_insert_simple(&mut uow, dto)?
+        };
+
+        self.undo_data = Some(undo);
         self.last_dto = Some(dto.clone());
         self.last_result = Some(result.clone());
         self.last_merge_time = Some(Instant::now());
-        self.was_selection_replacement = dto.position != dto.anchor;
+        self.was_selection_replacement = has_selection;
 
         uow.commit()?;
         Ok(result)
@@ -332,15 +498,68 @@ impl InsertTextUseCase {
 
 impl UndoRedoCommand for InsertTextUseCase {
     fn undo(&mut self) -> Result<()> {
-        let snapshot = self
-            .undo_snapshot
+        let undo = self
+            .undo_data
             .as_ref()
-            .ok_or_else(|| anyhow!("No snapshot available for undo"))?
-            .clone();
+            .ok_or_else(|| anyhow!("No undo data available"))?;
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        uow.restore_document(&snapshot)?;
+
+        match undo {
+            InsertTextUndo::SelectionReplacement(snapshot) => {
+                uow.restore_document(&snapshot.clone())?;
+            }
+            InsertTextUndo::Simple(data) => {
+                // Restore original element
+                uow.update_inline_element(&data.original_element)?;
+
+                // Restore original block
+                uow.update_block(&data.original_block)?;
+
+                // Reverse position shifts on subsequent blocks
+                let frame = uow
+                    .get_frame(&data.frame_id)?
+                    .ok_or_else(|| anyhow!("Frame not found"))?;
+                let ordered_block_ids: Vec<EntityId> = frame
+                    .child_order
+                    .iter()
+                    .filter(|&&id| id > 0)
+                    .map(|&id| id as EntityId)
+                    .collect();
+
+                if let Some(block_idx) = ordered_block_ids
+                    .iter()
+                    .position(|&id| id == data.block_id)
+                {
+                    let subsequent_ids: Vec<EntityId> =
+                        ordered_block_ids[(block_idx + 1)..].to_vec();
+                    if !subsequent_ids.is_empty() {
+                        let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
+                        let now = chrono::Utc::now();
+                        let mut blocks_to_update: Vec<Block> = Vec::new();
+                        for b in subsequent_opt.into_iter().flatten() {
+                            let mut ub = b;
+                            ub.document_position -= data.text_len;
+                            ub.updated_at = now;
+                            blocks_to_update.push(ub);
+                        }
+                        if !blocks_to_update.is_empty() {
+                            uow.update_block_multi(&blocks_to_update)?;
+                        }
+                    }
+                }
+
+                // Restore document character_count
+                let mut doc = uow
+                    .get_document(&data.doc_id)?
+                    .ok_or_else(|| anyhow!("Document not found"))?;
+                doc.character_count = data.original_character_count;
+                doc.updated_at = chrono::Utc::now();
+                uow.update_document(&doc)?;
+            }
+        }
+
         uow.commit()?;
         Ok(())
     }
@@ -354,8 +573,13 @@ impl UndoRedoCommand for InsertTextUseCase {
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        let (_, snapshot) = execute_insert(&mut uow, &dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let has_selection = dto.position != dto.anchor;
+        let (_, undo) = if has_selection {
+            execute_insert_with_selection(&mut uow, &dto)?
+        } else {
+            execute_insert_simple(&mut uow, &dto)?
+        };
+        self.undo_data = Some(undo);
         uow.commit()?;
         Ok(())
     }
@@ -385,23 +609,22 @@ impl UndoRedoCommand for InsertTextUseCase {
             return false;
         }
 
-        // Rule 3: Contiguity — the new insert must start exactly where
-        // the previous insert ended (forward typing)
+        // Rule 3: Contiguous — other.position must equal self.new_position
         if other_dto.position != self_result.new_position {
             return false;
         }
 
-        // Rule 4: Max merged length — cap at 200 chars
-        let merged_len = self_dto.text.chars().count() + other_dto.text.chars().count();
-        if merged_len > 200 {
-            return false;
-        }
-
-        // Rule 5: Word boundary — break after space/punctuation
-        if let Some(last_char) = self_dto.text.chars().last()
-            && (last_char.is_whitespace() || is_word_boundary_punct(last_char))
+        // Rule 4: Word boundary — break on space/punctuation after non-space
+        let self_text = &self_dto.text;
+        let other_text = &other_dto.text;
+        if let (Some(last_self), Some(first_other)) =
+            (self_text.chars().next_back(), other_text.chars().next())
         {
-            return false;
+            if !last_self.is_whitespace()
+                && (first_other.is_whitespace() || is_word_boundary_punct(first_other))
+            {
+                return false;
+            }
         }
 
         true
@@ -412,30 +635,17 @@ impl UndoRedoCommand for InsertTextUseCase {
             return false;
         };
 
-        let Some(self_dto) = &self.last_dto else {
-            return false;
-        };
-        let Some(other_dto) = &other_cmd.last_dto else {
-            return false;
-        };
-        let Some(other_result) = &other_cmd.last_result else {
-            return false;
-        };
-        let Some(other_time) = &other_cmd.last_merge_time else {
-            return false;
-        };
-
-        // Build combined DTO: insert all accumulated text at the original position
-        let combined_dto = InsertTextDto {
-            position: self_dto.position,
-            anchor: self_dto.anchor,
-            text: format!("{}{}", self_dto.text, other_dto.text),
-        };
-
-        // Keep self.undo_snapshot unchanged — state before the typing burst started
-        self.last_dto = Some(combined_dto);
-        self.last_result = Some(other_result.clone());
-        self.last_merge_time = Some(*other_time);
+        // Keep our undo data (original state) but update the DTO and result
+        if let (Some(self_dto), Some(other_dto)) =
+            (&mut self.last_dto, &other_cmd.last_dto)
+        {
+            self_dto.text.push_str(&other_dto.text);
+            self_dto.anchor = self_dto.position; // merged command always has no selection
+        }
+        if let Some(other_result) = &other_cmd.last_result {
+            self.last_result = Some(other_result.clone());
+        }
+        self.last_merge_time = other_cmd.last_merge_time;
 
         true
     }
