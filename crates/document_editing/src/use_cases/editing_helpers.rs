@@ -1,6 +1,15 @@
 use anyhow::{Result, anyhow};
 use common::entities::{Block, InlineContent, InlineElement};
 
+/// Returns true for punctuation characters that should break undo merge groups.
+pub fn is_word_boundary_punct(c: char) -> bool {
+    matches!(
+        c,
+        '.' | ',' | ';' | ':' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\''
+            | '-'
+    )
+}
+
 /// Find the block containing the given document position from a sorted list of blocks.
 ///
 /// Returns `(block, index_in_list, offset_within_block)`.

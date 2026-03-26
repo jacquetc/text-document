@@ -1,4 +1,6 @@
-use super::editing_helpers::{find_block_at_position, find_element_at_offset};
+use super::editing_helpers::{
+    find_block_at_position, find_element_at_offset, is_word_boundary_punct,
+};
 use crate::InsertTextDto;
 use crate::InsertTextResultDto;
 use anyhow::{Result, anyhow};
@@ -13,15 +15,6 @@ use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
 use std::time::Instant;
-
-/// Returns true for punctuation characters that should break undo merge groups.
-fn is_word_boundary_punct(c: char) -> bool {
-    matches!(
-        c,
-        '.' | ',' | ';' | ':' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\''
-            | '-'
-    )
-}
 
 pub trait InsertTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertTextUnitOfWorkTrait>;

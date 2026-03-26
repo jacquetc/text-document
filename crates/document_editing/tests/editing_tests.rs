@@ -6,6 +6,46 @@ use test_harness::{export_text, setup_with_text};
 use document_editing::document_editing_controller;
 use document_editing::{DeleteTextDto, InsertBlockDto, InsertTextDto};
 
+/// Helper: delete one character backward (backspace) at the given cursor position.
+fn backspace(
+    db_context: &common::database::db_context::DbContext,
+    event_hub: &std::sync::Arc<common::event::EventHub>,
+    undo_redo_manager: &mut common::undo_redo::UndoRedoManager,
+    cursor_pos: i64,
+) -> Result<i64> {
+    let result = document_editing_controller::delete_text(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &DeleteTextDto {
+            position: cursor_pos,
+            anchor: cursor_pos - 1,
+        },
+    )?;
+    Ok(result.new_position)
+}
+
+/// Helper: delete one character forward (Del key) at the given cursor position.
+fn forward_delete(
+    db_context: &common::database::db_context::DbContext,
+    event_hub: &std::sync::Arc<common::event::EventHub>,
+    undo_redo_manager: &mut common::undo_redo::UndoRedoManager,
+    cursor_pos: i64,
+) -> Result<i64> {
+    let result = document_editing_controller::delete_text(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &DeleteTextDto {
+            position: cursor_pos,
+            anchor: cursor_pos + 1,
+        },
+    )?;
+    Ok(result.new_position)
+}
+
 #[test]
 fn test_insert_text_at_beginning() -> Result<()> {
     let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
@@ -824,6 +864,162 @@ fn test_insert_text_merge_punctuation_boundary() -> Result<()> {
     assert_eq!(export_text(&db_context, &event_hub)?, "Helloa.");
     undo_redo_manager.undo(None)?;
     assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    Ok(())
+}
+
+// ── DeleteText merge tests ─────────────────────────────────────
+
+#[test]
+fn test_delete_text_merge_consecutive_backspaces() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Backspace 3 times from position 5: delete 'o', 'l', 'l'
+    let pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, 5)?;
+    assert_eq!(pos, 4);
+    let pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, pos)?;
+    assert_eq!(pos, 3);
+    let _pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, pos)?;
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "He");
+    // All 3 should have merged into 1 command
+    assert_eq!(undo_redo_manager.get_stack_size(0), 1);
+
+    // Single undo restores original
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    Ok(())
+}
+
+#[test]
+fn test_delete_text_merge_consecutive_forward_deletes() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Forward-delete 3 times from position 1: delete 'e', 'l', 'l'
+    let pos = forward_delete(&db_context, &event_hub, &mut undo_redo_manager, 1)?;
+    assert_eq!(pos, 1);
+    let pos = forward_delete(&db_context, &event_hub, &mut undo_redo_manager, pos)?;
+    assert_eq!(pos, 1);
+    let _pos = forward_delete(&db_context, &event_hub, &mut undo_redo_manager, pos)?;
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "Ho");
+    assert_eq!(undo_redo_manager.get_stack_size(0), 1);
+
+    // Undo restores original
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    Ok(())
+}
+
+#[test]
+fn test_delete_text_merge_undo_redo() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Backspace 3 times from position 5
+    let mut pos = 5;
+    for _ in 0..3 {
+        pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, pos)?;
+    }
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "He");
+
+    // Undo restores
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "Hello");
+
+    // Redo replays combined delete
+    undo_redo_manager.redo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "He");
+
+    Ok(())
+}
+
+#[test]
+fn test_delete_text_no_merge_different_direction() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
+
+    // Backspace from position 5 (delete 'o')
+    let _pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, 5)?;
+
+    // Forward delete from position 4 would be different direction — should not merge
+    // But actually cursor is at 4 after backspace. Forward delete at 4 is NOT contiguous
+    // with the backspace direction. Let's verify with a non-contiguous case.
+
+    // Forward delete from position 0 (non-contiguous)
+    let _pos = forward_delete(&db_context, &event_hub, &mut undo_redo_manager, 0)?;
+
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_delete_text_no_merge_non_contiguous() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello World")?;
+
+    // Backspace from position 11 (delete 'd')
+    let _pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, 11)?;
+
+    // Backspace from position 5 (not contiguous with previous cursor at 10)
+    let _pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, 5)?;
+
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_delete_text_no_merge_selection_delete() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello World")?;
+
+    // Multi-char selection delete (not single-char)
+    document_editing_controller::delete_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &DeleteTextDto {
+            position: 5,
+            anchor: 11,
+        },
+    )?;
+
+    // Single-char backspace — should NOT merge with multi-char delete
+    let _pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, 5)?;
+
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_delete_text_merge_word_boundary() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("ab cd")?;
+
+    // Backspace from position 5: delete 'd', then 'c', then ' '
+    let pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, 5)?; // 'd'
+    let pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, pos)?; // 'c'
+    let pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, pos)?; // ' '
+
+    // 'd', 'c' merge. Then ' ' merges too (since 'c' is not a boundary).
+    // Now accumulated last deleted char is ' ' (whitespace).
+    assert_eq!(undo_redo_manager.get_stack_size(0), 1);
+
+    // Next backspace for 'b' should NOT merge (last deleted was space)
+    let _pos = backspace(&db_context, &event_hub, &mut undo_redo_manager, pos)?; // 'b'
+
+    assert_eq!(export_text(&db_context, &event_hub)?, "a");
+    assert_eq!(undo_redo_manager.get_stack_size(0), 2);
+
+    // Undo restores 'b'
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "ab");
+
+    // Undo restores ' cd'
+    undo_redo_manager.undo(None)?;
+    assert_eq!(export_text(&db_context, &event_hub)?, "ab cd");
 
     Ok(())
 }

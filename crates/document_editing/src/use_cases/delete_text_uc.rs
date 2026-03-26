@@ -1,4 +1,4 @@
-use super::editing_helpers::find_block_at_position;
+use super::editing_helpers::{find_block_at_position, is_word_boundary_punct};
 use crate::DeleteTextDto;
 use crate::DeleteTextResultDto;
 use anyhow::{Result, anyhow};
@@ -12,6 +12,7 @@ use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
+use std::time::Instant;
 
 pub trait DeleteTextUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn DeleteTextUnitOfWorkTrait>;
@@ -43,6 +44,9 @@ pub struct DeleteTextUseCase {
     uow_factory: Box<dyn DeleteTextUnitOfWorkFactoryTrait>,
     undo_snapshot: Option<EntityTreeSnapshot>,
     last_dto: Option<DeleteTextDto>,
+    last_result: Option<DeleteTextResultDto>,
+    last_merge_time: Option<Instant>,
+    is_single_char_origin: bool,
 }
 
 /// Remove a range [start_offset..end_offset) from a text string, by char indices.
@@ -414,6 +418,9 @@ impl DeleteTextUseCase {
             uow_factory,
             undo_snapshot: None,
             last_dto: None,
+            last_result: None,
+            last_merge_time: None,
+            is_single_char_origin: false,
         }
     }
 
@@ -424,6 +431,9 @@ impl DeleteTextUseCase {
         let (result, snapshot) = execute_delete(&mut uow, dto)?;
         self.undo_snapshot = Some(snapshot);
         self.last_dto = Some(dto.clone());
+        self.last_result = Some(result.clone());
+        self.last_merge_time = Some(Instant::now());
+        self.is_single_char_origin = (dto.position - dto.anchor).abs() == 1;
 
         uow.commit()?;
         Ok(result)
@@ -458,6 +468,111 @@ impl UndoRedoCommand for DeleteTextUseCase {
         self.undo_snapshot = Some(snapshot);
         uow.commit()?;
         Ok(())
+    }
+
+    fn can_merge(&self, other: &dyn UndoRedoCommand) -> bool {
+        let Some(other_cmd) = other.as_any().downcast_ref::<DeleteTextUseCase>() else {
+            return false;
+        };
+
+        let (Some(self_dto), Some(self_result), Some(self_time)) =
+            (&self.last_dto, &self.last_result, &self.last_merge_time)
+        else {
+            return false;
+        };
+        let (Some(other_dto), Some(_other_result), Some(other_time)) =
+            (&other_cmd.last_dto, &other_cmd.last_result, &other_cmd.last_merge_time)
+        else {
+            return false;
+        };
+
+        // Rule 1: Time limit — 2 seconds
+        if other_time.duration_since(*self_time) > std::time::Duration::from_secs(2) {
+            return false;
+        }
+
+        // Rule 2: Both must originate from single-char deletes
+        if !self.is_single_char_origin {
+            return false;
+        }
+        if (other_dto.position - other_dto.anchor).abs() != 1 {
+            return false;
+        }
+
+        // Rule 3: Same direction (both backspace or both forward delete)
+        let self_is_backspace = self_dto.position > self_dto.anchor;
+        let other_is_backspace = other_dto.position > other_dto.anchor;
+        if self_is_backspace != other_is_backspace {
+            return false;
+        }
+
+        // Rule 4: Contiguity
+        if self_is_backspace {
+            // Backspace: new delete's upper end == previous cursor position
+            if other_dto.position.max(other_dto.anchor) != self_result.new_position {
+                return false;
+            }
+        } else {
+            // Forward delete: new delete's lower end == previous cursor position
+            if other_dto.position.min(other_dto.anchor) != self_result.new_position {
+                return false;
+            }
+        }
+
+        // Rule 5: Max merged length — 200 chars
+        let self_range = (self_dto.position - self_dto.anchor).abs();
+        if self_range + 1 > 200 {
+            return false;
+        }
+
+        // Rule 6: Word boundary — break after deleting a space/punctuation
+        if let Some(last_deleted_char) = self_result.deleted_text.chars().next()
+            && (last_deleted_char.is_whitespace() || is_word_boundary_punct(last_deleted_char))
+        {
+            return false;
+        }
+
+        true
+    }
+
+    fn merge(&mut self, other: &dyn UndoRedoCommand) -> bool {
+        let Some(other_cmd) = other.as_any().downcast_ref::<DeleteTextUseCase>() else {
+            return false;
+        };
+
+        let Some(self_dto) = &self.last_dto else {
+            return false;
+        };
+        let Some(other_result) = &other_cmd.last_result else {
+            return false;
+        };
+        let Some(other_time) = &other_cmd.last_merge_time else {
+            return false;
+        };
+
+        let self_is_backspace = self_dto.position > self_dto.anchor;
+
+        // Extend the combined delete range by one char in the appropriate direction
+        let combined_dto = if self_is_backspace {
+            // Backspace: extend anchor backward (toward smaller positions)
+            DeleteTextDto {
+                position: self_dto.position,
+                anchor: self_dto.anchor - 1,
+            }
+        } else {
+            // Forward delete: extend anchor forward (toward larger positions)
+            DeleteTextDto {
+                position: self_dto.position,
+                anchor: self_dto.anchor + 1,
+            }
+        };
+
+        // Keep self.undo_snapshot — state before the deletion burst started
+        self.last_dto = Some(combined_dto);
+        self.last_result = Some(other_result.clone());
+        self.last_merge_time = Some(*other_time);
+
+        true
     }
 
     fn as_any(&self) -> &dyn Any {

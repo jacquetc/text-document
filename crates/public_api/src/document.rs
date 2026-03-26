@@ -905,6 +905,45 @@ fn capture_block_state(inner: &TextDocumentInner) -> Vec<UndoBlockState> {
     states
 }
 
+/// Build the full document text from sorted block states (joined with newlines).
+fn build_doc_text(states: &[UndoBlockState]) -> String {
+    states
+        .iter()
+        .map(|s| s.plain_text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Compute the precise edit between two strings by comparing common prefix and suffix.
+/// Returns `(edit_offset, chars_removed, chars_added)`.
+fn compute_text_edit(before: &str, after: &str) -> (usize, usize, usize) {
+    let before_chars: Vec<char> = before.chars().collect();
+    let after_chars: Vec<char> = after.chars().collect();
+
+    // Common prefix
+    let prefix_len = before_chars
+        .iter()
+        .zip(after_chars.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // Common suffix (not overlapping with prefix)
+    let before_remaining = before_chars.len() - prefix_len;
+    let after_remaining = after_chars.len() - prefix_len;
+    let suffix_len = before_chars
+        .iter()
+        .rev()
+        .zip(after_chars.iter().rev())
+        .take(before_remaining.min(after_remaining))
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let removed = before_remaining - suffix_len;
+    let added = after_remaining - suffix_len;
+
+    (prefix_len, removed, added)
+}
+
 /// Compare block state before and after undo/redo and emit
 /// ContentsChanged / FormatChanged events for affected regions.
 fn emit_undo_redo_change_events(inner: &mut TextDocumentInner, before: &[UndoBlockState]) {
@@ -970,10 +1009,23 @@ fn emit_undo_redo_change_events(inner: &mut TextDocumentInner, before: &[UndoBlo
 
     if content_changed {
         let position = earliest_pos.unwrap_or(0);
+        let chars_removed = old_end.saturating_sub(position);
+        let chars_added = new_end.saturating_sub(position);
+
+        // Use a precise text-level diff for cursor adjustment so cursors land
+        // at the actual edit point rather than the end of the affected block.
+        let before_text = build_doc_text(before);
+        let after_text = build_doc_text(&after);
+        let (edit_offset, precise_removed, precise_added) =
+            compute_text_edit(&before_text, &after_text);
+        if precise_removed > 0 || precise_added > 0 {
+            inner.adjust_cursors(edit_offset, precise_removed, precise_added);
+        }
+
         inner.queue_event(DocumentEvent::ContentsChanged {
             position,
-            chars_removed: old_end.saturating_sub(position),
-            chars_added: new_end.saturating_sub(position),
+            chars_removed,
+            chars_added,
             blocks_affected,
         });
     }

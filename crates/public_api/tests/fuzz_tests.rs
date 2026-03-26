@@ -349,17 +349,20 @@ proptest! {
             cursor.insert_text(text).unwrap();
         }
 
-        // Undo all inserts
-        for _ in 0..num_inserts {
-            prop_assert!(doc.can_undo());
+        // Undo all inserts (merging may reduce the number of undo steps)
+        let mut undo_count = 0;
+        while doc.can_undo() {
             doc.undo().unwrap();
+            undo_count += 1;
         }
+        prop_assert!(undo_count >= 1);
+        prop_assert!(undo_count <= num_inserts);
 
         let restored = doc.to_plain_text().unwrap();
         prop_assert_eq!(&restored, &initial);
 
         // Redo all
-        for _ in 0..num_inserts {
+        for _ in 0..undo_count {
             prop_assert!(doc.can_redo());
             doc.redo().unwrap();
         }

@@ -404,12 +404,18 @@ fn undo_redo_replace_text() {
 #[test]
 fn multiple_undo_redo_sequence() {
     let doc = new_doc("A");
+
+    // Use edit blocks to prevent merge between the two inserts
     let c = doc.cursor_at(1);
+    c.begin_edit_block();
     c.insert_text("B").unwrap();
+    c.end_edit_block();
     assert_eq!(doc.to_plain_text().unwrap(), "AB");
 
     let c = doc.cursor_at(2);
+    c.begin_edit_block();
     c.insert_text("C").unwrap();
+    c.end_edit_block();
     assert_eq!(doc.to_plain_text().unwrap(), "ABC");
 
     doc.undo().unwrap();
