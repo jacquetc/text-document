@@ -1,3 +1,5 @@
+mod benchmark_test;
+
 use std::path::Path;
 use std::process;
 
@@ -80,6 +82,8 @@ enum Commands {
         #[arg(short, long, default_value = "plain")]
         format: OutputFormat,
     },
+
+    Test,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -322,6 +326,9 @@ fn main() {
         ),
 
         Commands::Cat { file, format } => cmd_cat(file, format),
+        Commands::Test => {
+            benchmark_test::run_benchmark_test()
+        }
     };
 
     if let Err(e) = result {
