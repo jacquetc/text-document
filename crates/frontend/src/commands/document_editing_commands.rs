@@ -5,16 +5,17 @@
 use crate::app_context::AppContext;
 use anyhow::{Context, Result};
 use document_editing::{
-    AddBlockToListDto, CreateListDto, CreateListResultDto, DeleteTextDto, DeleteTextResultDto, InsertBlockDto,
-    InsertBlockResultDto, InsertFormattedTextDto, InsertFormattedTextResultDto, InsertFragmentDto,
-    InsertFragmentResultDto, InsertFrameDto, InsertFrameResultDto, InsertHtmlAtPositionDto,
-    InsertHtmlAtPositionResultDto, InsertImageDto, InsertImageResultDto, InsertListDto,
-    InsertListResultDto, InsertMarkdownAtPositionDto, InsertMarkdownAtPositionResultDto,
-    InsertTableColumnDto, InsertTableColumnResultDto, InsertTableDto, InsertTableResultDto,
-    InsertTableRowDto, InsertTableRowResultDto, InsertTextDto, InsertTextResultDto,
-    MergeTableCellsDto, MergeTableCellsResultDto, RemoveTableColumnDto, RemoveTableColumnResultDto,
-    RemoveBlockFromListDto, RemoveTableDto, RemoveTableRowDto, RemoveTableRowResultDto, SplitTableCellDto,
-    SplitTableCellResultDto, document_editing_controller,
+    AddBlockToListDto, CreateListDto, CreateListResultDto, DeleteTextDto, DeleteTextResultDto,
+    InsertBlockDto, InsertBlockResultDto, InsertFormattedTextDto, InsertFormattedTextResultDto,
+    InsertFragmentDto, InsertFragmentResultDto, InsertFrameDto, InsertFrameResultDto,
+    InsertHtmlAtPositionDto, InsertHtmlAtPositionResultDto, InsertImageDto, InsertImageResultDto,
+    InsertListDto, InsertListResultDto, InsertMarkdownAtPositionDto,
+    InsertMarkdownAtPositionResultDto, InsertTableColumnDto, InsertTableColumnResultDto,
+    InsertTableDto, InsertTableResultDto, InsertTableRowDto, InsertTableRowResultDto,
+    InsertTextDto, InsertTextResultDto, MergeTableCellsDto, MergeTableCellsResultDto,
+    RemoveBlockFromListDto, RemoveTableColumnDto, RemoveTableColumnResultDto, RemoveTableDto,
+    RemoveTableRowDto, RemoveTableRowResultDto, SplitTableCellDto, SplitTableCellResultDto,
+    document_editing_controller,
 };
 
 pub fn insert_text(

@@ -5,8 +5,7 @@ use common::entities::{Block, InlineContent, InlineElement};
 pub fn is_word_boundary_punct(c: char) -> bool {
     matches!(
         c,
-        '.' | ',' | ';' | ':' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\''
-            | '-'
+        '.' | ',' | ';' | ':' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '-'
     )
 }
 

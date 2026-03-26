@@ -1155,19 +1155,11 @@ impl TextCursor {
     }
 
     /// Set formatting on a list by its ID.
-    pub fn set_list_format(
-        &self,
-        list_id: usize,
-        format: &crate::ListFormat,
-    ) -> Result<()> {
+    pub fn set_list_format(&self, list_id: usize, format: &crate::ListFormat) -> Result<()> {
         let queued = {
             let mut inner = self.doc.lock();
             let dto = format.to_set_dto(list_id);
-            document_formatting_commands::set_list_format(
-                &inner.ctx,
-                Some(inner.stack_id),
-                &dto,
-            )?;
+            document_formatting_commands::set_list_format(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.queue_event(DocumentEvent::FormatChanged {
                 position: 0,
@@ -1197,11 +1189,7 @@ impl TextCursor {
                 block_id: to_i64(block_id),
                 list_id: to_i64(list_id),
             };
-            document_editing_commands::add_block_to_list(
-                &inner.ctx,
-                Some(inner.stack_id),
-                &dto,
-            )?;
+            document_editing_commands::add_block_to_list(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
             inner.queue_event(DocumentEvent::ContentsChanged {
                 position: 0,
@@ -1222,8 +1210,7 @@ impl TextCursor {
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
         };
-        let block_info =
-            document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
+        let block_info = document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
         drop(inner);
         self.add_block_to_list(block_info.block_id as usize, list_id)
     }
@@ -1261,8 +1248,7 @@ impl TextCursor {
         let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
         };
-        let block_info =
-            document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
+        let block_info = document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
         drop(inner);
         self.remove_block_from_list(block_info.block_id as usize)
     }

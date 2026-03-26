@@ -370,8 +370,7 @@ impl UndoRedoCommand for InsertTextUseCase {
         else {
             return false;
         };
-        let (Some(other_dto), Some(other_time)) =
-            (&other_cmd.last_dto, &other_cmd.last_merge_time)
+        let (Some(other_dto), Some(other_time)) = (&other_cmd.last_dto, &other_cmd.last_merge_time)
         else {
             return false;
         };

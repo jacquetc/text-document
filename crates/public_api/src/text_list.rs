@@ -7,9 +7,9 @@ use parking_lot::Mutex;
 use frontend::commands::{block_commands, list_commands};
 use frontend::common::types::EntityId;
 
-use crate::{ListFormat, ListStyle};
 use crate::inner::TextDocumentInner;
 use crate::text_block::{TextBlock, format_list_marker};
+use crate::{ListFormat, ListStyle};
 
 /// A read-only handle to a list in the document.
 ///

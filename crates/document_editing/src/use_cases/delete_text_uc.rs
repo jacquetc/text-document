@@ -480,9 +480,11 @@ impl UndoRedoCommand for DeleteTextUseCase {
         else {
             return false;
         };
-        let (Some(other_dto), Some(_other_result), Some(other_time)) =
-            (&other_cmd.last_dto, &other_cmd.last_result, &other_cmd.last_merge_time)
-        else {
+        let (Some(other_dto), Some(_other_result), Some(other_time)) = (
+            &other_cmd.last_dto,
+            &other_cmd.last_result,
+            &other_cmd.last_merge_time,
+        ) else {
             return false;
         };
 

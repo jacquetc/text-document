@@ -100,9 +100,6 @@ impl SetListFormatUnitOfWorkFactory {
 
 impl SetListFormatUnitOfWorkFactoryTrait for SetListFormatUnitOfWorkFactory {
     fn create(&self) -> Box<dyn SetListFormatUnitOfWorkTrait> {
-        Box::new(SetListFormatUnitOfWork::new(
-            &self.context,
-            &self.event_hub,
-        ))
+        Box::new(SetListFormatUnitOfWork::new(&self.context, &self.event_hub))
     }
 }
