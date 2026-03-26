@@ -4,7 +4,8 @@
 //! All Option mapping between public format structs and backend DTOs lives here.
 
 use crate::{
-    BlockFormat, BlockInfo, DocumentStats, FindMatch, FindOptions, FrameFormat, TextFormat,
+    BlockFormat, BlockInfo, DocumentStats, FindMatch, FindOptions, FrameFormat, ListFormat,
+    TextFormat,
 };
 
 // ── Position conversion ─────────────────────────────────────────
@@ -307,6 +308,23 @@ impl FrameFormat {
             right_margin: self.right_margin.map(|v| v as i64),
             padding: self.padding.map(|v| v as i64),
             border: self.border.map(|v| v as i64),
+        }
+    }
+}
+
+// ── ListFormat ─────────────────────────────────────────────────
+
+impl ListFormat {
+    pub(crate) fn to_set_dto(
+        &self,
+        list_id: usize,
+    ) -> frontend::document_formatting::SetListFormatDto {
+        frontend::document_formatting::SetListFormatDto {
+            list_id: to_i64(list_id),
+            style: self.style.clone(),
+            indent: self.indent.map(|v| v as i64),
+            prefix: self.prefix.clone(),
+            suffix: self.suffix.clone(),
         }
     }
 }

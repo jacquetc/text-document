@@ -166,6 +166,16 @@ pub struct BlockFormat {
     pub background_color: Option<String>,
 }
 
+/// List formatting. All fields are optional: `None` means
+/// "not set — don't change this property."
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListFormat {
+    pub style: Option<ListStyle>,
+    pub indent: Option<u8>,
+    pub prefix: Option<String>,
+    pub suffix: Option<String>,
+}
+
 /// Frame formatting. All fields are optional.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FrameFormat {

@@ -201,3 +201,12 @@ pub struct SplitTableCellDto {
 pub struct SplitTableCellResultDto {
     pub new_cell_ids: Vec<i64>,
 }
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AddBlockToListDto {
+    pub block_id: i64,
+    pub list_id: i64,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RemoveBlockFromListDto {
+    pub block_id: i64,
+}

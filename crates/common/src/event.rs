@@ -74,6 +74,8 @@ pub enum DocumentEditingEvent {
     RemoveTableColumn,
     MergeTableCells,
     SplitTableCell,
+    AddBlockToList,
+    RemoveBlockFromList,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
@@ -84,6 +86,7 @@ pub enum DocumentFormattingEvent {
     SetFrameFormat,
     SetTableFormat,
     SetTableCellFormat,
+    SetListFormat,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]

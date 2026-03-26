@@ -5,4 +5,5 @@ pub(crate) mod set_block_format_uc;
 pub(crate) mod set_frame_format_uc;
 pub(crate) mod set_table_cell_format_uc;
 pub(crate) mod set_table_format_uc;
+pub(crate) mod set_list_format_uc;
 pub(crate) mod set_text_format_uc;

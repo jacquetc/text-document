@@ -3,18 +3,21 @@
 use crate::MergeTextFormatDto;
 use crate::SetBlockFormatDto;
 use crate::SetFrameFormatDto;
+use crate::SetListFormatDto;
 use crate::SetTableCellFormatDto;
 use crate::SetTableFormatDto;
 use crate::SetTextFormatDto;
 use crate::units_of_work::merge_text_format_uow::MergeTextFormatUnitOfWorkFactory;
 use crate::units_of_work::set_block_format_uow::SetBlockFormatUnitOfWorkFactory;
 use crate::units_of_work::set_frame_format_uow::SetFrameFormatUnitOfWorkFactory;
+use crate::units_of_work::set_list_format_uow::SetListFormatUnitOfWorkFactory;
 use crate::units_of_work::set_table_cell_format_uow::SetTableCellFormatUnitOfWorkFactory;
 use crate::units_of_work::set_table_format_uow::SetTableFormatUnitOfWorkFactory;
 use crate::units_of_work::set_text_format_uow::SetTextFormatUnitOfWorkFactory;
 use crate::use_cases::merge_text_format_uc::MergeTextFormatUseCase;
 use crate::use_cases::set_block_format_uc::SetBlockFormatUseCase;
 use crate::use_cases::set_frame_format_uc::SetFrameFormatUseCase;
+use crate::use_cases::set_list_format_uc::SetListFormatUseCase;
 use crate::use_cases::set_table_cell_format_uc::SetTableCellFormatUseCase;
 use crate::use_cases::set_table_format_uc::SetTableFormatUseCase;
 use crate::use_cases::set_text_format_uc::SetTextFormatUseCase;
@@ -24,6 +27,7 @@ use common::event::{Event, Origin};
 use common::event::DocumentFormattingEvent::MergeTextFormat;
 use common::event::DocumentFormattingEvent::SetBlockFormat;
 use common::event::DocumentFormattingEvent::SetFrameFormat;
+use common::event::DocumentFormattingEvent::SetListFormat;
 use common::event::DocumentFormattingEvent::SetTableCellFormat;
 use common::event::DocumentFormattingEvent::SetTableFormat;
 use common::event::DocumentFormattingEvent::SetTextFormat;
@@ -146,6 +150,25 @@ pub fn set_table_cell_format(
     // Notify that the handling manifest has been loaded
     event_hub.send_event(Event {
         origin: Origin::DocumentFormatting(SetTableCellFormat),
+        ids: vec![],
+        data: None,
+    });
+    Ok(())
+}
+
+pub fn set_list_format(
+    db_context: &DbContext,
+    event_hub: &Arc<EventHub>,
+    undo_redo_manager: &mut UndoRedoManager,
+    stack_id: Option<u64>,
+    dto: &SetListFormatDto,
+) -> Result<()> {
+    let uow_context = SetListFormatUnitOfWorkFactory::new(db_context, event_hub);
+    let mut uc = SetListFormatUseCase::new(Box::new(uow_context));
+    uc.execute(dto)?;
+    undo_redo_manager.add_command_to_stack(Box::new(uc), stack_id)?;
+    event_hub.send_event(Event {
+        origin: Origin::DocumentFormatting(SetListFormat),
         ids: vec![],
         data: None,
     });

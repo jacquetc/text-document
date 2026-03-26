@@ -70,6 +70,8 @@ pub enum FlatEventKind {
     DocumentEditingRemoveTableColumn,
     DocumentEditingMergeTableCells,
     DocumentEditingSplitTableCell,
+    DocumentEditingAddBlockToList,
+    DocumentEditingRemoveBlockFromList,
 
     DocumentFormattingSetTextFormat,
     DocumentFormattingMergeTextFormat,
@@ -77,6 +79,7 @@ pub enum FlatEventKind {
     DocumentFormattingSetFrameFormat,
     DocumentFormattingSetTableFormat,
     DocumentFormattingSetTableCellFormat,
+    DocumentFormattingSetListFormat,
 
     DocumentIoImportPlainText,
     DocumentIoExportPlainText,
@@ -221,6 +224,12 @@ impl From<Event> for FlatEvent {
                 DocumentEditingEvent::SplitTableCell => {
                     FlatEventKind::DocumentEditingSplitTableCell
                 }
+                DocumentEditingEvent::AddBlockToList => {
+                    FlatEventKind::DocumentEditingAddBlockToList
+                }
+                DocumentEditingEvent::RemoveBlockFromList => {
+                    FlatEventKind::DocumentEditingRemoveBlockFromList
+                }
             },
             Origin::DocumentFormatting(fe) => match fe {
                 DocumentFormattingEvent::SetTextFormat => {
@@ -240,6 +249,9 @@ impl From<Event> for FlatEvent {
                 }
                 DocumentFormattingEvent::SetTableCellFormat => {
                     FlatEventKind::DocumentFormattingSetTableCellFormat
+                }
+                DocumentFormattingEvent::SetListFormat => {
+                    FlatEventKind::DocumentFormattingSetListFormat
                 }
             },
             Origin::DocumentIo(fe) => match fe {

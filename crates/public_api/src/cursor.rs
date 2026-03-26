@@ -1085,6 +1085,24 @@ impl TextCursor {
 
     // ── List operations ──────────────────────────────────────
 
+    /// Returns the list that the block at the cursor position belongs to,
+    /// or `None` if the current block is not a list item.
+    pub fn current_list(&self) -> Option<crate::TextList> {
+        let pos = self.position();
+        let inner = self.doc.lock();
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos),
+        };
+        let block_info =
+            document_inspection_commands::get_block_at_position(&inner.ctx, &dto).ok()?;
+        let block = crate::text_block::TextBlock {
+            doc: self.doc.clone(),
+            block_id: block_info.block_id as usize,
+        };
+        drop(inner);
+        block.list()
+    }
+
     /// Turn the block(s) in the selection into a list.
     pub fn create_list(&self, style: ListStyle) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
@@ -1134,6 +1152,132 @@ impl TextCursor {
         };
         crate::inner::dispatch_queued_events(queued);
         Ok(())
+    }
+
+    /// Set formatting on a list by its ID.
+    pub fn set_list_format(
+        &self,
+        list_id: usize,
+        format: &crate::ListFormat,
+    ) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = format.to_set_dto(list_id);
+            document_formatting_commands::set_list_format(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::FormatChanged {
+                position: 0,
+                length: 0,
+                kind: crate::flow::FormatChangeKind::List,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Set formatting on the list that the current block belongs to.
+    /// Returns an error if the cursor is not inside a list item.
+    pub fn set_current_list_format(&self, format: &crate::ListFormat) -> Result<()> {
+        let list = self
+            .current_list()
+            .ok_or_else(|| anyhow::anyhow!("cursor is not inside a list"))?;
+        self.set_list_format(list.id(), format)
+    }
+
+    /// Add a block to a list by their IDs.
+    pub fn add_block_to_list(&self, block_id: usize, list_id: usize) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::AddBlockToListDto {
+                block_id: to_i64(block_id),
+                list_id: to_i64(list_id),
+            };
+            document_editing_commands::add_block_to_list(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: 0,
+                chars_removed: 0,
+                chars_added: 0,
+                blocks_affected: 1,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Add the block at the cursor position to a list.
+    pub fn add_current_block_to_list(&self, list_id: usize) -> Result<()> {
+        let pos = self.position();
+        let inner = self.doc.lock();
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos),
+        };
+        let block_info =
+            document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
+        drop(inner);
+        self.add_block_to_list(block_info.block_id as usize, list_id)
+    }
+
+    /// Remove a block from its list by block ID.
+    pub fn remove_block_from_list(&self, block_id: usize) -> Result<()> {
+        let queued = {
+            let mut inner = self.doc.lock();
+            let dto = frontend::document_editing::RemoveBlockFromListDto {
+                block_id: to_i64(block_id),
+            };
+            document_editing_commands::remove_block_from_list(
+                &inner.ctx,
+                Some(inner.stack_id),
+                &dto,
+            )?;
+            inner.modified = true;
+            inner.queue_event(DocumentEvent::ContentsChanged {
+                position: 0,
+                chars_removed: 0,
+                chars_added: 0,
+                blocks_affected: 1,
+            });
+            self.queue_undo_redo_event(&mut inner)
+        };
+        crate::inner::dispatch_queued_events(queued);
+        Ok(())
+    }
+
+    /// Remove the block at the cursor position from its list.
+    /// Returns an error if the current block is not a list item.
+    pub fn remove_current_block_from_list(&self) -> Result<()> {
+        let pos = self.position();
+        let inner = self.doc.lock();
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos),
+        };
+        let block_info =
+            document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
+        drop(inner);
+        self.remove_block_from_list(block_info.block_id as usize)
+    }
+
+    /// Remove a list item by index within the list.
+    /// Resolves the index to a block, then removes it from the list.
+    pub fn remove_list_item(&self, list_id: usize, index: usize) -> Result<()> {
+        let list = crate::text_list::TextList {
+            doc: self.doc.clone(),
+            list_id,
+        };
+        let block = list
+            .item(index)
+            .ok_or_else(|| anyhow::anyhow!("list item index {index} out of range"))?;
+        self.remove_block_from_list(block.id())
     }
 
     // ── Format queries ───────────────────────────────────────

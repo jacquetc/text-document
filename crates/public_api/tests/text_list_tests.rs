@@ -1,4 +1,4 @@
-use text_document::{ListStyle, MoveMode, TextDocument};
+use text_document::{ListFormat, ListStyle, MoveMode, TextDocument};
 
 fn new_doc_with_list() -> TextDocument {
     let doc = TextDocument::new();
@@ -249,4 +249,282 @@ fn all_blocks_share_same_list_id() {
     let id2 = doc.block_by_number(2).unwrap().list().unwrap().id();
     assert_eq!(id0, id1);
     assert_eq!(id1, id2);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TextList::format()
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn list_format_returns_all_props() {
+    let doc = new_doc_with_list();
+    let block = doc.block_by_number(0).unwrap();
+    let list = block.list().unwrap();
+    let fmt = list.format();
+    assert_eq!(fmt.style, Some(ListStyle::Decimal));
+    assert_eq!(fmt.indent, Some(0));
+    assert!(fmt.prefix.is_some());
+    assert!(fmt.suffix.is_some());
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TextCursor::current_list()
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn current_list_returns_some_when_in_list() {
+    let doc = new_doc_with_list();
+    let cursor = doc.cursor_at(0);
+    let list = cursor.current_list();
+    assert!(list.is_some());
+    assert_eq!(list.unwrap().style(), ListStyle::Decimal);
+}
+
+#[test]
+fn current_list_returns_none_when_not_in_list() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let cursor = doc.cursor_at(0);
+    assert!(cursor.current_list().is_none());
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// set_list_format / set_current_list_format
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn set_list_format_changes_style() {
+    let doc = new_doc_with_list();
+    let block = doc.block_by_number(0).unwrap();
+    let list = block.list().unwrap();
+    let list_id = list.id();
+
+    let cursor = doc.cursor_at(0);
+    cursor
+        .set_list_format(
+            list_id,
+            &ListFormat {
+                style: Some(ListStyle::Circle),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(list.style(), ListStyle::Circle);
+}
+
+#[test]
+fn set_current_list_format_changes_indent() {
+    let doc = new_doc_with_list();
+    let cursor = doc.cursor_at(0);
+    cursor
+        .set_current_list_format(&ListFormat {
+            indent: Some(2),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    assert_eq!(list.indent(), 2);
+}
+
+#[test]
+fn set_list_format_is_undoable() {
+    let doc = new_doc_with_list();
+    let block = doc.block_by_number(0).unwrap();
+    let list = block.list().unwrap();
+    let list_id = list.id();
+
+    assert_eq!(list.style(), ListStyle::Decimal);
+
+    let cursor = doc.cursor_at(0);
+    cursor
+        .set_list_format(
+            list_id,
+            &ListFormat {
+                style: Some(ListStyle::Square),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(list.style(), ListStyle::Square);
+
+    doc.undo().unwrap();
+    assert_eq!(list.style(), ListStyle::Decimal);
+
+    doc.redo().unwrap();
+    assert_eq!(list.style(), ListStyle::Square);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// add_block_to_list / add_current_block_to_list
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn add_block_to_list_explicit() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Alpha\nBeta\nGamma").unwrap();
+
+    // Create list from first block only
+    let cursor = doc.cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor.set_position(5, MoveMode::KeepAnchor); // select "Alpha"
+    cursor.create_list(ListStyle::Disc).unwrap();
+
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    let list_id = list.id();
+    assert_eq!(list.count(), 1);
+
+    // Add second block explicitly
+    let block1 = doc.block_by_number(1).unwrap();
+    assert!(block1.list().is_none());
+
+    cursor.add_block_to_list(block1.id(), list_id).unwrap();
+    assert_eq!(list.count(), 2);
+    assert!(doc.block_by_number(1).unwrap().list().is_some());
+}
+
+#[test]
+fn add_current_block_to_list() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Alpha\nBeta\nGamma").unwrap();
+
+    // Create list from first block only
+    let cursor = doc.cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor.set_position(5, MoveMode::KeepAnchor);
+    cursor.create_list(ListStyle::Disc).unwrap();
+
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    let list_id = list.id();
+    assert_eq!(list.count(), 1);
+
+    // Move cursor to second block and add it implicitly
+    cursor.set_position(6, MoveMode::MoveAnchor); // inside "Beta"
+    cursor.add_current_block_to_list(list_id).unwrap();
+    assert_eq!(list.count(), 2);
+}
+
+#[test]
+fn add_block_to_list_is_undoable() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Alpha\nBeta").unwrap();
+
+    let cursor = doc.cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor.set_position(5, MoveMode::KeepAnchor);
+    cursor.create_list(ListStyle::Disc).unwrap();
+
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    let list_id = list.id();
+    let block1 = doc.block_by_number(1).unwrap();
+
+    cursor.add_block_to_list(block1.id(), list_id).unwrap();
+    assert_eq!(list.count(), 2);
+
+    doc.undo().unwrap();
+    assert_eq!(list.count(), 1);
+    assert!(doc.block_by_number(1).unwrap().list().is_none());
+
+    doc.redo().unwrap();
+    assert_eq!(list.count(), 2);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// remove_block_from_list / remove_current_block_from_list
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn remove_block_from_list_explicit() {
+    let doc = new_doc_with_list();
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    assert_eq!(list.count(), 3);
+
+    let block1 = doc.block_by_number(1).unwrap();
+    let cursor = doc.cursor();
+    cursor.remove_block_from_list(block1.id()).unwrap();
+
+    // Block 1 is no longer in the list
+    assert!(doc.block_by_number(1).unwrap().list().is_none());
+    assert_eq!(list.count(), 2);
+    // Block still exists in the document
+    assert_eq!(doc.block_by_number(1).unwrap().text(), "Beta");
+}
+
+#[test]
+fn remove_current_block_from_list() {
+    let doc = new_doc_with_list();
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    assert_eq!(list.count(), 3);
+
+    let cursor = doc.cursor_at(6); // inside "Beta"
+    cursor.remove_current_block_from_list().unwrap();
+
+    assert!(doc.block_by_number(1).unwrap().list().is_none());
+    assert_eq!(list.count(), 2);
+}
+
+#[test]
+fn remove_block_from_list_is_undoable() {
+    let doc = new_doc_with_list();
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    let block1 = doc.block_by_number(1).unwrap();
+
+    let cursor = doc.cursor();
+    cursor.remove_block_from_list(block1.id()).unwrap();
+    assert_eq!(list.count(), 2);
+
+    doc.undo().unwrap();
+    assert_eq!(list.count(), 3);
+    assert!(doc.block_by_number(1).unwrap().list().is_some());
+
+    doc.redo().unwrap();
+    assert_eq!(list.count(), 2);
+}
+
+#[test]
+fn remove_last_block_auto_deletes_list() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Solo").unwrap();
+    let cursor = doc.cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor.set_position(4, MoveMode::KeepAnchor);
+    cursor.create_list(ListStyle::Disc).unwrap();
+
+    let block = doc.block_by_number(0).unwrap();
+    assert!(block.list().is_some());
+
+    cursor.remove_block_from_list(block.id()).unwrap();
+    assert!(doc.block_by_number(0).unwrap().list().is_none());
+
+    // Undo restores the list
+    doc.undo().unwrap();
+    assert!(doc.block_by_number(0).unwrap().list().is_some());
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// remove_list_item
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn remove_list_item_by_index() {
+    let doc = new_doc_with_list();
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    let list_id = list.id();
+    assert_eq!(list.count(), 3);
+
+    let cursor = doc.cursor();
+    cursor.remove_list_item(list_id, 1).unwrap(); // remove "Beta"
+
+    assert_eq!(list.count(), 2);
+    // "Beta" block still exists but has no list
+    assert!(doc.block_by_number(1).unwrap().list().is_none());
+}
+
+#[test]
+fn remove_list_item_out_of_range_errors() {
+    let doc = new_doc_with_list();
+    let list = doc.block_by_number(0).unwrap().list().unwrap();
+    let cursor = doc.cursor();
+    assert!(cursor.remove_list_item(list.id(), 99).is_err());
 }

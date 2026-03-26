@@ -5,8 +5,8 @@
 use crate::app_context::AppContext;
 use anyhow::{Context, Result};
 use document_formatting::{
-    MergeTextFormatDto, SetBlockFormatDto, SetFrameFormatDto, SetTableCellFormatDto,
-    SetTableFormatDto, SetTextFormatDto, document_formatting_controller,
+    MergeTextFormatDto, SetBlockFormatDto, SetFrameFormatDto, SetListFormatDto,
+    SetTableCellFormatDto, SetTableFormatDto, SetTextFormatDto, document_formatting_controller,
 };
 
 pub fn set_text_format(
@@ -103,4 +103,20 @@ pub fn set_table_cell_format(
         dto,
     )
     .context("set_table_cell_format")
+}
+
+pub fn set_list_format(
+    ctx: &AppContext,
+    stack_id: Option<u64>,
+    dto: &SetListFormatDto,
+) -> Result<()> {
+    let mut undo_redo_manager = ctx.undo_redo_manager.lock().unwrap();
+    document_formatting_controller::set_list_format(
+        &ctx.db_context,
+        &ctx.event_hub,
+        &mut undo_redo_manager,
+        stack_id,
+        dto,
+    )
+    .context("set_list_format")
 }

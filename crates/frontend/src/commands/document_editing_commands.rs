@@ -5,7 +5,7 @@
 use crate::app_context::AppContext;
 use anyhow::{Context, Result};
 use document_editing::{
-    CreateListDto, CreateListResultDto, DeleteTextDto, DeleteTextResultDto, InsertBlockDto,
+    AddBlockToListDto, CreateListDto, CreateListResultDto, DeleteTextDto, DeleteTextResultDto, InsertBlockDto,
     InsertBlockResultDto, InsertFormattedTextDto, InsertFormattedTextResultDto, InsertFragmentDto,
     InsertFragmentResultDto, InsertFrameDto, InsertFrameResultDto, InsertHtmlAtPositionDto,
     InsertHtmlAtPositionResultDto, InsertImageDto, InsertImageResultDto, InsertListDto,
@@ -13,7 +13,7 @@ use document_editing::{
     InsertTableColumnDto, InsertTableColumnResultDto, InsertTableDto, InsertTableResultDto,
     InsertTableRowDto, InsertTableRowResultDto, InsertTextDto, InsertTextResultDto,
     MergeTableCellsDto, MergeTableCellsResultDto, RemoveTableColumnDto, RemoveTableColumnResultDto,
-    RemoveTableDto, RemoveTableRowDto, RemoveTableRowResultDto, SplitTableCellDto,
+    RemoveBlockFromListDto, RemoveTableDto, RemoveTableRowDto, RemoveTableRowResultDto, SplitTableCellDto,
     SplitTableCellResultDto, document_editing_controller,
 };
 
@@ -315,4 +315,36 @@ pub fn split_table_cell(
         dto,
     )
     .context("split_table_cell")
+}
+
+pub fn add_block_to_list(
+    ctx: &AppContext,
+    stack_id: Option<u64>,
+    dto: &AddBlockToListDto,
+) -> Result<()> {
+    let mut undo_redo_manager = ctx.undo_redo_manager.lock().unwrap();
+    document_editing_controller::add_block_to_list(
+        &ctx.db_context,
+        &ctx.event_hub,
+        &mut undo_redo_manager,
+        stack_id,
+        dto,
+    )
+    .context("add_block_to_list")
+}
+
+pub fn remove_block_from_list(
+    ctx: &AppContext,
+    stack_id: Option<u64>,
+    dto: &RemoveBlockFromListDto,
+) -> Result<()> {
+    let mut undo_redo_manager = ctx.undo_redo_manager.lock().unwrap();
+    document_editing_controller::remove_block_from_list(
+        &ctx.db_context,
+        &ctx.event_hub,
+        &mut undo_redo_manager,
+        stack_id,
+        dto,
+    )
+    .context("remove_block_from_list")
 }

@@ -116,6 +116,17 @@ pub struct SetTableCellFormatDto {
     pub background_color: Option<String>,
 }
 
+pub use common::entities::ListStyle;
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SetListFormatDto {
+    pub list_id: i64,
+    pub style: Option<ListStyle>,
+    pub indent: Option<i64>,
+    pub prefix: Option<String>,
+    pub suffix: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum CellVerticalAlignment {
     #[default]

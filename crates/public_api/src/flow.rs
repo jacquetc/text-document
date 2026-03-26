@@ -239,4 +239,7 @@ pub enum FormatChangeKind {
     /// Character-level: font, bold, italic, underline, color.
     /// Requires reshaping but not necessarily reflow.
     Character,
+    /// List-level: style, indent, prefix, suffix.
+    /// Requires marker relayout for list items.
+    List,
 }

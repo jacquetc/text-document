@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use frontend::commands::{block_commands, list_commands};
 use frontend::common::types::EntityId;
 
-use crate::ListStyle;
+use crate::{ListFormat, ListStyle};
 use crate::inner::TextDocumentInner;
 use crate::text_block::{TextBlock, format_list_marker};
 
@@ -92,6 +92,21 @@ impl TextList {
             doc: Arc::clone(&self.doc),
             block_id: b.id as usize,
         })
+    }
+
+    /// All format properties as a single struct. O(1).
+    pub fn format(&self) -> ListFormat {
+        let inner = self.doc.lock();
+        list_commands::get_list(&inner.ctx, &(self.list_id as u64))
+            .ok()
+            .flatten()
+            .map(|l| ListFormat {
+                style: Some(l.style),
+                indent: Some(l.indent as u8),
+                prefix: Some(l.prefix),
+                suffix: Some(l.suffix),
+            })
+            .unwrap_or_default()
     }
 
     /// Formatted marker for item at index. O(1) (after looking up list properties).

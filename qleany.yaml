@@ -632,6 +632,26 @@ features:
             - name: new_position
               type: integer
 
+      - name: add_block_to_list
+        undoable: true
+        entities: [Document, Block, List]
+        dto_in:
+          name: AddBlockToListDto
+          fields:
+            - name: block_id
+              type: integer
+            - name: list_id
+              type: integer
+
+      - name: remove_block_from_list
+        undoable: true
+        entities: [Document, Block, List]
+        dto_in:
+          name: RemoveBlockFromListDto
+          fields:
+            - name: block_id
+              type: integer
+
       - name: insert_fragment
         undoable: true
         entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
@@ -1044,6 +1064,37 @@ features:
                 - Middle
                 - Bottom
             - name: background_color
+              type: string
+              optional: true
+
+      - name: set_list_format
+        undoable: true
+        entities: [Document, List]
+        dto_in:
+          name: SetListFormatDto
+          fields:
+            - name: list_id
+              type: integer
+            - name: style
+              type: enum
+              enum_name: ListStyle
+              optional: true
+              enum_values:
+                - Disc
+                - Circle
+                - Square
+                - Decimal
+                - LowerAlpha
+                - UpperAlpha
+                - LowerRoman
+                - UpperRoman
+            - name: indent
+              type: integer
+              optional: true
+            - name: prefix
+              type: string
+              optional: true
+            - name: suffix
               type: string
               optional: true
 
