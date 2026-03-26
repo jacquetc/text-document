@@ -87,8 +87,6 @@ impl CommandUnitOfWork for InsertFormattedTextUnitOfWork {
 #[macros::uow_action(entity = "Document", action = "Get")]
 #[macros::uow_action(entity = "Document", action = "Update")]
 #[macros::uow_action(entity = "Document", action = "GetRelationship")]
-#[macros::uow_action(entity = "Document", action = "Snapshot")]
-#[macros::uow_action(entity = "Document", action = "Restore")]
 #[macros::uow_action(entity = "Frame", action = "Get")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "Get")]
@@ -96,10 +94,12 @@ impl CommandUnitOfWork for InsertFormattedTextUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "Update")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
+#[macros::uow_action(entity = "Block", action = "SetRelationship")]
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "InlineElement", action = "Remove")]
 impl InsertFormattedTextUnitOfWorkTrait for InsertFormattedTextUnitOfWork {}
 
 pub struct InsertFormattedTextUnitOfWorkFactory {

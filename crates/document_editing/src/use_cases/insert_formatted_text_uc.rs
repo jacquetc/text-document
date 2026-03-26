@@ -1,14 +1,12 @@
-use super::editing_helpers::{find_block_at_position, find_element_at_offset};
+use super::editing_helpers::find_element_at_offset;
 use crate::InsertFormattedTextDto;
 use crate::InsertFormattedTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
-use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
-use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
@@ -22,8 +20,6 @@ pub trait InsertFormattedTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Document", action = "Get")]
 #[macros::uow_action(entity = "Document", action = "Update")]
 #[macros::uow_action(entity = "Document", action = "GetRelationship")]
-#[macros::uow_action(entity = "Document", action = "Snapshot")]
-#[macros::uow_action(entity = "Document", action = "Restore")]
 #[macros::uow_action(entity = "Frame", action = "Get")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "Get")]
@@ -31,22 +27,46 @@ pub trait InsertFormattedTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "Update")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
+#[macros::uow_action(entity = "Block", action = "SetRelationship")]
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "InlineElement", action = "Remove")]
 pub trait InsertFormattedTextUnitOfWorkTrait: CommandUnitOfWork {}
+
+/// Lightweight undo data — stores only the few entities that actually changed.
+/// No snapshot serialization at all.
+struct UndoData {
+    /// The original inline element before it was split.
+    original_element: InlineElement,
+    /// The original list of element IDs on the block (to restore the relationship).
+    original_element_ids: Vec<EntityId>,
+    /// IDs of elements created by the insertion (to delete on undo).
+    created_element_ids: Vec<EntityId>,
+    /// The original block state (plain_text, text_length, etc.).
+    original_block: Block,
+    /// Document ID and original character_count.
+    doc_id: EntityId,
+    original_character_count: i64,
+    /// Number of chars inserted (to reverse position shifts).
+    text_len: i64,
+    /// Frame ID (to find subsequent blocks on undo).
+    frame_id: EntityId,
+    /// Block ID.
+    block_id: EntityId,
+}
 
 pub struct InsertFormattedTextUseCase {
     uow_factory: Box<dyn InsertFormattedTextUnitOfWorkFactoryTrait>,
-    undo_snapshot: Option<EntityTreeSnapshot>,
+    undo_data: Option<UndoData>,
     last_dto: Option<InsertFormattedTextDto>,
 }
 
 fn execute_insert_formatted_text(
     uow: &mut Box<dyn InsertFormattedTextUnitOfWorkTrait>,
     dto: &InsertFormattedTextDto,
-) -> Result<(InsertFormattedTextResultDto, EntityTreeSnapshot)> {
+) -> Result<(InsertFormattedTextResultDto, UndoData)> {
     let position = std::cmp::min(dto.position, dto.anchor);
 
     // Get Root -> Document
@@ -62,28 +82,46 @@ fn execute_insert_formatted_text(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    // Snapshot for undo before mutation
-    let snapshot = uow.snapshot_document(&[doc_id])?;
-
-    // Get frames
+    // Get frame and its child_order (block IDs in document order)
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-    // Get block IDs from frame
-    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let frame = uow
+        .get_frame(&frame_id)?
+        .ok_or_else(|| anyhow!("Frame not found"))?;
 
-    // Get all blocks
-    let blocks_opt = uow.get_block_multi(&block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
-    blocks.sort_by_key(|b| b.document_position);
+    // Get ordered block IDs — prefer child_order (document order) for binary search,
+    // fall back to reading all blocks if child_order isn't populated.
+    let ordered_block_ids: Vec<EntityId> = if !frame.child_order.is_empty() {
+        frame
+            .child_order
+            .iter()
+            .filter(|&&id| id > 0)
+            .map(|&id| id as EntityId)
+            .collect()
+    } else {
+        // Fallback: read block IDs from relationship
+        use common::direct_access::frame::frame_repository::FrameRelationshipField;
+        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?
+    };
 
-    // Find block at position
-    let (block, block_idx, offset) = find_block_at_position(&blocks, position)?;
+    if ordered_block_ids.is_empty() {
+        return Err(anyhow!("No blocks in document"));
+    }
+
+    // Binary search to find the block at position
+    let (block, block_idx) =
+        find_block_at_position_binary(uow, &ordered_block_ids, position)?;
+    let offset = position - block.document_position;
+
+    // Save original block for undo (cheap clone, no DB serialization)
+    let original_block = block.clone();
 
     // Get elements for this block
     let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+    let original_element_ids = element_ids.clone();
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
     let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
@@ -94,8 +132,12 @@ fn execute_insert_formatted_text(
     // Find element at offset
     let (element, elem_idx, elem_offset) = find_element_at_offset(&elements, offset)?;
 
+    // Save original element for undo
+    let original_element = element.clone();
+
     let now = chrono::Utc::now();
     let text_len = dto.text.chars().count() as i64;
+    let mut created_element_ids: Vec<EntityId> = Vec::new();
 
     // Split the current element at the insertion point and insert a new formatted element
     match &element.content {
@@ -125,7 +167,8 @@ fn execute_insert_formatted_text(
                 ..Default::default()
             };
             let insert_index = (elem_idx + 1) as i32;
-            uow.create_inline_element(&new_elem, block.id, insert_index)?;
+            let created = uow.create_inline_element(&new_elem, block.id, insert_index)?;
+            created_element_ids.push(created.id);
 
             // Create the after element if non-empty
             if !after_text.is_empty() {
@@ -134,7 +177,6 @@ fn execute_insert_formatted_text(
                     created_at: now,
                     updated_at: now,
                     content: InlineContent::Text(after_text),
-                    // Copy formatting from the original element
                     fmt_font_family: element.fmt_font_family.clone(),
                     fmt_font_point_size: element.fmt_font_point_size,
                     fmt_font_bold: element.fmt_font_bold,
@@ -152,11 +194,12 @@ fn execute_insert_formatted_text(
                     fmt_underline_style: element.fmt_underline_style.clone(),
                     fmt_vertical_alignment: element.fmt_vertical_alignment.clone(),
                 };
-                uow.create_inline_element(&after_elem, block.id, insert_index + 1)?;
+                let created_after =
+                    uow.create_inline_element(&after_elem, block.id, insert_index + 1)?;
+                created_element_ids.push(created_after.id);
             }
         }
         InlineContent::Empty => {
-            // Replace the empty element content with our formatted text
             let mut updated = element.clone();
             updated.content = InlineContent::Text(dto.text.clone());
             updated.fmt_font_family = Some(dto.font_family.clone());
@@ -176,7 +219,6 @@ fn execute_insert_formatted_text(
     // Update block cached fields
     let mut updated_block = block.clone();
     updated_block.text_length += text_len;
-    // Rebuild plain_text: insert at the offset
     let mut plain = updated_block.plain_text.clone();
     let byte_pos = {
         let mut idx = 0;
@@ -199,16 +241,20 @@ fn execute_insert_formatted_text(
     updated_block.updated_at = now;
     uow.update_block(&updated_block)?;
 
-    // Update subsequent blocks' document_position
-    let mut blocks_to_update: Vec<Block> = Vec::new();
-    for b in &blocks[(block_idx + 1)..] {
-        let mut ub = b.clone();
-        ub.document_position += text_len;
-        ub.updated_at = now;
-        blocks_to_update.push(ub);
-    }
-    if !blocks_to_update.is_empty() {
-        uow.update_block_multi(&blocks_to_update)?;
+    // Update subsequent blocks' document_position — only read blocks AFTER the target
+    let subsequent_ids: Vec<EntityId> = ordered_block_ids[(block_idx + 1)..].to_vec();
+    if !subsequent_ids.is_empty() {
+        let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
+        let mut blocks_to_update: Vec<Block> = Vec::new();
+        for b in subsequent_opt.into_iter().flatten() {
+            let mut ub = b;
+            ub.document_position += text_len;
+            ub.updated_at = now;
+            blocks_to_update.push(ub);
+        }
+        if !blocks_to_update.is_empty() {
+            uow.update_block_multi(&blocks_to_update)?;
+        }
     }
 
     // Update Document.character_count
@@ -217,19 +263,71 @@ fn execute_insert_formatted_text(
     updated_doc.updated_at = now;
     uow.update_document(&updated_doc)?;
 
+    let undo_data = UndoData {
+        original_element,
+        original_element_ids,
+        created_element_ids,
+        original_block,
+        doc_id,
+        original_character_count: document.character_count,
+        text_len,
+        frame_id,
+        block_id: block.id,
+    };
+
     Ok((
         InsertFormattedTextResultDto {
             new_position: position + text_len,
         },
-        snapshot,
+        undo_data,
     ))
+}
+
+/// Binary search through ordered block IDs to find the block containing `position`.
+fn find_block_at_position_binary(
+    uow: &Box<dyn InsertFormattedTextUnitOfWorkTrait>,
+    ordered_block_ids: &[EntityId],
+    position: i64,
+) -> Result<(Block, usize)> {
+    if ordered_block_ids.is_empty() {
+        return Err(anyhow!("No blocks in document"));
+    }
+
+    let mut left = 0usize;
+    let mut right = ordered_block_ids.len() - 1;
+
+    while left <= right {
+        let mid = left + (right - left) / 2;
+        let block = uow
+            .get_block(&ordered_block_ids[mid])?
+            .ok_or_else(|| anyhow!("Block not found"))?;
+        let block_end = block.document_position + block.text_length;
+
+        if position >= block.document_position && position <= block_end {
+            return Ok((block, mid));
+        } else if position < block.document_position {
+            if mid == 0 {
+                return Ok((block, mid));
+            }
+            right = mid - 1;
+        } else {
+            left = mid + 1;
+        }
+    }
+
+    // Fallback to last block
+    let last_idx = ordered_block_ids.len() - 1;
+    let block = uow
+        .get_block(&ordered_block_ids[last_idx])?
+        .ok_or_else(|| anyhow!("Block not found"))?;
+    Ok((block, last_idx))
 }
 
 impl InsertFormattedTextUseCase {
     pub fn new(uow_factory: Box<dyn InsertFormattedTextUnitOfWorkFactoryTrait>) -> Self {
         InsertFormattedTextUseCase {
             uow_factory,
-            undo_snapshot: None,
+            undo_data: None,
             last_dto: None,
         }
     }
@@ -241,8 +339,8 @@ impl InsertFormattedTextUseCase {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        let (result, snapshot) = execute_insert_formatted_text(&mut uow, dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let (result, undo_data) = execute_insert_formatted_text(&mut uow, dto)?;
+        self.undo_data = Some(undo_data);
         self.last_dto = Some(dto.clone());
 
         uow.commit()?;
@@ -252,15 +350,73 @@ impl InsertFormattedTextUseCase {
 
 impl UndoRedoCommand for InsertFormattedTextUseCase {
     fn undo(&mut self) -> Result<()> {
-        let snapshot = self
-            .undo_snapshot
+        let undo_data = self
+            .undo_data
             .as_ref()
-            .ok_or_else(|| anyhow!("No snapshot available for undo"))?
-            .clone();
+            .ok_or_else(|| anyhow!("No undo data available"))?;
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        uow.restore_document(&snapshot)?;
+
+        // 1. Delete created elements
+        for &elem_id in &undo_data.created_element_ids {
+            uow.remove_inline_element(&elem_id)?;
+        }
+
+        // 2. Restore the original element
+        uow.update_inline_element(&undo_data.original_element)?;
+
+        // 3. Restore the block's element relationship to original
+        uow.set_block_relationship(
+            &undo_data.block_id,
+            &BlockRelationshipField::Elements,
+            &undo_data.original_element_ids,
+        )?;
+
+        // 4. Restore the original block (plain_text, text_length, etc.)
+        uow.update_block(&undo_data.original_block)?;
+
+        // 5. Reverse position shifts on subsequent blocks
+        let frame = uow
+            .get_frame(&undo_data.frame_id)?
+            .ok_or_else(|| anyhow!("Frame not found"))?;
+        let ordered_block_ids: Vec<EntityId> = frame
+            .child_order
+            .iter()
+            .filter(|&&id| id > 0)
+            .map(|&id| id as EntityId)
+            .collect();
+
+        if let Some(block_idx) = ordered_block_ids
+            .iter()
+            .position(|&id| id == undo_data.block_id)
+        {
+            let subsequent_ids: Vec<EntityId> =
+                ordered_block_ids[(block_idx + 1)..].to_vec();
+            if !subsequent_ids.is_empty() {
+                let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
+                let now = chrono::Utc::now();
+                let mut blocks_to_update: Vec<Block> = Vec::new();
+                for b in subsequent_opt.into_iter().flatten() {
+                    let mut ub = b;
+                    ub.document_position -= undo_data.text_len;
+                    ub.updated_at = now;
+                    blocks_to_update.push(ub);
+                }
+                if !blocks_to_update.is_empty() {
+                    uow.update_block_multi(&blocks_to_update)?;
+                }
+            }
+        }
+
+        // 6. Restore document character_count
+        let mut doc = uow
+            .get_document(&undo_data.doc_id)?
+            .ok_or_else(|| anyhow!("Document not found"))?;
+        doc.character_count = undo_data.original_character_count;
+        doc.updated_at = chrono::Utc::now();
+        uow.update_document(&doc)?;
+
         uow.commit()?;
         Ok(())
     }
@@ -274,8 +430,8 @@ impl UndoRedoCommand for InsertFormattedTextUseCase {
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        let (_, snapshot) = execute_insert_formatted_text(&mut uow, &dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let (_, undo_data) = execute_insert_formatted_text(&mut uow, &dto)?;
+        self.undo_data = Some(undo_data);
         uow.commit()?;
         Ok(())
     }
