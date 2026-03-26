@@ -27,7 +27,8 @@ fn test_insert_markdown_simple_paragraph() -> Result<()> {
         },
     )?;
 
-    assert!(result.blocks_added >= 1);
+    // Single plain paragraph merges inline — no new blocks
+    assert_eq!(result.blocks_added, 0);
 
     // Verify the text was inserted
     let text = export_text(&db_context, &event_hub)?;
@@ -70,7 +71,11 @@ fn test_insert_markdown_multiple_paragraphs() -> Result<()> {
         },
     )?;
 
-    assert!(result.blocks_added >= 2, "Should add at least 2 blocks");
+    // Two parsed blocks: first merges into current, last becomes tail → 1 block added
+    assert_eq!(
+        result.blocks_added, 1,
+        "Two-block merge should add 1 block (tail)"
+    );
 
     let text = export_text(&db_context, &event_hub)?;
     assert!(text.contains("Para 1"));
@@ -195,7 +200,8 @@ fn test_insert_html_simple() -> Result<()> {
         },
     )?;
 
-    assert!(result.blocks_added >= 1);
+    // Single plain paragraph merges inline — no new blocks
+    assert_eq!(result.blocks_added, 0);
 
     let text = export_text(&db_context, &event_hub)?;
     assert!(text.contains("world"));
@@ -237,7 +243,11 @@ fn test_insert_html_multiple_paragraphs() -> Result<()> {
         },
     )?;
 
-    assert!(result.blocks_added >= 2, "Should add at least 2 blocks");
+    // Two parsed blocks: first merges into current, last becomes tail → 1 block added
+    assert_eq!(
+        result.blocks_added, 1,
+        "Two-block merge should add 1 block (tail)"
+    );
 
     let text = export_text(&db_context, &event_hub)?;
     assert!(text.contains("A"));
@@ -335,7 +345,8 @@ fn test_insert_fragment_simple() -> Result<()> {
         },
     )?;
 
-    assert!(result.blocks_added >= 1);
+    // Single inline-only fragment block merges inline — no new blocks
+    assert_eq!(result.blocks_added, 0);
 
     let block_ids = get_block_ids(&db_context)?;
     let mut found_bold = false;
@@ -450,7 +461,8 @@ fn test_insert_markdown_nested_bold_italic() -> Result<()> {
         },
     )?;
 
-    assert!(result.blocks_added >= 1);
+    // Single inline paragraph merges — no new blocks
+    assert_eq!(result.blocks_added, 0);
 
     let block_ids = get_block_ids(&db_context)?;
     let mut found_bi = false;
@@ -504,6 +516,202 @@ fn test_insert_html_link() -> Result<()> {
         }
     }
     assert!(found_link, "Should find an element with link href");
+
+    Ok(())
+}
+
+// ─── Inline merge tests ─────────────────────────────────────────────
+
+#[test]
+fn test_insert_html_single_paragraph_merges_inline() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello world")?;
+
+    let block_ids_before = get_block_ids(&db_context)?;
+    let block_count_before = block_ids_before.len();
+
+    let result = document_editing_controller::insert_html_at_position(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertHtmlAtPositionDto {
+            position: 5,
+            anchor: 5,
+            html: "<p> <b>beautiful</b></p>".to_string(),
+        },
+    )?;
+
+    // Single-paragraph inline HTML should NOT create new blocks
+    assert_eq!(
+        result.blocks_added, 0,
+        "Single inline block should not add blocks"
+    );
+
+    let block_ids_after = get_block_ids(&db_context)?;
+    assert_eq!(
+        block_ids_after.len(),
+        block_count_before,
+        "Block count should remain the same for inline merge"
+    );
+
+    // Verify text is merged
+    let text = export_text(&db_context, &event_hub)?;
+    assert!(
+        text.contains("Hello beautiful world"),
+        "Text should be merged inline, got: {}",
+        text
+    );
+
+    // Verify bold formatting on "beautiful"
+    let mut found_bold = false;
+    for block_id in &block_ids_after {
+        let elem_ids = get_element_ids(&db_context, block_id)?;
+        for elem_id in &elem_ids {
+            let elem = inline_element_controller::get(&db_context, elem_id)?;
+            if let Some(elem) = elem
+                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && t == "beautiful"
+            {
+                assert_eq!(elem.fmt_font_bold, Some(true));
+                found_bold = true;
+            }
+        }
+    }
+    assert!(found_bold, "Should find a bold 'beautiful' element");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_html_single_paragraph_merges_inline_undo() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello world")?;
+
+    let original_text = export_text(&db_context, &event_hub)?;
+
+    document_editing_controller::insert_html_at_position(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertHtmlAtPositionDto {
+            position: 5,
+            anchor: 5,
+            html: "<b>bold</b>".to_string(),
+        },
+    )?;
+
+    let after_insert = export_text(&db_context, &event_hub)?;
+    assert_ne!(after_insert, original_text);
+
+    // Undo should restore original state
+    undo_redo_manager.undo(None)?;
+    let after_undo = export_text(&db_context, &event_hub)?;
+    assert_eq!(after_undo, original_text);
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_markdown_single_paragraph_merges_inline() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello world")?;
+
+    let block_ids_before = get_block_ids(&db_context)?;
+    let block_count_before = block_ids_before.len();
+
+    let result = document_editing_controller::insert_markdown_at_position(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertMarkdownAtPositionDto {
+            position: 6, // After "Hello " (past the space)
+            anchor: 6,
+            markdown: "**beautiful** ".to_string(),
+        },
+    )?;
+
+    assert_eq!(
+        result.blocks_added, 0,
+        "Single inline block should not add blocks"
+    );
+
+    let block_ids_after = get_block_ids(&db_context)?;
+    assert_eq!(block_ids_after.len(), block_count_before);
+
+    let text = export_text(&db_context, &event_hub)?;
+    assert!(
+        text.contains("beautiful"),
+        "Text should be merged inline, got: {}",
+        text
+    );
+
+    Ok(())
+}
+
+// ─── Multi-block merge tests ────────────────────────────────────────
+
+#[test]
+fn test_insert_html_multi_block_merges_first_and_last() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("HelloWorld")?;
+
+    let block_ids_before = get_block_ids(&db_context)?;
+    assert_eq!(block_ids_before.len(), 1);
+
+    // Insert 3 paragraphs at position 5 (between "Hello" and "World")
+    let result = document_editing_controller::insert_html_at_position(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertHtmlAtPositionDto {
+            position: 5,
+            anchor: 5,
+            html: "<p>A</p><p>B</p><p>C</p>".to_string(),
+        },
+    )?;
+
+    // 3 parsed blocks: first merges into current, 1 middle block, last→tail = 2 added
+    assert_eq!(result.blocks_added, 2);
+
+    let text = export_text(&db_context, &event_hub)?;
+    // Expected: "HelloA" / "B" / "CWorld"
+    assert_eq!(
+        text, "HelloA\nB\nCWorld",
+        "Expected merged first/last with middle blocks, got: {}",
+        text
+    );
+
+    let block_ids_after = get_block_ids(&db_context)?;
+    assert_eq!(block_ids_after.len(), 3, "Should have 3 blocks total");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_html_two_blocks_no_middle() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("HelloWorld")?;
+
+    let result = document_editing_controller::insert_html_at_position(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertHtmlAtPositionDto {
+            position: 5,
+            anchor: 5,
+            html: "<p>A</p><p>B</p>".to_string(),
+        },
+    )?;
+
+    assert_eq!(result.blocks_added, 1);
+
+    let text = export_text(&db_context, &event_hub)?;
+    // Expected: "HelloA" / "BWorld"
+    assert_eq!(
+        text, "HelloA\nBWorld",
+        "Expected two-block merge, got: {}",
+        text
+    );
 
     Ok(())
 }

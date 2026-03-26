@@ -25,6 +25,20 @@ pub struct ParsedBlock {
     pub background_color: Option<String>,
 }
 
+impl ParsedBlock {
+    /// Returns `true` when this block carries no block-level formatting,
+    /// meaning its content is purely inline.
+    pub fn is_inline_only(&self) -> bool {
+        self.heading_level.is_none()
+            && self.list_style.is_none()
+            && !self.is_code_block
+            && self.line_height.is_none()
+            && self.non_breakable_lines.is_none()
+            && self.direction.is_none()
+            && self.background_color.is_none()
+    }
+}
+
 // ─── Markdown parsing ────────────────────────────────────────────────
 
 pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {

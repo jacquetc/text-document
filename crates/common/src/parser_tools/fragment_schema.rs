@@ -107,6 +107,25 @@ impl FragmentElement {
 }
 
 impl FragmentBlock {
+    /// Returns `true` when this block carries no block-level formatting,
+    /// meaning its content is purely inline.
+    pub fn is_inline_only(&self) -> bool {
+        self.heading_level.is_none()
+            && self.list.is_none()
+            && self.alignment.is_none()
+            && self.indent.unwrap_or(0) == 0
+            && self.text_indent.unwrap_or(0) == 0
+            && self.marker.is_none()
+            && self.top_margin.is_none()
+            && self.bottom_margin.is_none()
+            && self.left_margin.is_none()
+            && self.right_margin.is_none()
+            && self.line_height.is_none()
+            && self.non_breakable_lines.is_none()
+            && self.direction.is_none()
+            && self.background_color.is_none()
+    }
+
     pub fn from_entity(block: &Block, elements: &[InlineElement], list: Option<&List>) -> Self {
         FragmentBlock {
             plain_text: block.plain_text.clone(),

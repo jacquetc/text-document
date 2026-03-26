@@ -174,3 +174,132 @@ fn fragment_debug() {
     let debug = format!("{:?}", frag);
     assert!(debug.contains("DocumentFragment"));
 }
+
+// ── to_html inline-only detection ────────────────────────────────
+
+#[test]
+fn to_html_inline_only_no_p_wrapper() {
+    // A partial (inline-only) selection should not be wrapped in <p>
+    let inline_frag = DocumentFragment::from_html("<b>bold</b>");
+    let html = inline_frag.to_html();
+    assert!(
+        html.contains("<strong>bold</strong>"),
+        "Expected inline bold tag, got: {}",
+        html
+    );
+    assert!(
+        !html.contains("<p>"),
+        "Should not wrap inline-only fragment in <p>, got: {}",
+        html
+    );
+
+    // Also verify via cursor extraction of a partial selection
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let cursor = doc.cursor_at(0);
+    cursor.move_position(MoveOperation::Right, MoveMode::KeepAnchor, 5);
+    let sel_frag = cursor.selection();
+    assert_eq!(sel_frag.to_plain_text(), "Hello");
+    let sel_html = sel_frag.to_html();
+    assert!(
+        !sel_html.contains("<p>"),
+        "Partial selection should not have <p>, got: {}",
+        sel_html
+    );
+    assert!(
+        sel_html.contains("Hello"),
+        "Should contain the selected text, got: {}",
+        sel_html
+    );
+}
+
+#[test]
+fn to_html_full_plain_block_no_p_wrapper() {
+    // A single plain paragraph (no heading, list, etc.) is inline-only
+    let doc = new_doc_with_text("Hello world");
+    let cursor = doc.cursor();
+    cursor.select(SelectionType::Document);
+    let frag = cursor.selection();
+    let html = frag.to_html();
+    // Single plain paragraph has no block-level formatting → no <p> wrapper
+    assert!(
+        !html.contains("<p>"),
+        "Single plain block should not have <p>, got: {}",
+        html
+    );
+    assert!(html.contains("Hello world"));
+}
+
+#[test]
+fn to_html_multi_block_keeps_p_wrappers() {
+    let frag = DocumentFragment::from_plain_text("Line 1\nLine 2");
+    let html = frag.to_html();
+    // Multi-block should always use <p> wrappers
+    assert!(
+        html.contains("<p>Line 1</p>"),
+        "Expected <p> for first line, got: {}",
+        html
+    );
+    assert!(
+        html.contains("<p>Line 2</p>"),
+        "Expected <p> for second line, got: {}",
+        html
+    );
+}
+
+#[test]
+fn to_html_from_html_inline_fragment() {
+    let frag = DocumentFragment::from_html("<b>bold</b>");
+    let html = frag.to_html();
+    // Single inline block from HTML should not wrap in <p>
+    assert!(
+        html.contains("<strong>bold</strong>"),
+        "Expected bold tag, got: {}",
+        html
+    );
+    assert!(
+        !html.contains("<p>"),
+        "Should not wrap in <p>, got: {}",
+        html
+    );
+}
+
+// ── insert_html inline merge ─────────────────────────────────────
+
+#[test]
+fn cursor_insert_html_merges_inline() {
+    let doc = new_doc_with_text("Hello world");
+    let cursor = doc.cursor_at(6); // After "Hello " (position 6 = after the space)
+
+    let block_count_before = doc.stats().block_count;
+
+    cursor.insert_html("<b>beautiful</b>").unwrap();
+
+    let text = doc.to_plain_text().unwrap();
+    assert!(
+        text.contains("Hello beautiful"),
+        "Expected merged text, got: {}",
+        text
+    );
+
+    // Block count should NOT increase for inline content
+    assert_eq!(
+        doc.stats().block_count,
+        block_count_before,
+        "Inline HTML insert should not create new blocks"
+    );
+}
+
+#[test]
+fn cursor_insert_html_multi_paragraph_creates_blocks() {
+    let doc = new_doc_with_text("Hello world");
+    let block_count_before = doc.stats().block_count;
+
+    let cursor = doc.cursor_at(5);
+    cursor.insert_html("<p>A</p><p>B</p>").unwrap();
+
+    assert!(
+        doc.stats().block_count > block_count_before,
+        "Multi-paragraph HTML should create new blocks"
+    );
+}

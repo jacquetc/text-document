@@ -136,6 +136,16 @@ impl DocumentFragment {
 
         let mut body = String::new();
         let blocks = &fragment_data.blocks;
+
+        // Single inline-only block: emit inline HTML without block wrapper
+        if blocks.len() == 1 && blocks[0].is_inline_only() {
+            push_inline_html(&mut body, &blocks[0].elements);
+            return format!(
+                "<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>",
+                body
+            );
+        }
+
         let mut i = 0;
 
         while i < blocks.len() {

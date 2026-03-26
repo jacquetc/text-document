@@ -146,7 +146,8 @@ fn test_insert_fragment_roundtrip() -> Result<()> {
         },
     )?;
 
-    assert!(insert_result.blocks_added >= 1);
+    // Partial-block fragment is inline-only — merges without adding blocks
+    assert_eq!(insert_result.blocks_added, 0);
 
     let text = export_text(&db_context, &event_hub)?;
     assert!(
@@ -475,7 +476,8 @@ fn test_extract_insert_fragment_with_image() -> Result<()> {
         },
     )?;
 
-    assert!(result.blocks_added >= 1);
+    // Partial-block image fragment is inline-only — merges without adding blocks
+    assert_eq!(result.blocks_added, 0);
 
     Ok(())
 }

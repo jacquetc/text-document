@@ -1,4 +1,4 @@
-use super::editing_helpers::find_block_at_position;
+use super::editing_helpers::{find_block_at_position, find_element_at_offset};
 use crate::InsertFragmentDto;
 use crate::InsertFragmentResultDto;
 use anyhow::{Result, anyhow};
@@ -105,6 +105,102 @@ fn execute_insert_fragment(
 
     let plain_chars: Vec<char> = current_block.plain_text.chars().collect();
     let split_pos = (offset as usize).min(plain_chars.len());
+
+    // ── Inline merge: single block with no block-level formatting ──
+    if fragment_data.blocks.len() == 1 && fragment_data.blocks[0].is_inline_only() {
+        let frag_block = &fragment_data.blocks[0];
+        let inserted_plain = &frag_block.plain_text;
+        let inserted_len = inserted_plain.chars().count() as i64;
+
+        if inserted_len == 0 {
+            return Ok((
+                InsertFragmentResultDto {
+                    new_position: dto.position,
+                    blocks_added: 0,
+                },
+                snapshot,
+            ));
+        }
+
+        let now = chrono::Utc::now();
+
+        // Find element at the cursor offset
+        let (target_elem, elem_idx, local_offset) = find_element_at_offset(&elements, offset)?;
+
+        // Split the target element: keep "before" text in place
+        let after_text = match &target_elem.content {
+            InlineContent::Text(s) => {
+                let chars: Vec<char> = s.chars().collect();
+                let lo = local_offset as usize;
+                let before: String = chars[..lo].iter().collect();
+                let after: String = chars[lo..].iter().collect();
+
+                let mut updated = target_elem.clone();
+                updated.content = InlineContent::Text(before);
+                updated.updated_at = now;
+                uow.update_inline_element(&updated)?;
+
+                after
+            }
+            _ => String::new(),
+        };
+
+        // Create new inline elements from fragment
+        let mut insert_idx = (elem_idx + 1) as i32;
+        for frag_elem in &frag_block.elements {
+            let elem = frag_elem.to_entity();
+            uow.create_inline_element(&elem, current_block.id, insert_idx)?;
+            insert_idx += 1;
+        }
+
+        // Create element for remaining text (preserving original formatting)
+        if !after_text.is_empty() {
+            let mut after_elem = target_elem.clone();
+            after_elem.id = 0;
+            after_elem.content = InlineContent::Text(after_text);
+            after_elem.created_at = now;
+            after_elem.updated_at = now;
+            uow.create_inline_element(&after_elem, current_block.id, insert_idx)?;
+        }
+
+        // Update block metadata
+        let new_plain: String = plain_chars[..split_pos].iter().collect::<String>()
+            + inserted_plain
+            + &plain_chars[split_pos..].iter().collect::<String>();
+        let mut updated_block = current_block.clone();
+        updated_block.plain_text = new_plain;
+        updated_block.text_length += inserted_len;
+        updated_block.updated_at = now;
+        uow.update_block(&updated_block)?;
+
+        // Shift subsequent blocks
+        let mut blocks_to_update: Vec<Block> = Vec::new();
+        for b in &blocks[(block_idx + 1)..] {
+            let mut ub = b.clone();
+            ub.document_position += inserted_len;
+            ub.updated_at = now;
+            blocks_to_update.push(ub);
+        }
+        if !blocks_to_update.is_empty() {
+            uow.update_block_multi(&blocks_to_update)?;
+        }
+
+        // Update document character count
+        let mut updated_doc = document.clone();
+        updated_doc.character_count += inserted_len;
+        updated_doc.updated_at = now;
+        uow.update_document(&updated_doc)?;
+
+        return Ok((
+            InsertFragmentResultDto {
+                new_position: dto.position + inserted_len,
+                blocks_added: 0,
+            },
+            snapshot,
+        ));
+    }
+
+    // ── Block-splitting path (multi-block or block-level content) ──
     let text_before: String = plain_chars[..split_pos].iter().collect();
     let text_after: String = plain_chars[split_pos..].iter().collect();
 
@@ -193,22 +289,199 @@ fn execute_insert_fragment(
         });
     }
 
-    // Update current block with text before
-    let mut updated_current = current_block.clone();
-    updated_current.plain_text = text_before.clone();
-    updated_current.text_length = text_before.chars().count() as i64;
-    updated_current.updated_at = now;
-    uow.update_block(&updated_current)?;
+    // Helper: create fragment elements on a block
+    fn create_frag_elements(
+        uow: &mut Box<dyn InsertFragmentUnitOfWorkTrait>,
+        elements: &[common::parser_tools::fragment_schema::FragmentElement],
+        block_id: EntityId,
+    ) -> Result<()> {
+        for frag_elem in elements {
+            let elem = frag_elem.to_entity();
+            uow.create_inline_element(&elem, block_id, -1)?;
+        }
+        Ok(())
+    }
 
-    // Create new blocks from fragment data
-    let mut new_block_ids: Vec<EntityId> = Vec::new();
-    let mut total_new_chars: i64 = 0;
-    let mut running_position = current_block.document_position + updated_current.text_length + 1;
+    if fragment_data.blocks.len() >= 2 {
+        // ── Multi-block merge: first→current, middle→new, last→tail ──
 
-    for frag_block in &fragment_data.blocks {
+        let first_frag = &fragment_data.blocks[0];
+        let first_len = first_frag.plain_text.chars().count() as i64;
+
+        let mut updated_current = current_block.clone();
+        updated_current.plain_text = text_before.clone() + &first_frag.plain_text;
+        updated_current.text_length = text_before.chars().count() as i64 + first_len;
+        updated_current.updated_at = now;
+        uow.update_block(&updated_current)?;
+
+        create_frag_elements(uow, &first_frag.elements, current_block.id)?;
+
+        let mut new_block_ids: Vec<EntityId> = Vec::new();
+        let mut total_new_chars: i64 = first_len;
+        let mut running_position =
+            current_block.document_position + updated_current.text_length + 1;
+
+        // Create middle blocks (indices 1..n-1)
+        for frag_block in &fragment_data.blocks[1..fragment_data.blocks.len() - 1] {
+            let block_text_len = frag_block.plain_text.chars().count() as i64;
+
+            let list_id = if let Some(ref frag_list) = frag_block.list {
+                let list = frag_list.to_entity();
+                let created_list = uow.create_list(&list, doc_id, -1)?;
+                Some(created_list.id)
+            } else {
+                None
+            };
+
+            let new_block = Block {
+                id: 0,
+                created_at: now,
+                updated_at: now,
+                elements: vec![],
+                list: list_id,
+                text_length: block_text_len,
+                document_position: running_position,
+                plain_text: frag_block.plain_text.clone(),
+                fmt_alignment: frag_block.alignment.clone(),
+                fmt_top_margin: frag_block.top_margin,
+                fmt_bottom_margin: frag_block.bottom_margin,
+                fmt_left_margin: frag_block.left_margin,
+                fmt_right_margin: frag_block.right_margin,
+                fmt_heading_level: frag_block.heading_level,
+                fmt_indent: frag_block.indent,
+                fmt_text_indent: frag_block.text_indent,
+                fmt_marker: frag_block.marker.clone(),
+                fmt_tab_positions: frag_block.tab_positions.clone(),
+                fmt_line_height: frag_block.line_height,
+                fmt_non_breakable_lines: frag_block.non_breakable_lines,
+                fmt_direction: frag_block.direction.clone(),
+                fmt_background_color: frag_block.background_color.clone(),
+            };
+
+            let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
+            let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
+
+            create_frag_elements(uow, &frag_block.elements, created_block.id)?;
+
+            if frag_block.elements.is_empty() {
+                let elem = InlineElement {
+                    id: 0,
+                    created_at: now,
+                    updated_at: now,
+                    content: InlineContent::Text(String::new()),
+                    ..Default::default()
+                };
+                uow.create_inline_element(&elem, created_block.id, -1)?;
+            }
+
+            new_block_ids.push(created_block.id);
+            total_new_chars += block_text_len;
+            running_position += block_text_len + 1;
+        }
+
+        // Merge last fragment block's inline content into the tail block
+        let last_frag = &fragment_data.blocks[fragment_data.blocks.len() - 1];
+        let last_len = last_frag.plain_text.chars().count() as i64;
+
+        let tail_plain = last_frag.plain_text.clone() + &text_after;
+        let tail_block = Block {
+            id: 0,
+            created_at: now,
+            updated_at: now,
+            elements: vec![],
+            list: current_block.list,
+            text_length: tail_plain.chars().count() as i64,
+            document_position: running_position,
+            plain_text: tail_plain,
+            fmt_alignment: current_block.fmt_alignment.clone(),
+            fmt_top_margin: current_block.fmt_top_margin,
+            fmt_bottom_margin: current_block.fmt_bottom_margin,
+            fmt_left_margin: current_block.fmt_left_margin,
+            fmt_right_margin: current_block.fmt_right_margin,
+            fmt_heading_level: current_block.fmt_heading_level,
+            fmt_indent: current_block.fmt_indent,
+            fmt_text_indent: current_block.fmt_text_indent,
+            fmt_marker: current_block.fmt_marker.clone(),
+            fmt_tab_positions: current_block.fmt_tab_positions.clone(),
+            fmt_line_height: current_block.fmt_line_height,
+            fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
+            fmt_direction: current_block.fmt_direction.clone(),
+            fmt_background_color: current_block.fmt_background_color.clone(),
+        };
+
+        let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
+        let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
+
+        // Last block's elements first, then the original after-elements
+        create_frag_elements(uow, &last_frag.elements, created_tail.id)?;
+        for after_elem in &after_elements {
+            uow.create_inline_element(after_elem, created_tail.id, -1)?;
+        }
+
+        total_new_chars += last_len;
+
+        // Update frame child_order
+        let mut updated_frame = frame.clone();
+        let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
+        let mut new_child_ids: Vec<i64> = new_block_ids.iter().map(|id| *id as i64).collect();
+        new_child_ids.push(created_tail.id as i64);
+
+        for (i, id) in new_child_ids.iter().enumerate() {
+            updated_frame
+                .child_order
+                .insert(child_order_insert_pos + i, *id);
+        }
+        updated_frame.updated_at = now;
+        updated_frame.blocks =
+            uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+        uow.update_frame(&updated_frame)?;
+
+        let middle_count = fragment_data.blocks.len() as i64 - 2;
+        let blocks_added = middle_count + 1;
+        let original_next_pos = current_block.document_position + current_block.text_length + 1;
+        let new_next_pos = running_position + created_tail.text_length + 1;
+        let pos_shift = new_next_pos - original_next_pos;
+
+        let mut blocks_to_update: Vec<Block> = Vec::new();
+        for b in &blocks[(block_idx + 1)..] {
+            let mut ub = b.clone();
+            ub.document_position += pos_shift;
+            ub.updated_at = now;
+            blocks_to_update.push(ub);
+        }
+        if !blocks_to_update.is_empty() {
+            uow.update_block_multi(&blocks_to_update)?;
+        }
+
+        let mut updated_doc = document.clone();
+        updated_doc.block_count += blocks_added;
+        updated_doc.character_count += total_new_chars;
+        updated_doc.updated_at = now;
+        uow.update_document(&updated_doc)?;
+
+        let new_position = created_tail.document_position + last_len;
+
+        Ok((
+            InsertFragmentResultDto {
+                new_position,
+                blocks_added,
+            },
+            snapshot,
+        ))
+    } else {
+        // ── Single block with block-level formatting ──
+        let frag_block = &fragment_data.blocks[0];
         let block_text_len = frag_block.plain_text.chars().count() as i64;
 
-        // Create list entity if fragment block has one
+        let mut updated_current = current_block.clone();
+        updated_current.plain_text = text_before.clone();
+        updated_current.text_length = text_before.chars().count() as i64;
+        updated_current.updated_at = now;
+        uow.update_block(&updated_current)?;
+
+        let mut running_position =
+            current_block.document_position + updated_current.text_length + 1;
+
         let list_id = if let Some(ref frag_list) = frag_block.list {
             let list = frag_list.to_entity();
             let created_list = uow.create_list(&list, doc_id, -1)?;
@@ -242,16 +515,9 @@ fn execute_insert_fragment(
             fmt_background_color: frag_block.background_color.clone(),
         };
 
-        let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
-        let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
+        let created_block = uow.create_block(&new_block, frame_id, (block_idx + 1) as i32)?;
+        create_frag_elements(uow, &frag_block.elements, created_block.id)?;
 
-        // Create inline elements from fragment
-        for frag_elem in &frag_block.elements {
-            let elem = frag_elem.to_entity();
-            uow.create_inline_element(&elem, created_block.id, -1)?;
-        }
-
-        // If no elements, create an empty text element
         if frag_block.elements.is_empty() {
             let elem = InlineElement {
                 id: 0,
@@ -263,94 +529,81 @@ fn execute_insert_fragment(
             uow.create_inline_element(&elem, created_block.id, -1)?;
         }
 
-        new_block_ids.push(created_block.id);
-        total_new_chars += block_text_len;
         running_position += block_text_len + 1;
+
+        let tail_block = Block {
+            id: 0,
+            created_at: now,
+            updated_at: now,
+            elements: vec![],
+            list: current_block.list,
+            text_length: text_after.chars().count() as i64,
+            document_position: running_position,
+            plain_text: text_after,
+            fmt_alignment: current_block.fmt_alignment.clone(),
+            fmt_top_margin: current_block.fmt_top_margin,
+            fmt_bottom_margin: current_block.fmt_bottom_margin,
+            fmt_left_margin: current_block.fmt_left_margin,
+            fmt_right_margin: current_block.fmt_right_margin,
+            fmt_heading_level: current_block.fmt_heading_level,
+            fmt_indent: current_block.fmt_indent,
+            fmt_text_indent: current_block.fmt_text_indent,
+            fmt_marker: current_block.fmt_marker.clone(),
+            fmt_tab_positions: current_block.fmt_tab_positions.clone(),
+            fmt_line_height: current_block.fmt_line_height,
+            fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
+            fmt_direction: current_block.fmt_direction.clone(),
+            fmt_background_color: current_block.fmt_background_color.clone(),
+        };
+
+        let created_tail = uow.create_block(&tail_block, frame_id, (block_idx + 2) as i32)?;
+        for after_elem in &after_elements {
+            uow.create_inline_element(after_elem, created_tail.id, -1)?;
+        }
+
+        let mut updated_frame = frame.clone();
+        let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
+        let new_child_ids = [created_block.id as i64, created_tail.id as i64];
+        for (i, id) in new_child_ids.iter().enumerate() {
+            updated_frame
+                .child_order
+                .insert(child_order_insert_pos + i, *id);
+        }
+        updated_frame.updated_at = now;
+        updated_frame.blocks =
+            uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+        uow.update_frame(&updated_frame)?;
+
+        let blocks_added: i64 = 2;
+        let original_next_pos = current_block.document_position + current_block.text_length + 1;
+        let new_next_pos = running_position + created_tail.text_length + 1;
+        let pos_shift = new_next_pos - original_next_pos;
+
+        let mut blocks_to_update: Vec<Block> = Vec::new();
+        for b in &blocks[(block_idx + 1)..] {
+            let mut ub = b.clone();
+            ub.document_position += pos_shift;
+            ub.updated_at = now;
+            blocks_to_update.push(ub);
+        }
+        if !blocks_to_update.is_empty() {
+            uow.update_block_multi(&blocks_to_update)?;
+        }
+
+        let mut updated_doc = document.clone();
+        updated_doc.block_count += blocks_added;
+        updated_doc.character_count += block_text_len;
+        updated_doc.updated_at = now;
+        uow.update_document(&updated_doc)?;
+
+        Ok((
+            InsertFragmentResultDto {
+                new_position: running_position,
+                blocks_added: 1,
+            },
+            snapshot,
+        ))
     }
-
-    // Create tail block with remaining content
-    let tail_block = Block {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        elements: vec![],
-        list: current_block.list,
-        text_length: text_after.chars().count() as i64,
-        document_position: running_position,
-        plain_text: text_after,
-        fmt_alignment: current_block.fmt_alignment.clone(),
-        fmt_top_margin: current_block.fmt_top_margin,
-        fmt_bottom_margin: current_block.fmt_bottom_margin,
-        fmt_left_margin: current_block.fmt_left_margin,
-        fmt_right_margin: current_block.fmt_right_margin,
-        fmt_heading_level: current_block.fmt_heading_level,
-        fmt_indent: current_block.fmt_indent,
-        fmt_text_indent: current_block.fmt_text_indent,
-        fmt_marker: current_block.fmt_marker.clone(),
-        fmt_tab_positions: current_block.fmt_tab_positions.clone(),
-        fmt_line_height: current_block.fmt_line_height,
-        fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
-        fmt_direction: current_block.fmt_direction.clone(),
-        fmt_background_color: current_block.fmt_background_color.clone(),
-    };
-
-    let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
-    let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
-
-    for after_elem in &after_elements {
-        uow.create_inline_element(after_elem, created_tail.id, -1)?;
-    }
-
-    // Update frame child_order
-    let mut updated_frame = frame.clone();
-    let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
-    let mut new_child_ids: Vec<i64> = new_block_ids.iter().map(|id| *id as i64).collect();
-    new_child_ids.push(created_tail.id as i64);
-
-    for (i, id) in new_child_ids.iter().enumerate() {
-        updated_frame
-            .child_order
-            .insert(child_order_insert_pos + i, *id);
-    }
-    updated_frame.updated_at = now;
-    updated_frame.blocks =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
-    uow.update_frame(&updated_frame)?;
-
-    // Update subsequent block positions
-    let blocks_added = fragment_data.blocks.len() as i64 + 1;
-    let original_next_pos = current_block.document_position + current_block.text_length + 1;
-    let new_next_pos = running_position + created_tail.text_length + 1;
-    let pos_shift = new_next_pos - original_next_pos;
-
-    let mut blocks_to_update: Vec<Block> = Vec::new();
-    for b in &blocks[(block_idx + 1)..] {
-        let mut ub = b.clone();
-        ub.document_position += pos_shift;
-        ub.updated_at = now;
-        blocks_to_update.push(ub);
-    }
-    if !blocks_to_update.is_empty() {
-        uow.update_block_multi(&blocks_to_update)?;
-    }
-
-    // Update document stats
-    let mut updated_doc = document.clone();
-    updated_doc.block_count += blocks_added;
-    updated_doc.character_count += total_new_chars;
-    updated_doc.updated_at = now;
-    uow.update_document(&updated_doc)?;
-
-    let new_position = running_position;
-    let blocks_added_result = fragment_data.blocks.len() as i64;
-
-    Ok((
-        InsertFragmentResultDto {
-            new_position,
-            blocks_added: blocks_added_result,
-        },
-        snapshot,
-    ))
 }
 
 pub struct InsertFragmentUseCase {
