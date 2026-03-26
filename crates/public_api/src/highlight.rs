@@ -2,8 +2,8 @@
 //!
 //! Provides a [`SyntaxHighlighter`] trait inspired by Qt's `QSyntaxHighlighter`.
 //! Implementors produce shadow formatting that is merged into
-//! [`FragmentContent`](crate::FragmentContent) at layout time but never
-//! touches the stored [`InlineElement`] entities — export, cursor, undo, and
+//! [`FragmentContent`] at layout time but never
+//! touches the stored `InlineElement` entities — export, cursor, undo, and
 //! search remain unaffected.
 
 use std::any::Any;
