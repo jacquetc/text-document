@@ -87,6 +87,18 @@ impl TextCursor {
         new_pos: usize,
         blocks_affected: usize,
     ) -> QueuedEvents {
+        self.finish_edit_ext(inner, edit_pos, removed, new_pos, blocks_affected, true)
+    }
+
+    fn finish_edit_ext(
+        &self,
+        inner: &mut TextDocumentInner,
+        edit_pos: usize,
+        removed: usize,
+        new_pos: usize,
+        blocks_affected: usize,
+        flow_may_change: bool,
+    ) -> QueuedEvents {
         let added = new_pos - edit_pos;
         inner.adjust_cursors(edit_pos, removed, added);
         {
@@ -104,7 +116,9 @@ impl TextCursor {
             blocks_affected,
         });
         inner.check_block_count_changed();
-        inner.check_flow_changed();
+        if flow_may_change {
+            inner.check_flow_changed();
+        }
         self.queue_undo_redo_event(inner)
     }
 
@@ -400,12 +414,13 @@ impl TextCursor {
             )?;
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(
+            self.finish_edit_ext(
                 &mut inner,
                 edit_pos,
                 removed,
                 to_usize(result.new_position),
                 1,
+                false,
             )
         };
         crate::inner::dispatch_queued_events(queued);
@@ -554,12 +569,13 @@ impl TextCursor {
                 document_editing_commands::insert_image(&inner.ctx, Some(inner.stack_id), &dto)?;
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(
+            self.finish_edit_ext(
                 &mut inner,
                 edit_pos,
                 removed,
                 to_usize(result.new_position),
                 1,
+                false,
             )
         };
         crate::inner::dispatch_queued_events(queued);
@@ -1142,12 +1158,13 @@ impl TextCursor {
                 document_editing_commands::insert_list(&inner.ctx, Some(inner.stack_id), &dto)?;
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
-            self.finish_edit(
+            self.finish_edit_ext(
                 &mut inner,
                 edit_pos,
                 removed,
                 to_usize(result.new_position),
                 1,
+                false,
             )
         };
         crate::inner::dispatch_queued_events(queued);

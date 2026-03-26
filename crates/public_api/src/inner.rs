@@ -207,9 +207,9 @@ impl TextDocumentInner {
 
     /// Check the current block count and queue a `BlockCountChanged` event if it changed.
     pub fn check_block_count_changed(&mut self) {
-        let stats = frontend::commands::document_inspection_commands::get_document_stats(&self.ctx);
-        if let Ok(stats) = stats {
-            let new_count = stats.block_count as usize;
+        let doc = frontend::commands::document_commands::get_document(&self.ctx, &self.document_id);
+        if let Ok(Some(doc)) = doc {
+            let new_count = doc.block_count as usize;
             if new_count != self.last_block_count {
                 self.last_block_count = new_count;
                 self.queue_event(crate::DocumentEvent::BlockCountChanged(new_count));

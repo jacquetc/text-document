@@ -418,6 +418,24 @@ impl TextDocument {
         }
     }
 
+    /// Build a single `BlockSnapshot` for the block at the given position.
+    ///
+    /// This is O(k) where k = inline elements in that block, compared to
+    /// `snapshot_flow()` which is O(n) over the entire document.
+    /// Use for incremental layout updates after single-block edits.
+    pub fn snapshot_block_at_position(
+        &self,
+        position: usize,
+    ) -> Option<crate::flow::BlockSnapshot> {
+        let inner = self.inner.lock();
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(position),
+        };
+        let info =
+            document_inspection_commands::get_block_at_position(&inner.ctx, &dto).ok()?;
+        crate::text_block::build_block_snapshot(&inner, info.block_id as u64)
+    }
+
     /// Get a read-only handle to the block containing the given
     /// character position. Returns `None` if position is out of range.
     pub fn block_at_position(&self, position: usize) -> Option<crate::text_block::TextBlock> {
