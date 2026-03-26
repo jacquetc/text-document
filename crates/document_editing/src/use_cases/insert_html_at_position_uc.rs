@@ -327,29 +327,45 @@ macro_rules! impl_content_insert {
             }
 
             if parsed_blocks.len() >= 2 {
-                // ── Multi-block merge: first→current, middle→new, last→tail ──
-
-                // Merge first parsed block's inline content into current block
+                // ── Multi-block: merge inline-only first/last, standalone otherwise ──
                 let first_parsed = &parsed_blocks[0];
+                let last_parsed = &parsed_blocks[parsed_blocks.len() - 1];
+                let merge_first = first_parsed.is_inline_only();
+                let merge_last = last_parsed.is_inline_only();
+
                 let first_plain: String =
                     first_parsed.spans.iter().map(|s| s.text.as_str()).collect();
                 let first_len = first_plain.chars().count() as i64;
 
                 let mut updated_current = current_block.clone();
-                updated_current.plain_text = text_before.clone() + &first_plain;
-                updated_current.text_length = text_before.chars().count() as i64 + first_len;
+                if merge_first {
+                    updated_current.plain_text = text_before.clone() + &first_plain;
+                    updated_current.text_length = text_before.chars().count() as i64 + first_len;
+                } else {
+                    updated_current.plain_text = text_before.clone();
+                    updated_current.text_length = text_before.chars().count() as i64;
+                }
                 updated_current.updated_at = now;
                 uow.update_block(&updated_current)?;
 
-                create_span_elements!(uow, &first_parsed.spans, current_block.id, now);
+                if merge_first {
+                    create_span_elements!(uow, &first_parsed.spans, current_block.id, now);
+                }
 
                 let mut new_block_ids: Vec<EntityId> = Vec::new();
-                let mut total_new_chars: i64 = first_len;
+                let mut total_new_chars: i64 = if merge_first { first_len } else { 0 };
                 let mut running_position =
                     current_block.document_position + updated_current.text_length + 1;
 
-                // Create middle blocks (indices 1..n-1)
-                for parsed in &parsed_blocks[1..parsed_blocks.len() - 1] {
+                // Create standalone blocks (not merged first/last)
+                let middle_start = if merge_first { 1 } else { 0 };
+                let middle_end = if merge_last {
+                    parsed_blocks.len() - 1
+                } else {
+                    parsed_blocks.len()
+                };
+
+                for parsed in &parsed_blocks[middle_start..middle_end] {
                     let block_plain: String =
                         parsed.spans.iter().map(|s| s.text.as_str()).collect();
                     let block_text_len = block_plain.chars().count() as i64;
@@ -416,13 +432,17 @@ macro_rules! impl_content_insert {
                     running_position += block_text_len + 1;
                 }
 
-                // Merge last parsed block's inline content into the tail block
-                let last_parsed = &parsed_blocks[parsed_blocks.len() - 1];
+                // Build tail: merge last block if inline-only
                 let last_plain: String =
                     last_parsed.spans.iter().map(|s| s.text.as_str()).collect();
                 let last_len = last_plain.chars().count() as i64;
 
-                let tail_plain = last_plain + &text_after;
+                let tail_plain = if merge_last {
+                    total_new_chars += last_len;
+                    last_plain + &text_after
+                } else {
+                    text_after.clone()
+                };
                 let tail_block = Block {
                     id: 0,
                     created_at: now,
@@ -451,13 +471,12 @@ macro_rules! impl_content_insert {
                 let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
                 let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
 
-                // Last block's spans first, then the original after-elements
-                create_span_elements!(uow, &last_parsed.spans, created_tail.id, now);
+                if merge_last {
+                    create_span_elements!(uow, &last_parsed.spans, created_tail.id, now);
+                }
                 for after_elem in &after_elements {
                     uow.create_inline_element(after_elem, created_tail.id, -1)?;
                 }
-
-                total_new_chars += last_len;
 
                 // Update frame child_order
                 let mut updated_frame = frame.clone();
@@ -476,9 +495,8 @@ macro_rules! impl_content_insert {
                     uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
                 uow.update_frame(&updated_frame)?;
 
-                // middle blocks + tail
-                let middle_count = parsed_blocks.len() as i64 - 2;
-                let blocks_added = middle_count + 1;
+                let standalone_count = (middle_end - middle_start) as i64;
+                let blocks_added = standalone_count + 1; // standalone + tail
                 let original_next_pos =
                     current_block.document_position + current_block.text_length + 1;
                 let new_next_pos = running_position + created_tail.text_length + 1;
@@ -501,8 +519,11 @@ macro_rules! impl_content_insert {
                 updated_doc.updated_at = now;
                 uow.update_document(&updated_doc)?;
 
-                // Cursor at end of last pasted content in the tail block
-                let new_position = created_tail.document_position + last_len;
+                let new_position = if merge_last {
+                    created_tail.document_position + last_len
+                } else {
+                    created_tail.document_position
+                };
                 Ok((new_position, blocks_added, snapshot))
             } else {
                 // ── Single block with block-level formatting ──

@@ -303,26 +303,42 @@ fn execute_insert_fragment(
     }
 
     if fragment_data.blocks.len() >= 2 {
-        // ── Multi-block merge: first→current, middle→new, last→tail ──
-
+        // ── Multi-block: merge inline-only first/last, standalone otherwise ──
         let first_frag = &fragment_data.blocks[0];
+        let last_frag = &fragment_data.blocks[fragment_data.blocks.len() - 1];
+        let merge_first = first_frag.is_inline_only();
+        let merge_last = last_frag.is_inline_only();
+
         let first_len = first_frag.plain_text.chars().count() as i64;
 
         let mut updated_current = current_block.clone();
-        updated_current.plain_text = text_before.clone() + &first_frag.plain_text;
-        updated_current.text_length = text_before.chars().count() as i64 + first_len;
+        if merge_first {
+            updated_current.plain_text = text_before.clone() + &first_frag.plain_text;
+            updated_current.text_length = text_before.chars().count() as i64 + first_len;
+        } else {
+            updated_current.plain_text = text_before.clone();
+            updated_current.text_length = text_before.chars().count() as i64;
+        }
         updated_current.updated_at = now;
         uow.update_block(&updated_current)?;
 
-        create_frag_elements(uow, &first_frag.elements, current_block.id)?;
+        if merge_first {
+            create_frag_elements(uow, &first_frag.elements, current_block.id)?;
+        }
 
         let mut new_block_ids: Vec<EntityId> = Vec::new();
-        let mut total_new_chars: i64 = first_len;
+        let mut total_new_chars: i64 = if merge_first { first_len } else { 0 };
         let mut running_position =
             current_block.document_position + updated_current.text_length + 1;
 
-        // Create middle blocks (indices 1..n-1)
-        for frag_block in &fragment_data.blocks[1..fragment_data.blocks.len() - 1] {
+        let middle_start = if merge_first { 1 } else { 0 };
+        let middle_end = if merge_last {
+            fragment_data.blocks.len() - 1
+        } else {
+            fragment_data.blocks.len()
+        };
+
+        for frag_block in &fragment_data.blocks[middle_start..middle_end] {
             let block_text_len = frag_block.plain_text.chars().count() as i64;
 
             let list_id = if let Some(ref frag_list) = frag_block.list {
@@ -379,11 +395,14 @@ fn execute_insert_fragment(
             running_position += block_text_len + 1;
         }
 
-        // Merge last fragment block's inline content into the tail block
-        let last_frag = &fragment_data.blocks[fragment_data.blocks.len() - 1];
         let last_len = last_frag.plain_text.chars().count() as i64;
 
-        let tail_plain = last_frag.plain_text.clone() + &text_after;
+        let tail_plain = if merge_last {
+            total_new_chars += last_len;
+            last_frag.plain_text.clone() + &text_after
+        } else {
+            text_after.clone()
+        };
         let tail_block = Block {
             id: 0,
             created_at: now,
@@ -412,13 +431,12 @@ fn execute_insert_fragment(
         let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
         let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
 
-        // Last block's elements first, then the original after-elements
-        create_frag_elements(uow, &last_frag.elements, created_tail.id)?;
+        if merge_last {
+            create_frag_elements(uow, &last_frag.elements, created_tail.id)?;
+        }
         for after_elem in &after_elements {
             uow.create_inline_element(after_elem, created_tail.id, -1)?;
         }
-
-        total_new_chars += last_len;
 
         // Update frame child_order
         let mut updated_frame = frame.clone();
@@ -436,8 +454,8 @@ fn execute_insert_fragment(
             uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
         uow.update_frame(&updated_frame)?;
 
-        let middle_count = fragment_data.blocks.len() as i64 - 2;
-        let blocks_added = middle_count + 1;
+        let standalone_count = (middle_end - middle_start) as i64;
+        let blocks_added = standalone_count + 1;
         let original_next_pos = current_block.document_position + current_block.text_length + 1;
         let new_next_pos = running_position + created_tail.text_length + 1;
         let pos_shift = new_next_pos - original_next_pos;
@@ -459,7 +477,11 @@ fn execute_insert_fragment(
         updated_doc.updated_at = now;
         uow.update_document(&updated_doc)?;
 
-        let new_position = created_tail.document_position + last_len;
+        let new_position = if merge_last {
+            created_tail.document_position + last_len
+        } else {
+            created_tail.document_position
+        };
 
         Ok((
             InsertFragmentResultDto {
