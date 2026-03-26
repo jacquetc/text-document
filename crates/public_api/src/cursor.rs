@@ -22,6 +22,21 @@ use crate::inner::{CursorData, QueuedEvents, TextDocumentInner};
 use crate::text_table::TextTable;
 use crate::{BlockFormat, FrameFormat, MoveMode, MoveOperation, SelectionType, TextFormat};
 
+/// Compute the maximum valid cursor position from document stats.
+///
+/// Cursor positions include block separators (one between each pair of adjacent
+/// blocks), but `character_count` does not. The max position is therefore
+/// `character_count + (block_count - 1)`.
+fn max_cursor_position(stats: &frontend::document_inspection::DocumentStatsDto) -> usize {
+    let chars = to_usize(stats.character_count);
+    let blocks = to_usize(stats.block_count);
+    if blocks > 1 {
+        chars + blocks - 1
+    } else {
+        chars
+    }
+}
+
 /// A cursor into a [`TextDocument`](crate::TextDocument).
 ///
 /// Multiple cursors can coexist on the same document (like Qt's `QTextCursor`).
@@ -196,7 +211,7 @@ impl TextCursor {
                 table_count: 0,
             }
         });
-        pos >= to_usize(stats.character_count)
+        pos >= max_cursor_position(&stats)
     }
 
     /// The block number (0-indexed) containing the cursor.
@@ -227,11 +242,11 @@ impl TextCursor {
 
     /// Set the cursor to an absolute position.
     pub fn set_position(&self, position: usize, mode: MoveMode) {
-        // Clamp to document length
+        // Clamp to max document position (includes block separators)
         let end = {
             let inner = self.doc.lock();
             document_inspection_commands::get_document_stats(&inner.ctx)
-                .map(|s| to_usize(s.character_count))
+                .map(|s| max_cursor_position(&s))
                 .unwrap_or(0)
         };
         let pos = position.min(end);
@@ -261,7 +276,7 @@ impl TextCursor {
                 let end = {
                     let inner = self.doc.lock();
                     document_inspection_commands::get_document_stats(&inner.ctx)
-                        .map(|s| to_usize(s.character_count))
+                        .map(|s| max_cursor_position(&s))
                         .unwrap_or(0)
                 };
                 let mut d = self.data.lock();
@@ -1320,7 +1335,7 @@ impl TextCursor {
             MoveOperation::End => {
                 let inner = self.doc.lock();
                 document_inspection_commands::get_document_stats(&inner.ctx)
-                    .map(|s| to_usize(s.character_count))
+                    .map(|s| max_cursor_position(&s))
                     .unwrap_or(pos)
             }
             MoveOperation::NextCharacter | MoveOperation::Right => pos + n,
@@ -1382,10 +1397,10 @@ impl TextCursor {
                 if end == pos {
                     // Already at a boundary, skip whitespace
                     let inner = self.doc.lock();
-                    let stats = document_inspection_commands::get_document_stats(&inner.ctx)
-                        .map(|s| to_usize(s.character_count))
+                    let max_pos = document_inspection_commands::get_document_stats(&inner.ctx)
+                        .map(|s| max_cursor_position(&s))
                         .unwrap_or(0);
-                    let scan_len = (stats - pos).min(64);
+                    let scan_len = max_pos.saturating_sub(pos).min(64);
                     if scan_len == 0 {
                         return pos;
                     }

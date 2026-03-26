@@ -153,10 +153,12 @@ proptest! {
         for op in &ops {
             cursor.move_position(*op, MoveMode::MoveAnchor, 1);
             let pos = cursor.position();
-            let len = doc.character_count();
-            prop_assert!(pos <= len,
-                "cursor position {} exceeds character_count {} after {:?}",
-                pos, len, op);
+            let stats = doc.stats();
+            // Max position includes block separators: character_count + (block_count - 1)
+            let max_pos = stats.character_count + stats.block_count.saturating_sub(1);
+            prop_assert!(pos <= max_pos,
+                "cursor position {} exceeds max_position {} after {:?}",
+                pos, max_pos, op);
         }
     }
 }
@@ -175,10 +177,12 @@ proptest! {
         let cursor = doc.cursor();
         cursor.set_position(pos, MoveMode::MoveAnchor);
         let actual = cursor.position();
-        let len = doc.character_count();
-        prop_assert!(actual <= len,
-            "set_position({}) resulted in position {} > len {}",
-            pos, actual, len);
+        let stats = doc.stats();
+        // Max position includes block separators: character_count + (block_count - 1)
+        let max_pos = stats.character_count + stats.block_count.saturating_sub(1);
+        prop_assert!(actual <= max_pos,
+            "set_position({}) resulted in position {} > max_position {}",
+            pos, actual, max_pos);
     }
 }
 
