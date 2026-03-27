@@ -79,10 +79,13 @@ fn execute_insert_block(
         &frame_id,
     )?;
 
-    // Get all blocks
+    // Get all blocks in document order (from child_order traversal).
+    // Do NOT sort by stored document_position — it may be stale after insert_text
+    // which intentionally skips position updates for performance. The child_order
+    // traversal order ensures inner-frame blocks are checked before subsequent
+    // outer-frame blocks, so "first match wins" finds the correct block.
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
-    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
-    blocks.sort_by_key(|b| b.document_position);
+    let blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
 
     // Find block at position
     let (current_block, block_idx, offset) = find_block_at_position(&blocks, position)?;
@@ -287,13 +290,11 @@ fn execute_insert_block(
     uow.update_frame(&updated_frame)?;
 
     // Update subsequent blocks' document_position (those after the new block)
-    // The new block's text_length is the length of text_after
-    // Blocks after the original block_idx need their positions recalculated
+    // Splitting a block introduces one additional block separator, so all
+    // subsequent blocks shift forward by 1.
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for b in &blocks[(block_idx + 1)..] {
         let mut ub = b.clone();
-        // Splitting a block introduces one additional block separator, so all
-        // subsequent blocks shift forward by 1.
         ub.document_position += 1;
         ub.updated_at = now;
         blocks_to_update.push(ub);
