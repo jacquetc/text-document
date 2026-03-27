@@ -615,7 +615,7 @@ impl TextCursor {
     /// Insert a table at the cursor position.
     ///
     /// Creates a `rows × columns` table with empty cells.
-    /// The cursor moves to after the table.
+    /// The cursor moves into the first cell of the table.
     /// Returns a handle to the created table.
     pub fn insert_table(&self, rows: usize, columns: usize) -> Result<TextTable> {
         let (pos, anchor) = self.read_cursor();

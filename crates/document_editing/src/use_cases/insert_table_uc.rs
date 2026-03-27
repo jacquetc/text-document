@@ -292,7 +292,7 @@ fn execute_insert_table(
     updated_doc.updated_at = now;
     uow.update_document(&updated_doc)?;
 
-    let new_position = insert_pos + table_size;
+    let new_position = insert_pos;
 
     Ok((
         InsertTableResultDto {
