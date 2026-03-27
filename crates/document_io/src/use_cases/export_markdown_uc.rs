@@ -327,6 +327,7 @@ impl ExportMarkdownUseCase {
             let prefix = "#".repeat(level as usize);
             format!("{}{} {}", quote_prefix, prefix, inline_md)
         } else if let Some(ref list_entity) = list {
+            let indent_prefix = "  ".repeat(list_entity.indent as usize);
             match list_entity.style {
                 ListStyle::Decimal
                 | ListStyle::LowerAlpha
@@ -340,9 +341,12 @@ impl ExportMarkdownUseCase {
                     } else {
                         *ordered_list_counter += 1;
                     }
-                    format!("{}{}. {}", quote_prefix, ordered_list_counter, inline_md)
+                    format!(
+                        "{}{}{}. {}",
+                        quote_prefix, indent_prefix, ordered_list_counter, inline_md
+                    )
                 }
-                _ => format!("{}- {}", quote_prefix, inline_md),
+                _ => format!("{}{}- {}", quote_prefix, indent_prefix, inline_md),
             }
         } else {
             *current_list_id = None;

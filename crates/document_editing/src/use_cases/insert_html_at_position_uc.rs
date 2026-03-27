@@ -376,7 +376,7 @@ macro_rules! impl_content_insert {
                             created_at: now,
                             updated_at: now,
                             style: list_style.clone(),
-                            indent: 1,
+                            indent: parsed.list_indent as i64,
                             prefix: String::new(),
                             suffix: String::new(),
                         };

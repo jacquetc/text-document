@@ -18,6 +18,7 @@ pub struct ParsedBlock {
     pub spans: Vec<ParsedSpan>,
     pub heading_level: Option<i64>,
     pub list_style: Option<ListStyle>,
+    pub list_indent: u32,
     pub is_code_block: bool,
     pub code_language: Option<String>,
     pub blockquote_depth: u32,
@@ -66,8 +67,9 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
     let mut strikeout = false;
     let mut link_href: Option<String> = None;
 
-    // List style stack for nested lists
+    // List style stack for nested lists (also tracks nesting depth)
     let mut list_stack: Vec<Option<ListStyle>> = Vec::new();
+    let mut current_list_indent: u32 = 0;
 
     for event in parser {
         match event {
@@ -82,6 +84,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         spans: std::mem::take(&mut current_spans),
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
+                        list_indent: current_list_indent,
                         is_code_block: false,
                         code_language: None,
                         blockquote_depth,
@@ -104,6 +107,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     spans: std::mem::take(&mut current_spans),
                     heading_level: current_heading.take(),
                     list_style: None,
+                    list_indent: 0,
                     is_code_block: false,
                     code_language: None,
                     blockquote_depth,
@@ -126,8 +130,30 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                 list_stack.pop();
             }
             Event::Start(Tag::Item) => {
+                // Flush any accumulated spans from the parent item before
+                // starting a child item in a tight list
+                if !current_spans.is_empty() {
+                    blocks.push(ParsedBlock {
+                        spans: std::mem::take(&mut current_spans),
+                        heading_level: None,
+                        list_style: current_list_style.clone(),
+                        list_indent: current_list_indent,
+                        is_code_block: false,
+                        code_language: None,
+                        blockquote_depth,
+                        line_height: None,
+                        non_breakable_lines: None,
+                        direction: None,
+                        background_color: None,
+                    });
+                }
                 in_block = true;
                 current_list_style = list_stack.last().cloned().flatten();
+                current_list_indent = if list_stack.is_empty() {
+                    0
+                } else {
+                    (list_stack.len() - 1) as u32
+                };
             }
             Event::End(TagEnd::Item) => {
                 // The paragraph inside the item will have already been flushed,
@@ -137,6 +163,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         spans: std::mem::take(&mut current_spans),
                         heading_level: None,
                         list_style: current_list_style.clone(),
+                        list_indent: current_list_indent,
                         is_code_block: false,
                         code_language: None,
                         blockquote_depth,
@@ -170,6 +197,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     spans: std::mem::take(&mut current_spans),
                     heading_level: None,
                     list_style: None,
+                    list_indent: 0,
                     is_code_block: true,
                     code_language: code_language.take(),
                     blockquote_depth,
@@ -253,6 +281,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         spans: std::mem::take(&mut current_spans),
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
+                        list_indent: current_list_indent,
                         is_code_block,
                         code_language: code_language.clone(),
                         blockquote_depth,
@@ -279,6 +308,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             spans: std::mem::take(&mut current_spans),
             heading_level: current_heading,
             list_style: current_list_style,
+            list_indent: current_list_indent,
             is_code_block,
             code_language: code_language.take(),
             blockquote_depth,
@@ -298,6 +328,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             }],
             heading_level: None,
             list_style: None,
+            list_indent: 0,
             is_code_block: false,
             code_language: None,
             blockquote_depth: 0,
@@ -401,6 +432,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
         blocks: &mut Vec<ParsedBlock>,
         current_list_style: &Option<ListStyle>,
         blockquote_depth: u32,
+        list_depth: u32,
         depth: usize,
     ) {
         if depth > MAX_RECURSION_DEPTH {
@@ -412,6 +444,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 let mut new_state = state.clone();
                 let mut new_list_style = current_list_style.clone();
                 let mut bq_depth = blockquote_depth;
+                let mut new_list_depth = list_depth;
 
                 // Determine if this is a block-level element
                 let is_block_tag = matches!(
@@ -443,9 +476,11 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                     }
                     "ul" => {
                         new_list_style = Some(ListStyle::Disc);
+                        new_list_depth = list_depth + 1;
                     }
                     "ol" => {
                         new_list_style = Some(ListStyle::Decimal);
+                        new_list_depth = list_depth + 1;
                     }
                     "blockquote" => {
                         bq_depth += 1;
@@ -500,6 +535,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         }],
                         heading_level: None,
                         list_style: None,
+                        list_indent: 0,
                         is_code_block: false,
                         code_language: None,
                         blockquote_depth: bq_depth,
@@ -520,6 +556,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             blocks,
                             &new_list_style,
                             bq_depth,
+                            new_list_depth,
                             depth + 1,
                         );
                     }
@@ -533,6 +570,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         &new_list_style,
                         blocks,
                         bq_depth,
+                        new_list_depth,
                         depth + 1,
                     );
 
@@ -542,11 +580,18 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         None
                     };
 
+                    let list_indent_for_block = if tag == "li" {
+                        new_list_depth.saturating_sub(1)
+                    } else {
+                        0
+                    };
+
                     if !spans.is_empty() || heading_level.is_some() {
                         blocks.push(ParsedBlock {
                             spans,
                             heading_level,
                             list_style: list_style_for_block,
+                            list_indent: list_indent_for_block,
                             is_code_block,
                             code_language,
                             blockquote_depth: bq_depth,
@@ -565,6 +610,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             blocks,
                             &new_list_style,
                             bq_depth,
+                            new_list_depth,
                             depth + 1,
                         );
                     }
@@ -577,6 +623,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             blocks,
                             current_list_style,
                             bq_depth,
+                            list_depth,
                             depth + 1,
                         );
                     }
@@ -599,6 +646,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         }],
                         heading_level: None,
                         list_style: None,
+                        list_indent: 0,
                         is_code_block: false,
                         code_language: None,
                         blockquote_depth,
@@ -618,6 +666,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         blocks,
                         current_list_style,
                         blockquote_depth,
+                        list_depth,
                         depth + 1,
                     );
                 }
@@ -628,6 +677,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
     /// Collect inline spans from a block-level element's children.
     /// If a nested block-level element is encountered, it is flushed as a
     /// separate block.
+    #[allow(clippy::too_many_arguments)]
     fn collect_inline_spans(
         node: ego_tree::NodeRef<Node>,
         state: &FmtState,
@@ -635,6 +685,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
         current_list_style: &Option<ListStyle>,
         blocks: &mut Vec<ParsedBlock>,
         blockquote_depth: u32,
+        list_depth: u32,
         depth: usize,
     ) {
         if depth > MAX_RECURSION_DEPTH {
@@ -706,6 +757,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             blocks,
                             current_list_style,
                             blockquote_depth,
+                            list_depth,
                             depth + 1,
                         );
                     } else {
@@ -717,6 +769,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             current_list_style,
                             blocks,
                             blockquote_depth,
+                            list_depth,
                             depth + 1,
                         );
                     }
@@ -728,7 +781,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
 
     let initial_state = FmtState::default();
     for child in root.children() {
-        walk_node(child, &initial_state, &mut blocks, &None, 0, 0);
+        walk_node(child, &initial_state, &mut blocks, &None, 0, 0, 0);
     }
 
     // If no blocks were parsed, create a single empty paragraph
@@ -740,6 +793,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
             }],
             heading_level: None,
             list_style: None,
+            list_indent: 0,
             is_code_block: false,
             code_language: None,
             blockquote_depth: 0,
@@ -960,5 +1014,37 @@ mod tests {
         assert_eq!(blocks[0].direction, None);
         assert_eq!(blocks[0].background_color, None);
         assert_eq!(blocks[0].non_breakable_lines, None);
+    }
+
+    #[test]
+    fn test_parse_markdown_nested_list_indent() {
+        let md = "- top\n  - nested\n    - deep";
+        let blocks = parse_markdown(md);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].list_style, Some(ListStyle::Disc));
+        assert_eq!(blocks[0].list_indent, 0);
+        assert_eq!(blocks[1].list_style, Some(ListStyle::Disc));
+        assert_eq!(blocks[1].list_indent, 1);
+        assert_eq!(blocks[2].list_style, Some(ListStyle::Disc));
+        assert_eq!(blocks[2].list_indent, 2);
+    }
+
+    #[test]
+    fn test_parse_markdown_nested_ordered_list_indent() {
+        let md = "1. first\n   1. nested\n   2. nested2";
+        let blocks = parse_markdown(md);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].list_indent, 0);
+        assert_eq!(blocks[1].list_indent, 1);
+        assert_eq!(blocks[2].list_indent, 1);
+    }
+
+    #[test]
+    fn test_parse_html_nested_list_indent() {
+        let html = "<ul><li>top</li><ul><li>nested</li></ul></ul>";
+        let blocks = parse_html(html);
+        assert!(blocks.len() >= 2);
+        assert_eq!(blocks[0].list_indent, 0);
+        assert_eq!(blocks[1].list_indent, 1);
     }
 }

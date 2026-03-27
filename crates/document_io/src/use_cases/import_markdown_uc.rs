@@ -209,6 +209,7 @@ fn import_parsed_blocks(
         if let Some(ref list_style) = parsed_block.list_style {
             let list = List {
                 style: list_style.clone(),
+                indent: parsed_block.list_indent as i64,
                 ..List::default()
             };
             let created_list = uow.create_list(&list, doc_id, -1)?;

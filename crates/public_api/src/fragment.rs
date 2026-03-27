@@ -561,7 +561,7 @@ fn parsed_blocks_to_fragment(
 
             let list = pb.list_style.map(|style| FragmentList {
                 style,
-                indent: 0,
+                indent: pb.list_indent as i64,
                 prefix: String::new(),
                 suffix: String::new(),
             });
