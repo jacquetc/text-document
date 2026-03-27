@@ -109,7 +109,7 @@ fn execute_insert_formatted_text(
 
     // Find block at position by computing positions on the fly
     let (block, _block_idx, block_pos) =
-        find_block_at_position_sequential(uow, &ordered_block_ids, position)?;
+        find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
     let offset = position - block_pos;
 
     // Save original block for undo (cheap clone, no DB serialization)
@@ -268,7 +268,7 @@ fn execute_insert_formatted_text(
 /// Find the block containing `position` by computing positions on the fly
 /// from child_order + text_length. No dependency on stored document_position.
 fn find_block_at_position_sequential(
-    uow: &Box<dyn InsertFormattedTextUnitOfWorkTrait>,
+    uow: &dyn InsertFormattedTextUnitOfWorkTrait,
     ordered_block_ids: &[EntityId],
     position: i64,
 ) -> Result<(Block, usize, i64)> {

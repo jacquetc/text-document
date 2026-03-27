@@ -1,8 +1,5 @@
-use text_document::TextDocument;
 use anyhow::Result;
-
-
-
+use text_document::TextDocument;
 
 pub fn run_benchmark_test() -> Result<()> {
     let doc = TextDocument::new();
@@ -61,7 +58,10 @@ Vestibulum elementum lacus nec diam malesuada, non efficitur neque rhoncus. Viva
 
     // Run multiple iterations to generate enough samples for profiling
     for _ in 0..1000 {
-        cursor.insert_formatted_text("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ", &format)?;
+        cursor.insert_formatted_text(
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ",
+            &format,
+        )?;
     }
 
     Ok(())

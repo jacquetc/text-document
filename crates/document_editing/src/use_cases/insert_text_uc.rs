@@ -49,7 +49,7 @@ struct UndoData {
 /// Undo data for the selection-replacement path (needs full snapshot).
 enum InsertTextUndo {
     /// Fast path: simple insert, no selection. Clone-based undo.
-    Simple(UndoData),
+    Simple(Box<UndoData>),
     /// Slow path: selection replacement. Uses full document snapshot.
     SelectionReplacement(common::snapshot::EntityTreeSnapshot),
 }
@@ -151,8 +151,7 @@ fn execute_insert_with_selection(
     let sel_end = std::cmp::max(dto.position, dto.anchor);
     let position = sel_start;
 
-    let (sel_block, sel_block_idx, sel_start_offset) =
-        find_block_at_position(&blocks, sel_start)?;
+    let (sel_block, sel_block_idx, sel_start_offset) = find_block_at_position(&blocks, sel_start)?;
     let (_, sel_end_block_idx, sel_end_offset) = find_block_at_position(&blocks, sel_end)?;
 
     if sel_block_idx != sel_end_block_idx {
@@ -162,8 +161,7 @@ fn execute_insert_with_selection(
         ));
     }
 
-    let chars_removed =
-        delete_range_in_block(uow, &sel_block, sel_start_offset, sel_end_offset)?;
+    let chars_removed = delete_range_in_block(uow, &sel_block, sel_start_offset, sel_end_offset)?;
 
     document.character_count -= chars_removed;
     document.updated_at = chrono::Utc::now();
@@ -301,8 +299,8 @@ fn execute_insert_simple(
     }
 
     // Find block at position by computing positions on the fly
-    let (block, block_idx, block_pos) =
-        find_block_at_position_sequential(uow, &ordered_block_ids, position)?;
+    let (block, _block_idx, block_pos) =
+        find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
     let offset = position - block_pos;
 
     // Save originals for undo (cheap clones, no serialization)
@@ -373,7 +371,7 @@ fn execute_insert_simple(
             new_position: position + text_len,
             blocks_affected: 1,
         },
-        InsertTextUndo::Simple(undo_data),
+        InsertTextUndo::Simple(Box::new(undo_data)),
     ))
 }
 
@@ -381,7 +379,7 @@ fn execute_insert_simple(
 /// from child_order + text_length. No dependency on stored document_position.
 /// Returns (block, index_in_ordered_ids, computed_position_of_block).
 fn find_block_at_position_sequential(
-    uow: &Box<dyn InsertTextUnitOfWorkTrait>,
+    uow: &dyn InsertTextUnitOfWorkTrait,
     ordered_block_ids: &[EntityId],
     position: i64,
 ) -> Result<(Block, usize, i64)> {
@@ -428,11 +426,7 @@ fn char_to_byte_offset(s: &str, char_offset: i64) -> usize {
         count += 1;
         idx = ci + ch.len_utf8();
     }
-    if count < char_offset {
-        s.len()
-    } else {
-        idx
-    }
+    if count < char_offset { s.len() } else { idx }
 }
 
 pub struct InsertTextUseCase {
@@ -578,9 +572,9 @@ impl UndoRedoCommand for InsertTextUseCase {
         if let (Some(last_self), Some(first_other)) =
             (self_text.chars().next_back(), other_text.chars().next())
         {
-            let self_is_boundary =
-                last_self.is_whitespace() || is_word_boundary_punct(last_self);
-            let other_is_word = !first_other.is_whitespace() && !is_word_boundary_punct(first_other);
+            let self_is_boundary = last_self.is_whitespace() || is_word_boundary_punct(last_self);
+            let other_is_word =
+                !first_other.is_whitespace() && !is_word_boundary_punct(first_other);
             if self_is_boundary && other_is_word {
                 return false;
             }
@@ -595,9 +589,7 @@ impl UndoRedoCommand for InsertTextUseCase {
         };
 
         // Keep our undo data (original state) but update the DTO and result
-        if let (Some(self_dto), Some(other_dto)) =
-            (&mut self.last_dto, &other_cmd.last_dto)
-        {
+        if let (Some(self_dto), Some(other_dto)) = (&mut self.last_dto, &other_cmd.last_dto) {
             self_dto.text.push_str(&other_dto.text);
             self_dto.anchor = self_dto.position; // merged command always has no selection
         }

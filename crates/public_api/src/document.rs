@@ -443,7 +443,7 @@ impl TextDocument {
                 .map(|&id| id as u64)
                 .collect()
         } else {
-            frame_dto.blocks.iter().copied().collect()
+            frame_dto.blocks.to_vec()
         };
 
         // Walk blocks computing positions on the fly

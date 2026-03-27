@@ -326,9 +326,7 @@ fn main() {
         ),
 
         Commands::Cat { file, format } => cmd_cat(file, format),
-        Commands::Test => {
-            benchmark_test::run_benchmark_test()
-        }
+        Commands::Test => benchmark_test::run_benchmark_test(),
     };
 
     if let Err(e) = result {
