@@ -68,6 +68,7 @@ fn create_cell_frame(
         fmt_padding: None,
         fmt_border: None,
         fmt_position: None,
+        fmt_is_blockquote: None,
         table: None, // Will not set table on cell frames — only the anchor frame gets it
     };
     let created_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
@@ -235,6 +236,7 @@ fn execute_insert_table(
         fmt_padding: None,
         fmt_border: None,
         fmt_position: None,
+        fmt_is_blockquote: None,
         table: Some(created_table.id),
     };
     let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;

@@ -372,6 +372,8 @@ fn execute_insert_fragment(
                 fmt_non_breakable_lines: frag_block.non_breakable_lines,
                 fmt_direction: frag_block.direction.clone(),
                 fmt_background_color: frag_block.background_color.clone(),
+                fmt_is_code_block: frag_block.is_code_block,
+                fmt_code_language: frag_block.code_language.clone(),
             };
 
             let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
@@ -426,6 +428,8 @@ fn execute_insert_fragment(
             fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
             fmt_direction: current_block.fmt_direction.clone(),
             fmt_background_color: current_block.fmt_background_color.clone(),
+            fmt_is_code_block: current_block.fmt_is_code_block,
+            fmt_code_language: current_block.fmt_code_language.clone(),
         };
 
         let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
@@ -535,6 +539,8 @@ fn execute_insert_fragment(
             fmt_non_breakable_lines: frag_block.non_breakable_lines,
             fmt_direction: frag_block.direction.clone(),
             fmt_background_color: frag_block.background_color.clone(),
+            fmt_is_code_block: frag_block.is_code_block,
+            fmt_code_language: frag_block.code_language.clone(),
         };
 
         let created_block = uow.create_block(&new_block, frame_id, (block_idx + 1) as i32)?;
@@ -576,6 +582,8 @@ fn execute_insert_fragment(
             fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
             fmt_direction: current_block.fmt_direction.clone(),
             fmt_background_color: current_block.fmt_background_color.clone(),
+            fmt_is_code_block: current_block.fmt_is_code_block,
+            fmt_code_language: current_block.fmt_code_language.clone(),
         };
 
         let created_tail = uow.create_block(&tail_block, frame_id, (block_idx + 2) as i32)?;

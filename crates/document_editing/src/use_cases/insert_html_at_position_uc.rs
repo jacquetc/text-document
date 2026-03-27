@@ -409,6 +409,8 @@ macro_rules! impl_content_insert {
                         fmt_non_breakable_lines: parsed.non_breakable_lines,
                         fmt_direction: parsed.direction.clone(),
                         fmt_background_color: parsed.background_color.clone(),
+                        fmt_is_code_block: None,
+                        fmt_code_language: None,
                     };
 
                     let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
@@ -466,6 +468,8 @@ macro_rules! impl_content_insert {
                     fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
                     fmt_direction: current_block.fmt_direction.clone(),
                     fmt_background_color: current_block.fmt_background_color.clone(),
+                    fmt_is_code_block: current_block.fmt_is_code_block,
+                    fmt_code_language: current_block.fmt_code_language.clone(),
                 };
 
                 let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
@@ -580,6 +584,8 @@ macro_rules! impl_content_insert {
                     fmt_non_breakable_lines: parsed.non_breakable_lines,
                     fmt_direction: parsed.direction.clone(),
                     fmt_background_color: parsed.background_color.clone(),
+                    fmt_is_code_block: None,
+                    fmt_code_language: None,
                 };
 
                 let created_block =
@@ -622,6 +628,8 @@ macro_rules! impl_content_insert {
                     fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
                     fmt_direction: current_block.fmt_direction.clone(),
                     fmt_background_color: current_block.fmt_background_color.clone(),
+                    fmt_is_code_block: current_block.fmt_is_code_block,
+                    fmt_code_language: current_block.fmt_code_language.clone(),
                 };
 
                 let created_tail =

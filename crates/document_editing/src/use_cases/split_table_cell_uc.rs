@@ -189,6 +189,7 @@ fn execute_split_table_cell(
             fmt_padding: None,
             fmt_border: None,
             fmt_position: None,
+            fmt_is_blockquote: None,
             table: None,
         };
         let created_frame = uow.create_frame(&cell_frame, doc_id, -1)?;

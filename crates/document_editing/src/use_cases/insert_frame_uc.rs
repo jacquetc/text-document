@@ -134,6 +134,7 @@ fn execute_insert_frame(
         fmt_padding: None,
         fmt_border: None,
         fmt_position: None,
+        fmt_is_blockquote: None,
         table: None,
     };
 
