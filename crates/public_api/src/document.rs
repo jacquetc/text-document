@@ -10,8 +10,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 
 use crate::{ResourceType, TextDirection, WrapMode};
 use frontend::commands::{
-    document_commands, document_inspection_commands, document_io_commands,
-    document_search_commands, resource_commands, undo_redo_commands,
+    block_commands, document_commands, document_inspection_commands, document_io_commands,
+    document_search_commands, frame_commands, resource_commands, undo_redo_commands,
 };
 
 use crate::convert::{self, to_i64, to_usize};
@@ -428,12 +428,47 @@ impl TextDocument {
         position: usize,
     ) -> Option<crate::flow::BlockSnapshot> {
         let inner = self.inner.lock();
-        let dto = frontend::document_inspection::GetBlockAtPositionDto {
-            position: to_i64(position),
+        let main_frame_id = get_main_frame_id(&inner);
+
+        // Get ordered block IDs from child_order
+        let frame_dto = frame_commands::get_frame(&inner.ctx, &main_frame_id)
+            .ok()
+            .flatten()?;
+
+        let ordered_block_ids: Vec<u64> = if !frame_dto.child_order.is_empty() {
+            frame_dto
+                .child_order
+                .iter()
+                .filter(|&&id| id > 0)
+                .map(|&id| id as u64)
+                .collect()
+        } else {
+            frame_dto.blocks.iter().copied().collect()
         };
-        let info =
-            document_inspection_commands::get_block_at_position(&inner.ctx, &dto).ok()?;
-        crate::text_block::build_block_snapshot(&inner, info.block_id as u64)
+
+        // Walk blocks computing positions on the fly
+        let pos = position as i64;
+        let mut running_pos: i64 = 0;
+        for &block_id in &ordered_block_ids {
+            let block_dto = block_commands::get_block(&inner.ctx, &block_id)
+                .ok()
+                .flatten()?;
+            let block_end = running_pos + block_dto.text_length;
+            if pos >= running_pos && pos <= block_end {
+                return crate::text_block::build_block_snapshot_with_position(
+                    &inner,
+                    block_id,
+                    Some(running_pos as usize),
+                );
+            }
+            running_pos = block_end + 1;
+        }
+
+        // Fallback to last block
+        if let Some(&last_id) = ordered_block_ids.last() {
+            return crate::text_block::build_block_snapshot(&inner, last_id);
+        }
+        None
     }
 
     /// Get a read-only handle to the block containing the given

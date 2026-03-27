@@ -570,6 +570,17 @@ pub(crate) fn build_block_snapshot(
     inner: &TextDocumentInner,
     block_id: u64,
 ) -> Option<BlockSnapshot> {
+    build_block_snapshot_with_position(inner, block_id, None)
+}
+
+/// Build a BlockSnapshot, optionally overriding the position with a computed value.
+/// When `computed_position` is Some, it's used instead of `block_dto.document_position`
+/// (which may be stale if position updates are deferred).
+pub(crate) fn build_block_snapshot_with_position(
+    inner: &TextDocumentInner,
+    block_id: u64,
+    computed_position: Option<usize>,
+) -> Option<BlockSnapshot> {
     let block_dto = block_commands::get_block(&inner.ctx, &block_id)
         .ok()
         .flatten()?;
@@ -581,9 +592,11 @@ pub(crate) fn build_block_snapshot(
     let parent_frame_id = find_parent_frame(inner, block_id).map(|id| id as usize);
     let table_cell = find_table_cell_context(inner, block_id);
 
+    let position = computed_position.unwrap_or_else(|| to_usize(block_dto.document_position));
+
     Some(BlockSnapshot {
         block_id: block_id as usize,
-        position: to_usize(block_dto.document_position),
+        position,
         length: to_usize(block_dto.text_length),
         text: block_dto.plain_text,
         fragments,
