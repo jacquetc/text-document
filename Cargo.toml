@@ -61,11 +61,12 @@ test_harness = { version = "1.1.0", path = "crates/test_harness", package = "tex
 [profile.release]
 lto = "fat"
 panic = "abort"
-strip = false
+strip = true
 codegen-units = 1
 
 [profile.profiling]
 inherits = "release"
+strip = false
 debug = true
 lto = false
 
