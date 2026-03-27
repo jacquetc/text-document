@@ -59,7 +59,8 @@ impl GetBlockAtPositionUseCase {
         let ordered_block_ids = collect_block_ids(&*uow, &frame_id)?;
 
         // Walk blocks computing positions on the fly.
-        // Use exclusive upper bound: position at block_end (separator) maps to next block.
+        // Separator (at block_end) maps to the next block.
+        // Empty blocks (text_length == 0) match when position == running_pos.
         let mut running_pos: i64 = 0;
         let mut block_number: usize = 0;
         for &block_id in &ordered_block_ids {
@@ -68,7 +69,9 @@ impl GetBlockAtPositionUseCase {
                 .ok_or_else(|| anyhow!("Block not found"))?;
             let block_end = running_pos + block.text_length;
 
-            if position >= running_pos && position < block_end {
+            // Position before this block's start means it was at the separator
+            // before this block — separator maps to next block (this one).
+            if position < running_pos {
                 uow.end_transaction()?;
                 return Ok(BlockInfoDto {
                     block_id: block.id as i64,
@@ -77,11 +80,25 @@ impl GetBlockAtPositionUseCase {
                     block_number: block_number as i64,
                 });
             }
+
+            // Within block text, or empty block at exactly this position
+            if position < block_end
+                || (block.text_length == 0 && position == running_pos)
+            {
+                uow.end_transaction()?;
+                return Ok(BlockInfoDto {
+                    block_id: block.id as i64,
+                    block_start: running_pos,
+                    block_length: block.text_length,
+                    block_number: block_number as i64,
+                });
+            }
+
             running_pos = block_end + 1;
             block_number += 1;
         }
 
-        // Fallback to last block
+        // Fallback: position is at or past the end of the document — return last block
         if let Some(&last_id) = ordered_block_ids.last() {
             let block = uow
                 .get_block(&last_id)?
