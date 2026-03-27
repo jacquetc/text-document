@@ -577,7 +577,7 @@ impl UndoRedoCommand for InsertTextUseCase {
         }
 
         // Rule 4: Max merge length — 200 characters
-        if self_dto.text.len() + other_dto.text.len() > 200 {
+        if self_dto.text.chars().count() + other_dto.text.chars().count() > 200 {
             return false;
         }
 
