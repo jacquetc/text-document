@@ -430,21 +430,8 @@ impl TextDocument {
         let inner = self.inner.lock();
         let main_frame_id = get_main_frame_id(&inner);
 
-        // Get ordered block IDs from child_order
-        let frame_dto = frame_commands::get_frame(&inner.ctx, &main_frame_id)
-            .ok()
-            .flatten()?;
-
-        let ordered_block_ids: Vec<u64> = if !frame_dto.child_order.is_empty() {
-            frame_dto
-                .child_order
-                .iter()
-                .filter(|&&id| id > 0)
-                .map(|&id| id as u64)
-                .collect()
-        } else {
-            frame_dto.blocks.to_vec()
-        };
+        // Collect all block IDs in document order, traversing into nested frames
+        let ordered_block_ids = collect_frame_block_ids(&inner, main_frame_id)?;
 
         // Walk blocks computing positions on the fly
         let pos = position as i64;
@@ -1096,6 +1083,34 @@ fn emit_undo_redo_change_events(inner: &mut TextDocumentInner, before: &[UndoBlo
 // ── Flow helpers ──────────────────────────────────────────────
 
 /// Get the main frame ID for the document.
+/// Collect all block IDs in document order from a frame, recursing into nested
+/// sub-frames (negative entries in child_order).
+fn collect_frame_block_ids(
+    inner: &TextDocumentInner,
+    frame_id: frontend::common::types::EntityId,
+) -> Option<Vec<u64>> {
+    let frame_dto = frame_commands::get_frame(&inner.ctx, &frame_id)
+        .ok()
+        .flatten()?;
+
+    if !frame_dto.child_order.is_empty() {
+        let mut block_ids = Vec::new();
+        for &entry in &frame_dto.child_order {
+            if entry > 0 {
+                block_ids.push(entry as u64);
+            } else if entry < 0 {
+                let sub_frame_id = (-entry) as u64;
+                if let Some(sub_ids) = collect_frame_block_ids(inner, sub_frame_id) {
+                    block_ids.extend(sub_ids);
+                }
+            }
+        }
+        Some(block_ids)
+    } else {
+        Some(frame_dto.blocks.to_vec())
+    }
+}
+
 fn get_main_frame_id(inner: &TextDocumentInner) -> frontend::common::types::EntityId {
     // The document's first frame is the main frame.
     let frames = frontend::commands::document_commands::get_document_relationship(
