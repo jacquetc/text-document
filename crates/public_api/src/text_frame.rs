@@ -218,6 +218,10 @@ fn build_cell_frame_ids(inner: &TextDocumentInner) -> HashSet<EntityId> {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Build a FlowSnapshot for the given frame. Called while lock is held.
+///
+/// Block positions are computed on-the-fly from child_order + text_length
+/// rather than using stored `document_position` values (which may be stale
+/// after insert_text defers position updates for performance).
 pub(crate) fn build_flow_snapshot(
     inner: &TextDocumentInner,
     frame_id: EntityId,
@@ -231,22 +235,32 @@ pub(crate) fn build_flow_snapshot(
     };
 
     if !frame_dto.child_order.is_empty() {
-        snapshot_from_child_order(inner, &frame_dto.child_order)
+        let (elements, _) = snapshot_from_child_order(inner, &frame_dto.child_order, 0);
+        elements
     } else {
         snapshot_fallback(inner, &frame_dto)
     }
 }
 
+/// Walk child_order, building snapshots with on-the-fly position computation.
+/// Returns (elements, running_position_after_last_block).
 fn snapshot_from_child_order(
     inner: &TextDocumentInner,
     child_order: &[i64],
-) -> Vec<FlowElementSnapshot> {
+    start_pos: usize,
+) -> (Vec<FlowElementSnapshot>, usize) {
     let mut elements = Vec::with_capacity(child_order.len());
+    let mut running_pos = start_pos;
 
     for &entry in child_order {
         if entry > 0 {
             let block_id = entry as u64;
-            if let Some(snap) = crate::text_block::build_block_snapshot(inner, block_id) {
+            if let Some(snap) = crate::text_block::build_block_snapshot_with_position(
+                inner,
+                block_id,
+                Some(running_pos),
+            ) {
+                running_pos += snap.length + 1; // +1 for block separator
                 elements.push(FlowElementSnapshot::Block(snap));
             }
         } else if entry < 0 {
@@ -257,10 +271,15 @@ fn snapshot_from_child_order(
             {
                 if let Some(table_id) = sub_frame.table {
                     if let Some(snap) = build_table_snapshot(inner, table_id) {
+                        // Table cells have their own position spaces — don't advance running_pos
+                        // for block separators here; the table occupies positions based on its
+                        // content. For now, treat the table as opaque.
                         elements.push(FlowElementSnapshot::Table(snap));
                     }
                 } else {
-                    let nested = build_flow_snapshot(inner, sub_frame_id);
+                    let (nested, new_pos) =
+                        snapshot_from_child_order(inner, &sub_frame.child_order, running_pos);
+                    running_pos = new_pos;
                     elements.push(FlowElementSnapshot::Frame(FrameSnapshot {
                         frame_id: sub_frame_id as usize,
                         format: frame_dto_to_format(&sub_frame),
@@ -271,7 +290,7 @@ fn snapshot_from_child_order(
         }
     }
 
-    elements
+    (elements, running_pos)
 }
 
 fn snapshot_fallback(

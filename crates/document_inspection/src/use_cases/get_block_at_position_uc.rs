@@ -17,8 +17,10 @@ pub trait GetBlockAtPositionUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
 #[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRO")]
 #[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 pub trait GetBlockAtPositionUnitOfWorkTrait: QueryUnitOfWork {}
 
@@ -37,7 +39,7 @@ impl GetBlockAtPositionUseCase {
 
         let position = dto.position;
 
-        // Get Root(1) -> Document -> Frames -> Blocks
+        // Get Root(1) -> Document -> root frame
         let root = uow
             .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
@@ -49,57 +51,84 @@ impl GetBlockAtPositionUseCase {
 
         let frame_ids =
             uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+        let frame_id = *frame_ids
+            .first()
+            .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-        // Get all frames
-        let frames_opt = uow.get_frame_multi(&frame_ids)?;
+        // Collect all block IDs in document order by traversing child_order recursively
+        let ordered_block_ids = collect_block_ids(&*uow, &frame_id)?;
 
-        // Collect all block IDs from all frames
-        let mut all_block_ids: Vec<EntityId> = Vec::new();
-        for frame in frames_opt.iter().flatten() {
-            let block_ids =
-                uow.get_frame_relationship(&frame.id, &FrameRelationshipField::Blocks)?;
-            all_block_ids.extend(block_ids);
+        // Walk blocks computing positions on the fly.
+        // Use exclusive upper bound: position at block_end (separator) maps to next block.
+        let mut running_pos: i64 = 0;
+        let mut block_number: usize = 0;
+        for &block_id in &ordered_block_ids {
+            let block = uow
+                .get_block(&block_id)?
+                .ok_or_else(|| anyhow!("Block not found"))?;
+            let block_end = running_pos + block.text_length;
+
+            if position >= running_pos && position < block_end {
+                uow.end_transaction()?;
+                return Ok(BlockInfoDto {
+                    block_id: block.id as i64,
+                    block_start: running_pos,
+                    block_length: block.text_length,
+                    block_number: block_number as i64,
+                });
+            }
+            running_pos = block_end + 1;
+            block_number += 1;
         }
 
-        // Get all blocks and sort by document_position
-        let blocks_opt = uow.get_block_multi(&all_block_ids)?;
-        let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
-        blocks.sort_by_key(|b| b.document_position);
-
-        // Binary search for the block containing the position
-        let result = blocks.binary_search_by(|b| {
-            if position < b.document_position {
-                std::cmp::Ordering::Greater
-            } else if position >= b.document_position + b.text_length {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        });
-
-        let block_index = match result {
-            Ok(idx) => idx,
-            Err(idx) => {
-                // Position is between blocks (at a block separator), return the next block
-                if idx < blocks.len() {
-                    idx
-                } else if !blocks.is_empty() {
-                    blocks.len() - 1
-                } else {
-                    return Err(anyhow!("No blocks found in document"));
+        // Fallback to last block
+        if let Some(&last_id) = ordered_block_ids.last() {
+            let block = uow
+                .get_block(&last_id)?
+                .ok_or_else(|| anyhow!("Block not found"))?;
+            // Recompute position for last block
+            let mut pos: i64 = 0;
+            for &id in &ordered_block_ids[..ordered_block_ids.len() - 1] {
+                if let Some(b) = uow.get_block(&id)? {
+                    pos += b.text_length + 1;
                 }
             }
-        };
-
-        let block = &blocks[block_index];
+            uow.end_transaction()?;
+            return Ok(BlockInfoDto {
+                block_id: block.id as i64,
+                block_start: pos,
+                block_length: block.text_length,
+                block_number: (ordered_block_ids.len() - 1) as i64,
+            });
+        }
 
         uow.end_transaction()?;
+        Err(anyhow!("No blocks found in document"))
+    }
+}
 
-        Ok(BlockInfoDto {
-            block_id: block.id as i64,
-            block_start: block.document_position,
-            block_length: block.text_length,
-            block_number: block_index as i64,
-        })
+/// Collect all block IDs in document order by recursing into sub-frames.
+fn collect_block_ids(
+    uow: &dyn GetBlockAtPositionUnitOfWorkTrait,
+    frame_id: &EntityId,
+) -> Result<Vec<EntityId>> {
+    let frame = uow
+        .get_frame(frame_id)?
+        .ok_or_else(|| anyhow!("Frame not found"))?;
+
+    if !frame.child_order.is_empty() {
+        let mut block_ids = Vec::new();
+        for &entry in &frame.child_order {
+            if entry > 0 {
+                block_ids.push(entry as EntityId);
+            } else if entry < 0 {
+                let sub_frame_id = (-entry) as EntityId;
+                let sub_ids = collect_block_ids(uow, &sub_frame_id)?;
+                block_ids.extend(sub_ids);
+            }
+        }
+        Ok(block_ids)
+    } else {
+        uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)
     }
 }
