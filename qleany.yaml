@@ -138,6 +138,9 @@ entities:
           - FloatLeft
           - FloatRight
         optional: true
+      - name: fmt_is_blockquote
+        type: bool
+        optional: true
       - name: table
         type: entity
         entity: Table
@@ -222,6 +225,12 @@ entities:
           - RightToLeft
         optional: true
       - name: fmt_background_color
+        type: string
+        optional: true
+      - name: fmt_is_code_block
+        type: bool
+        optional: true
+      - name: fmt_code_language
         type: string
         optional: true
 
