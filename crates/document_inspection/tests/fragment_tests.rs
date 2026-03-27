@@ -179,9 +179,10 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
     // Find the position range containing "bold text"
     let text = export_text(&db_context, &event_hub)?;
     // text is now something like "Start\nbold text\n"
-    // Find where "bold text" starts
-    let bold_start = text.find("bold text").expect("should contain 'bold text'");
-    let bold_end = bold_start + "bold text".len();
+    // Find where "bold text" starts (convert byte offset to char position)
+    let byte_offset = text.find("bold text").expect("should contain 'bold text'");
+    let bold_start = text[..byte_offset].chars().count();
+    let bold_end = bold_start + "bold text".chars().count();
 
     // Extract the bold fragment
     let extract_result = document_inspection_controller::extract_fragment(
