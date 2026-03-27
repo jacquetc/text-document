@@ -4,7 +4,7 @@ use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, Resource, Root,
+    Block, Document, Frame, FramePosition, InlineContent, InlineElement, List, Resource, Root,
 };
 use common::long_operation::LongOperation;
 use common::parser_tools::content_parser::{ParsedSpan, parse_html};
@@ -134,10 +134,21 @@ impl LongOperation for ImportHtmlUseCase {
         let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
         // Step 4: Create blocks with inline elements
+        // Track blockquote frame stack
         let total_blocks = parsed_blocks.len();
         let mut total_chars: i64 = 0;
         let mut document_position: i64 = 0;
-        let mut block_ids: Vec<i64> = Vec::new();
+
+        struct FrameState {
+            frame_id: common::types::EntityId,
+            child_order: Vec<i64>,
+        }
+
+        let mut frame_stack: Vec<FrameState> = vec![FrameState {
+            frame_id: created_frame.id,
+            child_order: Vec::new(),
+        }];
+        let mut current_bq_depth: u32 = 0;
 
         for (i, parsed_block) in parsed_blocks.iter().enumerate() {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -145,9 +156,45 @@ impl LongOperation for ImportHtmlUseCase {
                 return Err(anyhow!("Operation was cancelled"));
             }
 
+            let bq_depth = parsed_block.blockquote_depth;
+
+            // Close blockquote frames if depth decreased
+            while current_bq_depth > bq_depth && frame_stack.len() > 1 {
+                let finished = frame_stack.pop().unwrap();
+                let mut frame_entity = uow
+                    .get_frame(&finished.frame_id)?
+                    .ok_or_else(|| anyhow!("Blockquote frame not found"))?;
+                frame_entity.child_order = finished.child_order;
+                uow.update_frame(&frame_entity)?;
+                current_bq_depth -= 1;
+            }
+
+            // Open blockquote frames if depth increased
+            while current_bq_depth < bq_depth {
+                let parent_frame_id = frame_stack.last().unwrap().frame_id;
+                let bq_frame = Frame {
+                    fmt_is_blockquote: Some(true),
+                    fmt_position: Some(FramePosition::InFlow),
+                    parent_frame: Some(parent_frame_id),
+                    ..Frame::default()
+                };
+                let created_bq = uow.create_frame(&bq_frame, doc_id, -1)?;
+                frame_stack
+                    .last_mut()
+                    .unwrap()
+                    .child_order
+                    .push(-(created_bq.id as i64));
+                frame_stack.push(FrameState {
+                    frame_id: created_bq.id,
+                    child_order: Vec::new(),
+                });
+                current_bq_depth += 1;
+            }
+
             let plain_text: String = parsed_block.spans.iter().map(|s| s.text.as_str()).collect();
             let line_len = plain_text.chars().count() as i64;
 
+            let current_frame_id = frame_stack.last().unwrap().frame_id;
             let block = Block {
                 plain_text,
                 text_length: line_len,
@@ -157,10 +204,16 @@ impl LongOperation for ImportHtmlUseCase {
                 fmt_non_breakable_lines: parsed_block.non_breakable_lines,
                 fmt_direction: parsed_block.direction.clone(),
                 fmt_background_color: parsed_block.background_color.clone(),
+                fmt_is_code_block: if parsed_block.is_code_block {
+                    Some(true)
+                } else {
+                    None
+                },
+                fmt_code_language: parsed_block.code_language.clone(),
                 ..Block::default()
             };
 
-            let created_block = uow.create_block(&block, created_frame.id, -1)?;
+            let created_block = uow.create_block(&block, current_frame_id, -1)?;
 
             for span in &parsed_block.spans {
                 let element = create_inline_element_from_span(span, parsed_block.is_code_block);
@@ -182,7 +235,11 @@ impl LongOperation for ImportHtmlUseCase {
                 )?;
             }
 
-            block_ids.push(created_block.id as i64);
+            frame_stack
+                .last_mut()
+                .unwrap()
+                .child_order
+                .push(created_block.id as i64);
             total_chars += line_len;
 
             document_position += line_len;
@@ -199,11 +256,22 @@ impl LongOperation for ImportHtmlUseCase {
             }
         }
 
-        // Step 5: Update frame child_order
+        // Close any remaining open blockquote frames
+        while frame_stack.len() > 1 {
+            let finished = frame_stack.pop().unwrap();
+            let mut frame_entity = uow
+                .get_frame(&finished.frame_id)?
+                .ok_or_else(|| anyhow!("Blockquote frame not found"))?;
+            frame_entity.child_order = finished.child_order;
+            uow.update_frame(&frame_entity)?;
+        }
+
+        // Step 5: Update root frame child_order
+        let root_state = frame_stack.pop().unwrap();
         let mut updated_frame = uow
-            .get_frame(&created_frame.id)?
+            .get_frame(&root_state.frame_id)?
             .ok_or_else(|| anyhow!("Created frame not found"))?;
-        updated_frame.child_order = block_ids;
+        updated_frame.child_order = root_state.child_order;
         uow.update_frame(&updated_frame)?;
 
         // Step 6: Update document stats

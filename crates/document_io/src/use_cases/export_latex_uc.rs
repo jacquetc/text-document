@@ -7,6 +7,7 @@ use common::entities::{
     Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
     TextDirection,
 };
+use std::collections::HashMap;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
 
@@ -87,123 +88,10 @@ impl ExportLatexUseCase {
                 continue;
             }
 
-            // Check if this is a table anchor frame
-            let frame = uow.get_frame(frame_id)?;
-            if let Some(ref f) = frame
-                && let Some(table_id) = f.table
-            {
-                let table_latex = self.render_table_latex(&*uow, &table_id)?;
-                body_parts.push(table_latex);
-                continue;
-            }
-
-            let block_ids = uow.get_frame_relationship(
-                frame_id,
-                &common::direct_access::frame::FrameRelationshipField::Blocks,
-            )?;
-
-            if block_ids.is_empty() {
-                continue;
-            }
-
-            let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
-            blocks.sort_by_key(|b| b.document_position);
-
-            let mut i = 0;
-            while i < blocks.len() {
-                let block = &blocks[i];
-
-                // Check if block has a list
-                let list_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::List,
-                )?;
-                let list = if let Some(list_id) = list_ids.first() {
-                    uow.get_list(list_id)?
-                } else {
-                    None
-                };
-
-                if let Some(ref list_entity) = list {
-                    // Collect consecutive list items
-                    let is_ordered = matches!(
-                        list_entity.style,
-                        ListStyle::Decimal
-                            | ListStyle::LowerAlpha
-                            | ListStyle::UpperAlpha
-                            | ListStyle::LowerRoman
-                            | ListStyle::UpperRoman
-                    );
-                    let env = if is_ordered { "enumerate" } else { "itemize" };
-                    let mut items = Vec::new();
-
-                    while i < blocks.len() {
-                        let b = &blocks[i];
-                        let b_list_ids = uow.get_block_relationship(
-                            &b.id,
-                            &common::direct_access::block::BlockRelationshipField::List,
-                        )?;
-                        let b_list = if let Some(lid) = b_list_ids.first() {
-                            uow.get_list(lid)?
-                        } else {
-                            None
-                        };
-
-                        if b_list.is_some() {
-                            let inline_latex = self.render_inline_latex(&*uow, b)?;
-                            items.push(format!("\\item {}", inline_latex));
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    body_parts.push(format!(
-                        "\\begin{{{}}}\n{}\n\\end{{{}}}",
-                        env,
-                        items.join("\n"),
-                        env
-                    ));
-                } else {
-                    let inline_latex = self.render_inline_latex(&*uow, block)?;
-
-                    let mut content = if let Some(level) = block.fmt_heading_level {
-                        let cmd = match level {
-                            1 => "section",
-                            2 => "subsection",
-                            3 => "subsubsection",
-                            _ => "paragraph",
-                        };
-                        format!("\\{}{{{}}}", cmd, inline_latex)
-                    } else {
-                        inline_latex
-                    };
-
-                    // Wrap with line-height
-                    if let Some(lh) = block.fmt_line_height {
-                        let spacing = lh as f64 / 1000.0;
-                        content = format!("{{\\setstretch{{{:.2}}}{}}}", spacing, content);
-                    }
-                    // Wrap with direction
-                    if block.fmt_direction == Some(TextDirection::RightToLeft) {
-                        content = format!("\\RL{{{}}}", content);
-                    }
-                    // Wrap with background color
-                    if let Some(ref c) = block.fmt_background_color {
-                        content = format!(
-                            "\\colorbox{{{}}}{{\\parbox{{\\linewidth}}{{{}}}}}",
-                            c, content
-                        );
-                    }
-                    // Wrap with non-breakable lines
-                    if block.fmt_non_breakable_lines == Some(true) {
-                        content = format!("\\mbox{{{}}}", content);
-                    }
-
-                    body_parts.push(content);
-                    i += 1;
-                }
+            let frame_latex =
+                self.render_frame_latex(&*uow, frame_id, &cell_frame_ids)?;
+            if !frame_latex.is_empty() {
+                body_parts.push(frame_latex);
             }
         }
 
@@ -226,6 +114,237 @@ impl ExportLatexUseCase {
         };
 
         Ok(ExportLatexResultDto { latex_text })
+    }
+
+    fn render_frame_latex(
+        &self,
+        uow: &dyn ExportLatexUnitOfWorkTrait,
+        frame_id: &EntityId,
+        cell_frame_ids: &HashSet<EntityId>,
+    ) -> Result<String> {
+        let frame = uow.get_frame(frame_id)?;
+        let frame = match frame {
+            Some(f) => f,
+            None => return Ok(String::new()),
+        };
+
+        // Check if this is a table anchor frame
+        if let Some(table_id) = frame.table {
+            return self.render_table_latex(uow, &table_id);
+        }
+
+        let block_ids = uow.get_frame_relationship(
+            frame_id,
+            &common::direct_access::frame::FrameRelationshipField::Blocks,
+        )?;
+
+        // Build a map of block ID -> Block for quick lookup
+        let blocks_opt = uow.get_block_multi(&block_ids)?;
+        let block_map: HashMap<EntityId, Block> = blocks_opt
+            .into_iter()
+            .flatten()
+            .map(|b| (b.id, b))
+            .collect();
+
+        let mut parts: Vec<String> = Vec::new();
+
+        if frame.child_order.is_empty() {
+            // No child_order: fall back to rendering all blocks sorted by position
+            let mut blocks: Vec<&Block> = block_map.values().collect();
+            blocks.sort_by_key(|b| b.document_position);
+            self.render_blocks_latex(uow, &blocks, &mut parts)?;
+        } else {
+            // Use child_order to interleave blocks and sub-frames
+            // Collect consecutive blocks, then render them as a group
+            let mut pending_blocks: Vec<&Block> = Vec::new();
+
+            for &order_val in &frame.child_order {
+                if order_val > 0 {
+                    // Positive = block ID
+                    let block_id: EntityId = order_val as u64;
+                    if let Some(block) = block_map.get(&block_id) {
+                        pending_blocks.push(block);
+                    }
+                } else {
+                    // Negative = negated sub-frame ID
+                    // Flush pending blocks first
+                    if !pending_blocks.is_empty() {
+                        self.render_blocks_latex(uow, &pending_blocks, &mut parts)?;
+                        pending_blocks.clear();
+                    }
+
+                    let sub_frame_id: EntityId = (-order_val) as u64;
+                    // Skip cell frames
+                    if cell_frame_ids.contains(&sub_frame_id) {
+                        continue;
+                    }
+                    let sub_latex =
+                        self.render_frame_latex(uow, &sub_frame_id, cell_frame_ids)?;
+                    if !sub_latex.is_empty() {
+                        parts.push(sub_latex);
+                    }
+                }
+            }
+
+            // Flush remaining pending blocks
+            if !pending_blocks.is_empty() {
+                self.render_blocks_latex(uow, &pending_blocks, &mut parts)?;
+            }
+        }
+
+        if parts.is_empty() {
+            return Ok(String::new());
+        }
+
+        let content = parts.join("\n\n");
+
+        // Wrap with blockquote environment if applicable
+        if frame.fmt_is_blockquote == Some(true) {
+            Ok(format!("\\begin{{quote}}\n{}\n\\end{{quote}}", content))
+        } else {
+            Ok(content)
+        }
+    }
+
+    /// Render a sequence of blocks (handling list grouping, code blocks, etc.)
+    fn render_blocks_latex(
+        &self,
+        uow: &dyn ExportLatexUnitOfWorkTrait,
+        blocks: &[&Block],
+        parts: &mut Vec<String>,
+    ) -> Result<()> {
+        let mut i = 0;
+        while i < blocks.len() {
+            let block = blocks[i];
+
+            // Check if block has a list
+            let list_ids = uow.get_block_relationship(
+                &block.id,
+                &common::direct_access::block::BlockRelationshipField::List,
+            )?;
+            let list = if let Some(list_id) = list_ids.first() {
+                uow.get_list(list_id)?
+            } else {
+                None
+            };
+
+            if let Some(ref list_entity) = list {
+                // Collect consecutive list items
+                let is_ordered = matches!(
+                    list_entity.style,
+                    ListStyle::Decimal
+                        | ListStyle::LowerAlpha
+                        | ListStyle::UpperAlpha
+                        | ListStyle::LowerRoman
+                        | ListStyle::UpperRoman
+                );
+                let env = if is_ordered { "enumerate" } else { "itemize" };
+                let mut items = Vec::new();
+
+                while i < blocks.len() {
+                    let b = blocks[i];
+                    let b_list_ids = uow.get_block_relationship(
+                        &b.id,
+                        &common::direct_access::block::BlockRelationshipField::List,
+                    )?;
+                    let b_list = if let Some(lid) = b_list_ids.first() {
+                        uow.get_list(lid)?
+                    } else {
+                        None
+                    };
+
+                    if b_list.is_some() {
+                        let inline_latex = self.render_inline_latex(uow, b)?;
+                        items.push(format!("\\item {}", inline_latex));
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                parts.push(format!(
+                    "\\begin{{{}}}\n{}\n\\end{{{}}}",
+                    env,
+                    items.join("\n"),
+                    env
+                ));
+            } else if block.fmt_is_code_block == Some(true) {
+                // Code block: emit verbatim with raw text (no LaTeX formatting)
+                let raw_text = self.render_raw_text(uow, block)?;
+                parts.push(format!(
+                    "\\begin{{verbatim}}\n{}\n\\end{{verbatim}}",
+                    raw_text
+                ));
+                i += 1;
+            } else {
+                let inline_latex = self.render_inline_latex(uow, block)?;
+
+                let mut content = if let Some(level) = block.fmt_heading_level {
+                    let cmd = match level {
+                        1 => "section",
+                        2 => "subsection",
+                        3 => "subsubsection",
+                        _ => "paragraph",
+                    };
+                    format!("\\{}{{{}}}", cmd, inline_latex)
+                } else {
+                    inline_latex
+                };
+
+                // Wrap with line-height
+                if let Some(lh) = block.fmt_line_height {
+                    let spacing = lh as f64 / 1000.0;
+                    content = format!("{{\\setstretch{{{:.2}}}{}}}", spacing, content);
+                }
+                // Wrap with direction
+                if block.fmt_direction == Some(TextDirection::RightToLeft) {
+                    content = format!("\\RL{{{}}}", content);
+                }
+                // Wrap with background color
+                if let Some(ref c) = block.fmt_background_color {
+                    content = format!(
+                        "\\colorbox{{{}}}{{\\parbox{{\\linewidth}}{{{}}}}}",
+                        c, content
+                    );
+                }
+                // Wrap with non-breakable lines
+                if block.fmt_non_breakable_lines == Some(true) {
+                    content = format!("\\mbox{{{}}}", content);
+                }
+
+                parts.push(content);
+                i += 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Render raw text content of a block (no LaTeX escaping or formatting).
+    /// Used for verbatim/code block environments.
+    fn render_raw_text(
+        &self,
+        uow: &dyn ExportLatexUnitOfWorkTrait,
+        block: &Block,
+    ) -> Result<String> {
+        let element_ids = uow.get_block_relationship(
+            &block.id,
+            &common::direct_access::block::BlockRelationshipField::Elements,
+        )?;
+
+        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+
+        let mut text = String::new();
+        for elem in &elements {
+            match &elem.content {
+                InlineContent::Text(t) => text.push_str(t),
+                InlineContent::Image { name, .. } => text.push_str(name),
+                InlineContent::Empty => {}
+            }
+        }
+
+        Ok(text)
     }
 
     fn render_inline_latex(

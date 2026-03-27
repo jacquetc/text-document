@@ -51,6 +51,7 @@ impl QueryUnitOfWork for ExportHtmlUnitOfWork {
 #[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]

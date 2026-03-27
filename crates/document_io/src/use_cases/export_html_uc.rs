@@ -19,6 +19,7 @@ pub trait ExportHtmlUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
@@ -86,126 +87,9 @@ impl ExportHtmlUseCase {
                 continue;
             }
 
-            // Check if this is a table anchor frame
-            let frame = uow.get_frame(frame_id)?;
-            if let Some(ref f) = frame
-                && let Some(table_id) = f.table
-            {
-                let table_html = self.render_table_html(&*uow, &table_id)?;
-                body_parts.push(table_html);
-                continue;
-            }
-
-            let block_ids = uow.get_frame_relationship(
-                frame_id,
-                &common::direct_access::frame::FrameRelationshipField::Blocks,
-            )?;
-
-            if block_ids.is_empty() {
-                continue;
-            }
-
-            let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
-            blocks.sort_by_key(|b| b.document_position);
-
-            // Group consecutive list items
-            let mut i = 0;
-            while i < blocks.len() {
-                let block = &blocks[i];
-
-                // Check if block has a list
-                let list_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::List,
-                )?;
-                let list = if let Some(list_id) = list_ids.first() {
-                    uow.get_list(list_id)?
-                } else {
-                    None
-                };
-
-                if let Some(ref list_entity) = list {
-                    // Start a list group
-                    let is_ordered = matches!(
-                        list_entity.style,
-                        ListStyle::Decimal
-                            | ListStyle::LowerAlpha
-                            | ListStyle::UpperAlpha
-                            | ListStyle::LowerRoman
-                            | ListStyle::UpperRoman
-                    );
-                    let list_tag = if is_ordered { "ol" } else { "ul" };
-                    let mut list_items = Vec::new();
-
-                    // Collect consecutive list items
-                    while i < blocks.len() {
-                        let b = &blocks[i];
-                        let b_list_ids = uow.get_block_relationship(
-                            &b.id,
-                            &common::direct_access::block::BlockRelationshipField::List,
-                        )?;
-                        let b_list = if let Some(lid) = b_list_ids.first() {
-                            uow.get_list(lid)?
-                        } else {
-                            None
-                        };
-
-                        if b_list.is_some() {
-                            let inline_html = self.render_inline_html(&*uow, b)?;
-                            list_items.push(format!("<li>{}</li>", inline_html));
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    body_parts.push(format!(
-                        "<{}>{}</{}>",
-                        list_tag,
-                        list_items.join(""),
-                        list_tag
-                    ));
-                } else {
-                    let inline_html = self.render_inline_html(&*uow, block)?;
-
-                    let mut styles: Vec<String> = Vec::new();
-                    match block.fmt_alignment {
-                        Some(Alignment::Left) => styles.push("text-align: left".into()),
-                        Some(Alignment::Right) => styles.push("text-align: right".into()),
-                        Some(Alignment::Center) => styles.push("text-align: center".into()),
-                        Some(Alignment::Justify) => styles.push("text-align: justify".into()),
-                        None => {}
-                    }
-                    if let Some(lh) = block.fmt_line_height {
-                        styles.push(format!("line-height: {}", lh as f64 / 1000.0));
-                    }
-                    if block.fmt_non_breakable_lines == Some(true) {
-                        styles.push("white-space: pre".into());
-                    }
-                    if block.fmt_direction == Some(TextDirection::RightToLeft) {
-                        styles.push("direction: rtl".into());
-                    }
-                    if let Some(ref c) = block.fmt_background_color {
-                        styles.push(format!("background-color: {}", c));
-                    }
-                    let style_attr = if styles.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" style=\"{}\"", styles.join("; "))
-                    };
-
-                    if let Some(level) = block.fmt_heading_level {
-                        let level = level.clamp(1, 6);
-                        body_parts.push(format!(
-                            "<h{}{}>{}</h{}>",
-                            level, style_attr, inline_html, level
-                        ));
-                    } else {
-                        body_parts.push(format!("<p{}>{}</p>", style_attr, inline_html));
-                    }
-                    i += 1;
-                }
+            let frame_html = self.render_frame_html(&*uow, frame_id, &cell_frame_ids)?;
+            if !frame_html.is_empty() {
+                body_parts.push(frame_html);
             }
         }
 
@@ -217,6 +101,259 @@ impl ExportHtmlUseCase {
         );
 
         Ok(ExportHtmlDto { html_text })
+    }
+
+    /// Render a frame's content as HTML, walking its `child_order` to interleave
+    /// blocks and sub-frames (blockquotes). Falls back to sorted blocks when
+    /// `child_order` is empty.
+    fn render_frame_html(
+        &self,
+        uow: &dyn ExportHtmlUnitOfWorkTrait,
+        frame_id: &EntityId,
+        cell_frame_ids: &HashSet<EntityId>,
+    ) -> Result<String> {
+        let frame = uow
+            .get_frame(frame_id)?
+            .ok_or_else(|| anyhow!("Frame not found"))?;
+
+        // Table anchor frame — render the table instead of blocks
+        if let Some(table_id) = frame.table {
+            return self.render_table_html(uow, &table_id);
+        }
+
+        // If child_order is populated, use it to interleave blocks and sub-frames
+        if !frame.child_order.is_empty() {
+            return self.render_frame_by_child_order(uow, &frame, cell_frame_ids);
+        }
+
+        // Fallback: render all blocks in document_position order (original behaviour)
+        let block_ids = uow.get_frame_relationship(
+            frame_id,
+            &common::direct_access::frame::FrameRelationshipField::Blocks,
+        )?;
+
+        if block_ids.is_empty() {
+            return Ok(String::new());
+        }
+
+        let blocks_opt = uow.get_block_multi(&block_ids)?;
+        let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+        blocks.sort_by_key(|b| b.document_position);
+
+        self.render_blocks_html(uow, &blocks)
+    }
+
+    /// Walk `child_order` entries: positive values are block IDs, negative values
+    /// are negated sub-frame IDs.
+    fn render_frame_by_child_order(
+        &self,
+        uow: &dyn ExportHtmlUnitOfWorkTrait,
+        frame: &Frame,
+        cell_frame_ids: &HashSet<EntityId>,
+    ) -> Result<String> {
+        let mut parts: Vec<String> = Vec::new();
+        // Accumulate consecutive blocks so we can group list items
+        let mut pending_blocks: Vec<Block> = Vec::new();
+
+        for &entry in &frame.child_order {
+            if entry > 0 {
+                // Positive: block ID
+                let block_id = entry as u64;
+                if let Some(block) = uow.get_block(&block_id)? {
+                    pending_blocks.push(block);
+                }
+            } else {
+                // Negative: negated sub-frame ID
+                // First, flush any accumulated blocks
+                if !pending_blocks.is_empty() {
+                    let html = self.render_blocks_html(uow, &pending_blocks)?;
+                    if !html.is_empty() {
+                        parts.push(html);
+                    }
+                    pending_blocks.clear();
+                }
+
+                let sub_frame_id = (-entry) as u64;
+
+                // Skip cell frames
+                if cell_frame_ids.contains(&sub_frame_id) {
+                    continue;
+                }
+
+                let sub_frame = uow.get_frame(&sub_frame_id)?;
+                if let Some(ref sf) = sub_frame {
+                    if sf.fmt_is_blockquote == Some(true) {
+                        // Recursively render the blockquote frame content
+                        let inner =
+                            self.render_frame_html(uow, &sub_frame_id, cell_frame_ids)?;
+                        if !inner.is_empty() {
+                            parts.push(format!("<blockquote>{}</blockquote>", inner));
+                        }
+                    } else {
+                        // Non-blockquote sub-frame: render normally
+                        let inner =
+                            self.render_frame_html(uow, &sub_frame_id, cell_frame_ids)?;
+                        if !inner.is_empty() {
+                            parts.push(inner);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Flush remaining blocks
+        if !pending_blocks.is_empty() {
+            let html = self.render_blocks_html(uow, &pending_blocks)?;
+            if !html.is_empty() {
+                parts.push(html);
+            }
+        }
+
+        Ok(parts.join(""))
+    }
+
+    /// Render a slice of blocks as HTML, grouping consecutive list items and
+    /// handling code blocks, headings, and paragraphs.
+    fn render_blocks_html(
+        &self,
+        uow: &dyn ExportHtmlUnitOfWorkTrait,
+        blocks: &[Block],
+    ) -> Result<String> {
+        let mut parts: Vec<String> = Vec::new();
+        let mut i = 0;
+
+        while i < blocks.len() {
+            let block = &blocks[i];
+
+            // --- Code block ---
+            if block.fmt_is_code_block == Some(true) {
+                let element_ids = uow.get_block_relationship(
+                    &block.id,
+                    &common::direct_access::block::BlockRelationshipField::Elements,
+                )?;
+                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+
+                // Concatenate raw text without inline formatting
+                let mut raw_text = String::new();
+                for elem in &elements {
+                    match &elem.content {
+                        InlineContent::Text(t) => raw_text.push_str(t),
+                        InlineContent::Image { .. } | InlineContent::Empty => {}
+                    }
+                }
+
+                let escaped = escape_html(&raw_text);
+
+                let code_open = if let Some(ref lang) = block.fmt_code_language {
+                    if !lang.is_empty() {
+                        format!("<code class=\"language-{}\">", escape_html(lang))
+                    } else {
+                        "<code>".to_string()
+                    }
+                } else {
+                    "<code>".to_string()
+                };
+
+                parts.push(format!("<pre>{}{}</code></pre>", code_open, escaped));
+                i += 1;
+                continue;
+            }
+
+            // --- List items ---
+            let list_ids = uow.get_block_relationship(
+                &block.id,
+                &common::direct_access::block::BlockRelationshipField::List,
+            )?;
+            let list = if let Some(list_id) = list_ids.first() {
+                uow.get_list(list_id)?
+            } else {
+                None
+            };
+
+            if let Some(ref list_entity) = list {
+                let is_ordered = matches!(
+                    list_entity.style,
+                    ListStyle::Decimal
+                        | ListStyle::LowerAlpha
+                        | ListStyle::UpperAlpha
+                        | ListStyle::LowerRoman
+                        | ListStyle::UpperRoman
+                );
+                let list_tag = if is_ordered { "ol" } else { "ul" };
+                let mut list_items = Vec::new();
+
+                while i < blocks.len() {
+                    let b = &blocks[i];
+                    let b_list_ids = uow.get_block_relationship(
+                        &b.id,
+                        &common::direct_access::block::BlockRelationshipField::List,
+                    )?;
+                    let b_list = if let Some(lid) = b_list_ids.first() {
+                        uow.get_list(lid)?
+                    } else {
+                        None
+                    };
+
+                    if b_list.is_some() {
+                        let inline_html = self.render_inline_html(uow, b)?;
+                        list_items.push(format!("<li>{}</li>", inline_html));
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                parts.push(format!(
+                    "<{}>{}</{}>",
+                    list_tag,
+                    list_items.join(""),
+                    list_tag
+                ));
+            } else {
+                // --- Normal block (paragraph / heading) ---
+                let inline_html = self.render_inline_html(uow, block)?;
+
+                let mut styles: Vec<String> = Vec::new();
+                match block.fmt_alignment {
+                    Some(Alignment::Left) => styles.push("text-align: left".into()),
+                    Some(Alignment::Right) => styles.push("text-align: right".into()),
+                    Some(Alignment::Center) => styles.push("text-align: center".into()),
+                    Some(Alignment::Justify) => styles.push("text-align: justify".into()),
+                    None => {}
+                }
+                if let Some(lh) = block.fmt_line_height {
+                    styles.push(format!("line-height: {}", lh as f64 / 1000.0));
+                }
+                if block.fmt_non_breakable_lines == Some(true) {
+                    styles.push("white-space: pre".into());
+                }
+                if block.fmt_direction == Some(TextDirection::RightToLeft) {
+                    styles.push("direction: rtl".into());
+                }
+                if let Some(ref c) = block.fmt_background_color {
+                    styles.push(format!("background-color: {}", c));
+                }
+                let style_attr = if styles.is_empty() {
+                    String::new()
+                } else {
+                    format!(" style=\"{}\"", styles.join("; "))
+                };
+
+                if let Some(level) = block.fmt_heading_level {
+                    let level = level.clamp(1, 6);
+                    parts.push(format!(
+                        "<h{}{}>{}</h{}>",
+                        level, style_attr, inline_html, level
+                    ));
+                } else {
+                    parts.push(format!("<p{}>{}</p>", style_attr, inline_html));
+                }
+                i += 1;
+            }
+        }
+
+        Ok(parts.join(""))
     }
 
     fn render_table_html(
