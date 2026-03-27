@@ -49,7 +49,8 @@ fn insert_block_creates_new_paragraph() {
     let doc = new_doc_with_text("HelloWorld");
     let cursor = doc.cursor_at(5);
     cursor.insert_block().unwrap();
-    assert!(doc.block_count() >= 2);
+    assert_eq!(doc.block_count(), 2);
+    assert_eq!(doc.to_plain_text().unwrap(), "Hello\nWorld");
 }
 
 #[test]

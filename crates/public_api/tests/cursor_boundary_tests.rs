@@ -216,7 +216,7 @@ fn move_next_word() {
     let doc = new_doc("Hello world foo");
     let c = doc.cursor();
     c.move_position(MoveOperation::NextWord, MoveMode::MoveAnchor, 1);
-    assert!(c.position() >= 5);
+    assert_eq!(c.position(), 5);
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn move_word_right() {
     let doc = new_doc("Hello world");
     let c = doc.cursor();
     c.move_position(MoveOperation::WordRight, MoveMode::MoveAnchor, 1);
-    assert!(c.position() >= 5);
+    assert_eq!(c.position(), 5);
 }
 
 #[test]
@@ -507,7 +507,7 @@ fn cursor_char_format() {
     let c = doc.cursor();
     let fmt = c.char_format().unwrap();
     // Default format has no explicit bold
-    let _ = fmt.font_bold;
+    assert_ne!(fmt.font_bold, Some(true));
 }
 
 #[test]
@@ -515,7 +515,7 @@ fn cursor_block_format() {
     let doc = new_doc("Hello");
     let c = doc.cursor();
     let fmt = c.block_format().unwrap();
-    let _ = fmt.alignment;
+    assert_eq!(fmt.alignment, None);
 }
 
 // ── Word boundary edge cases ────────────────────────────────────
@@ -525,8 +525,8 @@ fn next_word_at_end_of_document() {
     let doc = new_doc("Hello");
     let c = doc.cursor_at(5);
     let moved = c.move_position(MoveOperation::NextWord, MoveMode::MoveAnchor, 1);
-    // At end, may not move
-    let _ = moved;
+    assert!(!moved);
+    assert_eq!(c.position(), 5);
 }
 
 #[test]

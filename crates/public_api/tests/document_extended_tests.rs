@@ -252,24 +252,24 @@ fn try_new_succeeds() {
 #[test]
 fn text_at_beyond_document_length() {
     let doc = new_doc("Hello");
-    // Requesting more text than available should not panic
-    let result = doc.text_at(0, 100);
-    // Implementation may truncate or error — just verify no panic
-    let _ = result;
+    // Requesting more text than available should truncate to what's available
+    let result = doc.text_at(0, 100).unwrap();
+    assert_eq!(result, "Hello");
 }
 
 #[test]
 fn text_at_position_beyond_end() {
     let doc = new_doc("Hello");
     let result = doc.text_at(100, 5);
-    let _ = result;
+    assert!(result.is_err());
 }
 
 #[test]
 fn block_at_beyond_end() {
     let doc = new_doc("Hello");
-    let result = doc.block_at(100);
-    let _ = result;
+    // Position beyond end should return the last block
+    let result = doc.block_at(100).unwrap();
+    assert_eq!(result.block_number, 0);
 }
 
 // ── ContentsChanged event payload ───────────────────────────────
