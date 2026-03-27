@@ -18,8 +18,10 @@ pub trait GetTextAtPositionUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRO")]
 #[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRO")]
 #[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
@@ -50,7 +52,7 @@ impl GetTextAtPositionUseCase {
             });
         }
 
-        // Get Root(1) -> Document -> Frames -> Blocks
+        // Get Root(1) -> Document -> root frame -> collect blocks recursively
         let root = uow
             .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
@@ -62,19 +64,22 @@ impl GetTextAtPositionUseCase {
 
         let frame_ids =
             uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+        let frame_id = *frame_ids
+            .first()
+            .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-        let frames_opt = uow.get_frame_multi(&frame_ids)?;
+        // Collect all block IDs in document order, traversing into nested frames
+        let ordered_block_ids = collect_block_ids(&*uow, &frame_id)?;
 
-        let mut all_block_ids: Vec<EntityId> = Vec::new();
-        for frame in frames_opt.iter().flatten() {
-            let block_ids =
-                uow.get_frame_relationship(&frame.id, &FrameRelationshipField::Blocks)?;
-            all_block_ids.extend(block_ids);
-        }
-
-        let blocks_opt = uow.get_block_multi(&all_block_ids)?;
+        // Get all blocks and assign computed positions
+        let blocks_opt = uow.get_block_multi(&ordered_block_ids)?;
         let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
-        blocks.sort_by_key(|b| b.document_position);
+        // Assign on-the-fly positions so they match the true document layout
+        let mut running: i64 = 0;
+        for block in &mut blocks {
+            block.document_position = running;
+            running += block.text_length + 1;
+        }
 
         // Find the block containing the requested position.
         // Use <= on the upper bound so that a position at the very end of a block is valid.
@@ -166,5 +171,31 @@ impl GetTextAtPositionUseCase {
             block_id: blocks[first_block_idx].id as i64,
             element_id: first_element_id as i64,
         })
+    }
+}
+
+/// Collect all block IDs in document order by recursing into sub-frames.
+fn collect_block_ids(
+    uow: &dyn GetTextAtPositionUnitOfWorkTrait,
+    frame_id: &EntityId,
+) -> Result<Vec<EntityId>> {
+    let frame = uow
+        .get_frame(frame_id)?
+        .ok_or_else(|| anyhow!("Frame not found"))?;
+
+    if !frame.child_order.is_empty() {
+        let mut block_ids = Vec::new();
+        for &entry in &frame.child_order {
+            if entry > 0 {
+                block_ids.push(entry as EntityId);
+            } else if entry < 0 {
+                let sub_frame_id = (-entry) as EntityId;
+                let sub_ids = collect_block_ids(uow, &sub_frame_id)?;
+                block_ids.extend(sub_ids);
+            }
+        }
+        Ok(block_ids)
+    } else {
+        uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)
     }
 }
