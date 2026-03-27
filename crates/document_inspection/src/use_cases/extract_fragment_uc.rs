@@ -197,6 +197,16 @@ impl ExtractFragmentUseCase {
                 } else {
                     None
                 },
+                is_code_block: if is_full_block {
+                    block.fmt_is_code_block
+                } else {
+                    None
+                },
+                code_language: if is_full_block {
+                    block.fmt_code_language.clone()
+                } else {
+                    None
+                },
             };
 
             plain_texts.push(extracted_text);
