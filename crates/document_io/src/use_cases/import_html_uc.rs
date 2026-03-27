@@ -8,6 +8,7 @@ use common::entities::{
 };
 use common::long_operation::LongOperation;
 use common::parser_tools::content_parser::{ParsedSpan, parse_html};
+use common::parser_tools::list_grouper::ListGrouper;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::sync::Arc;
 
@@ -149,6 +150,7 @@ impl LongOperation for ImportHtmlUseCase {
             child_order: Vec::new(),
         }];
         let mut current_bq_depth: u32 = 0;
+        let mut list_grouper = ListGrouper::new();
 
         for (i, parsed_block) in parsed_blocks.iter().enumerate() {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -167,6 +169,7 @@ impl LongOperation for ImportHtmlUseCase {
                 frame_entity.child_order = finished.child_order;
                 uow.update_frame(&frame_entity)?;
                 current_bq_depth -= 1;
+                list_grouper.reset();
             }
 
             // Open blockquote frames if depth increased
@@ -189,6 +192,7 @@ impl LongOperation for ImportHtmlUseCase {
                     child_order: Vec::new(),
                 });
                 current_bq_depth += 1;
+                list_grouper.reset();
             }
 
             let plain_text: String = parsed_block.spans.iter().map(|s| s.text.as_str()).collect();
@@ -222,18 +226,32 @@ impl LongOperation for ImportHtmlUseCase {
 
             // Handle list items
             if let Some(ref list_style) = parsed_block.list_style {
-                let list = List {
-                    style: list_style.clone(),
-                    indent: parsed_block.list_indent as i64,
-                    ..List::default()
+                let list_id = if let Some(existing_id) =
+                    list_grouper.try_reuse(list_style, parsed_block.list_indent)
+                {
+                    existing_id
+                } else {
+                    let list = List {
+                        style: list_style.clone(),
+                        indent: parsed_block.list_indent as i64,
+                        ..List::default()
+                    };
+                    let created_list = uow.create_list(&list, doc_id, -1)?;
+                    list_grouper.register(
+                        created_list.id,
+                        list_style.clone(),
+                        parsed_block.list_indent,
+                    );
+                    created_list.id
                 };
-                let created_list = uow.create_list(&list, doc_id, -1)?;
 
                 uow.set_block_relationship(
                     &created_block.id,
                     &common::direct_access::block::BlockRelationshipField::List,
-                    &[created_list.id],
+                    &[list_id],
                 )?;
+            } else {
+                list_grouper.reset();
             }
 
             frame_stack

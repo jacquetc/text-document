@@ -91,7 +91,11 @@ impl DocumentFragment {
     /// Create a fragment from Markdown.
     pub fn from_markdown(markdown: &str) -> Self {
         let parsed = frontend::common::parser_tools::content_parser::parse_markdown(markdown);
-        parsed_blocks_to_fragment(parsed)
+        let blocks =
+            frontend::common::parser_tools::content_parser::ParsedElement::flatten_to_blocks(
+                parsed,
+            );
+        parsed_blocks_to_fragment(blocks)
     }
 
     /// Create a fragment from an entire document.

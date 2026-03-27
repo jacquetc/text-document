@@ -9,6 +9,7 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
 use common::parser_tools::fragment_schema::FragmentData;
+use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -338,14 +339,27 @@ fn execute_insert_fragment(
             fragment_data.blocks.len()
         };
 
+        let mut list_grouper = ListGrouper::new();
         for frag_block in &fragment_data.blocks[middle_start..middle_end] {
             let block_text_len = frag_block.plain_text.chars().count() as i64;
 
             let list_id = if let Some(ref frag_list) = frag_block.list {
-                let list = frag_list.to_entity();
-                let created_list = uow.create_list(&list, doc_id, -1)?;
-                Some(created_list.id)
+                if let Some(existing_id) =
+                    list_grouper.try_reuse(&frag_list.style, frag_list.indent as u32)
+                {
+                    Some(existing_id)
+                } else {
+                    let list = frag_list.to_entity();
+                    let created_list = uow.create_list(&list, doc_id, -1)?;
+                    list_grouper.register(
+                        created_list.id,
+                        frag_list.style.clone(),
+                        frag_list.indent as u32,
+                    );
+                    Some(created_list.id)
+                }
             } else {
+                list_grouper.reset();
                 None
             };
 

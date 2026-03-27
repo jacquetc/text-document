@@ -9,6 +9,7 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
 use common::parser_tools::content_parser;
+use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -364,24 +365,37 @@ macro_rules! impl_content_insert {
                     parsed_blocks.len()
                 };
 
+                let mut list_grouper = ListGrouper::new();
                 for parsed in &parsed_blocks[middle_start..middle_end] {
                     let block_plain: String =
                         parsed.spans.iter().map(|s| s.text.as_str()).collect();
                     let block_text_len = block_plain.chars().count() as i64;
 
                     let list_id = if let Some(ref list_style) = parsed.list_style {
-                        let list = List {
-                            id: 0,
-                            created_at: now,
-                            updated_at: now,
-                            style: list_style.clone(),
-                            indent: parsed.list_indent as i64,
-                            prefix: String::new(),
-                            suffix: String::new(),
-                        };
-                        let created_list = uow.create_list(&list, doc_id, -1)?;
-                        Some(created_list.id)
+                        if let Some(existing_id) =
+                            list_grouper.try_reuse(list_style, parsed.list_indent)
+                        {
+                            Some(existing_id)
+                        } else {
+                            let list = List {
+                                id: 0,
+                                created_at: now,
+                                updated_at: now,
+                                style: list_style.clone(),
+                                indent: parsed.list_indent as i64,
+                                prefix: String::new(),
+                                suffix: String::new(),
+                            };
+                            let created_list = uow.create_list(&list, doc_id, -1)?;
+                            list_grouper.register(
+                                created_list.id,
+                                list_style.clone(),
+                                parsed.list_indent,
+                            );
+                            Some(created_list.id)
+                        }
                     } else {
+                        list_grouper.reset();
                         None
                     };
 
@@ -547,7 +561,7 @@ macro_rules! impl_content_insert {
                         created_at: now,
                         updated_at: now,
                         style: list_style.clone(),
-                        indent: 1,
+                        indent: parsed.list_indent as i64,
                         prefix: String::new(),
                         suffix: String::new(),
                     };
@@ -685,7 +699,8 @@ fn execute_insert_markdown(
     uow: &mut Box<dyn InsertMarkdownAtPositionUnitOfWorkTrait>,
     dto: &InsertMarkdownAtPositionDto,
 ) -> Result<(InsertMarkdownAtPositionResultDto, EntityTreeSnapshot)> {
-    let parsed_blocks = content_parser::parse_markdown(&dto.markdown);
+    let parsed_elements = content_parser::parse_markdown(&dto.markdown);
+    let parsed_blocks = content_parser::ParsedElement::flatten_to_blocks(parsed_elements);
     let (new_position, blocks_added, snapshot) =
         execute_content_insert(uow, dto.position, dto.anchor, &parsed_blocks)?;
     Ok((

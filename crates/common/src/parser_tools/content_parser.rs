@@ -12,6 +12,79 @@ pub struct ParsedSpan {
     pub link_href: Option<String>,
 }
 
+/// A parsed table cell containing inline spans.
+#[derive(Debug, Clone)]
+pub struct ParsedTableCell {
+    pub spans: Vec<ParsedSpan>,
+}
+
+/// A parsed table extracted from markdown or HTML.
+#[derive(Debug, Clone)]
+pub struct ParsedTable {
+    /// Number of header rows (typically 1 for markdown tables).
+    pub header_rows: usize,
+    /// All rows (header + body), each containing cells with their inline spans.
+    pub rows: Vec<Vec<ParsedTableCell>>,
+}
+
+/// A parsed element: either a block or a table.
+#[derive(Debug, Clone)]
+pub enum ParsedElement {
+    Block(ParsedBlock),
+    Table(ParsedTable),
+}
+
+impl ParsedElement {
+    /// Extract blocks, flattening tables into one block per cell.
+    /// Use when table structure is not needed.
+    pub fn flatten_to_blocks(elements: Vec<ParsedElement>) -> Vec<ParsedBlock> {
+        let mut blocks = Vec::new();
+        for elem in elements {
+            match elem {
+                ParsedElement::Block(b) => blocks.push(b),
+                ParsedElement::Table(t) => {
+                    for row in t.rows {
+                        for cell in row {
+                            blocks.push(ParsedBlock {
+                                spans: cell.spans,
+                                heading_level: None,
+                                list_style: None,
+                                list_indent: 0,
+                                is_code_block: false,
+                                code_language: None,
+                                blockquote_depth: 0,
+                                line_height: None,
+                                non_breakable_lines: None,
+                                direction: None,
+                                background_color: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if blocks.is_empty() {
+            blocks.push(ParsedBlock {
+                spans: vec![ParsedSpan {
+                    text: String::new(),
+                    ..Default::default()
+                }],
+                heading_level: None,
+                list_style: None,
+                list_indent: 0,
+                is_code_block: false,
+                code_language: None,
+                blockquote_depth: 0,
+                line_height: None,
+                non_breakable_lines: None,
+                direction: None,
+                background_color: None,
+            });
+        }
+        blocks
+    }
+}
+
 /// A parsed block (paragraph, heading, list item, code block)
 #[derive(Debug, Clone)]
 pub struct ParsedBlock {
@@ -45,14 +118,14 @@ impl ParsedBlock {
 
 // ─── Markdown parsing ────────────────────────────────────────────────
 
-pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
+pub fn parse_markdown(markdown: &str) -> Vec<ParsedElement> {
     use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
     let options =
         Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(markdown, options);
 
-    let mut blocks: Vec<ParsedBlock> = Vec::new();
+    let mut elements: Vec<ParsedElement> = Vec::new();
     let mut current_spans: Vec<ParsedSpan> = Vec::new();
     let mut current_heading: Option<i64> = None;
     let mut current_list_style: Option<ListStyle> = None;
@@ -71,6 +144,14 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
     let mut list_stack: Vec<Option<ListStyle>> = Vec::new();
     let mut current_list_indent: u32 = 0;
 
+    // Table tracking state
+    let mut in_table = false;
+    let mut in_table_head = false;
+    let mut table_rows: Vec<Vec<ParsedTableCell>> = Vec::new();
+    let mut current_row_cells: Vec<ParsedTableCell> = Vec::new();
+    let mut current_cell_spans: Vec<ParsedSpan> = Vec::new();
+    let mut table_header_rows: usize = 0;
+
     for event in parser {
         match event {
             Event::Start(Tag::Paragraph) => {
@@ -80,7 +161,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             }
             Event::End(TagEnd::Paragraph) => {
                 if !current_spans.is_empty() || in_block {
-                    blocks.push(ParsedBlock {
+                    elements.push(ParsedElement::Block(ParsedBlock {
                         spans: std::mem::take(&mut current_spans),
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
@@ -92,7 +173,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         non_breakable_lines: None,
                         direction: None,
                         background_color: None,
-                    });
+                    }));
                 }
                 in_block = false;
                 current_list_style = None;
@@ -103,7 +184,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                 is_code_block = false;
             }
             Event::End(TagEnd::Heading(_)) => {
-                blocks.push(ParsedBlock {
+                elements.push(ParsedElement::Block(ParsedBlock {
                     spans: std::mem::take(&mut current_spans),
                     heading_level: current_heading.take(),
                     list_style: None,
@@ -115,7 +196,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     non_breakable_lines: None,
                     direction: None,
                     background_color: None,
-                });
+                }));
                 in_block = false;
             }
             Event::Start(Tag::List(ordered)) => {
@@ -133,7 +214,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                 // Flush any accumulated spans from the parent item before
                 // starting a child item in a tight list
                 if !current_spans.is_empty() {
-                    blocks.push(ParsedBlock {
+                    elements.push(ParsedElement::Block(ParsedBlock {
                         spans: std::mem::take(&mut current_spans),
                         heading_level: None,
                         list_style: current_list_style.clone(),
@@ -145,7 +226,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         non_breakable_lines: None,
                         direction: None,
                         background_color: None,
-                    });
+                    }));
                 }
                 in_block = true;
                 current_list_style = list_stack.last().cloned().flatten();
@@ -159,7 +240,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                 // The paragraph inside the item will have already been flushed,
                 // but if there was no inner paragraph (tight list), flush now.
                 if !current_spans.is_empty() {
-                    blocks.push(ParsedBlock {
+                    elements.push(ParsedElement::Block(ParsedBlock {
                         spans: std::mem::take(&mut current_spans),
                         heading_level: None,
                         list_style: current_list_style.clone(),
@@ -171,7 +252,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         non_breakable_lines: None,
                         direction: None,
                         background_color: None,
-                    });
+                    }));
                 }
                 in_block = false;
                 current_list_style = None;
@@ -193,7 +274,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                 {
                     last.text.truncate(last.text.len() - 1);
                 }
-                blocks.push(ParsedBlock {
+                elements.push(ParsedElement::Block(ParsedBlock {
                     spans: std::mem::take(&mut current_spans),
                     heading_level: None,
                     list_style: None,
@@ -205,10 +286,54 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     non_breakable_lines: None,
                     direction: None,
                     background_color: None,
-                });
+                }));
                 in_block = false;
                 is_code_block = false;
             }
+            // ─── Table events ───────────────────────────────────────
+            Event::Start(Tag::Table(_)) => {
+                in_table = true;
+                in_table_head = false;
+                table_rows.clear();
+                current_row_cells.clear();
+                current_cell_spans.clear();
+                table_header_rows = 0;
+            }
+            Event::End(TagEnd::Table) => {
+                elements.push(ParsedElement::Table(ParsedTable {
+                    header_rows: table_header_rows,
+                    rows: std::mem::take(&mut table_rows),
+                }));
+                in_table = false;
+            }
+            Event::Start(Tag::TableHead) => {
+                in_table_head = true;
+                current_row_cells.clear();
+            }
+            Event::End(TagEnd::TableHead) => {
+                // Flush the header row
+                table_rows.push(std::mem::take(&mut current_row_cells));
+                table_header_rows += 1;
+                in_table_head = false;
+            }
+            Event::Start(Tag::TableRow) => {
+                current_row_cells.clear();
+            }
+            Event::End(TagEnd::TableRow) => {
+                // Body rows only — header row is flushed in End(TableHead)
+                if !in_table_head {
+                    table_rows.push(std::mem::take(&mut current_row_cells));
+                }
+            }
+            Event::Start(Tag::TableCell) => {
+                current_cell_spans.clear();
+            }
+            Event::End(TagEnd::TableCell) => {
+                current_row_cells.push(ParsedTableCell {
+                    spans: std::mem::take(&mut current_cell_spans),
+                });
+            }
+            // ─── Inline formatting ──────────────────────────────────
             Event::Start(Tag::Emphasis) => {
                 italic = true;
             }
@@ -234,11 +359,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                 link_href = None;
             }
             Event::Text(text) => {
-                if !in_block {
-                    // Bare text outside any block — create an implicit paragraph
-                    in_block = true;
-                }
-                current_spans.push(ParsedSpan {
+                let span = ParsedSpan {
                     text: text.to_string(),
                     bold,
                     italic,
@@ -246,13 +367,18 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     strikeout,
                     code: is_code_block,
                     link_href: link_href.clone(),
-                });
+                };
+                if in_table {
+                    current_cell_spans.push(span);
+                } else {
+                    if !in_block {
+                        in_block = true;
+                    }
+                    current_spans.push(span);
+                }
             }
             Event::Code(text) => {
-                if !in_block {
-                    in_block = true;
-                }
-                current_spans.push(ParsedSpan {
+                let span = ParsedSpan {
                     text: text.to_string(),
                     bold,
                     italic,
@@ -260,11 +386,18 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     strikeout,
                     code: true,
                     link_href: link_href.clone(),
-                });
+                };
+                if in_table {
+                    current_cell_spans.push(span);
+                } else {
+                    if !in_block {
+                        in_block = true;
+                    }
+                    current_spans.push(span);
+                }
             }
             Event::SoftBreak => {
-                // Add a space
-                current_spans.push(ParsedSpan {
+                let span = ParsedSpan {
                     text: " ".to_string(),
                     bold,
                     italic,
@@ -272,12 +405,17 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     strikeout,
                     code: false,
                     link_href: link_href.clone(),
-                });
+                };
+                if in_table {
+                    current_cell_spans.push(span);
+                } else {
+                    current_spans.push(span);
+                }
             }
             Event::HardBreak => {
                 // Finalize current block
                 if !current_spans.is_empty() || in_block {
-                    blocks.push(ParsedBlock {
+                    elements.push(ParsedElement::Block(ParsedBlock {
                         spans: std::mem::take(&mut current_spans),
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
@@ -289,7 +427,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         non_breakable_lines: None,
                         direction: None,
                         background_color: None,
-                    });
+                    }));
                 }
             }
             Event::Start(Tag::BlockQuote(_)) => {
@@ -304,7 +442,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
 
     // Flush any remaining content
     if !current_spans.is_empty() {
-        blocks.push(ParsedBlock {
+        elements.push(ParsedElement::Block(ParsedBlock {
             spans: std::mem::take(&mut current_spans),
             heading_level: current_heading,
             list_style: current_list_style,
@@ -316,12 +454,12 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             non_breakable_lines: None,
             direction: None,
             background_color: None,
-        });
+        }));
     }
 
-    // If no blocks were parsed, create a single empty paragraph
-    if blocks.is_empty() {
-        blocks.push(ParsedBlock {
+    // If no elements were parsed, create a single empty paragraph
+    if elements.is_empty() {
+        elements.push(ParsedElement::Block(ParsedBlock {
             spans: vec![ParsedSpan {
                 text: String::new(),
                 ..Default::default()
@@ -336,10 +474,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             non_breakable_lines: None,
             direction: None,
             background_color: None,
-        });
+        }));
     }
 
-    blocks
+    elements
 }
 
 fn heading_level_to_i64(level: pulldown_cmark::HeadingLevel) -> i64 {
@@ -811,9 +949,14 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
 mod tests {
     use super::*;
 
+    /// Helper: flatten parse_markdown output to blocks for tests that don't care about tables.
+    fn parse_markdown_blocks(md: &str) -> Vec<ParsedBlock> {
+        ParsedElement::flatten_to_blocks(parse_markdown(md))
+    }
+
     #[test]
     fn test_parse_markdown_simple_paragraph() {
-        let blocks = parse_markdown("Hello **world**");
+        let blocks = parse_markdown_blocks("Hello **world**");
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].spans.len() >= 2);
         // "Hello " is plain, "world" is bold
@@ -829,7 +972,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_heading() {
-        let blocks = parse_markdown("# Title");
+        let blocks = parse_markdown_blocks("# Title");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].heading_level, Some(1));
         assert_eq!(blocks[0].spans[0].text, "Title");
@@ -837,7 +980,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_list() {
-        let blocks = parse_markdown("- item1\n- item2");
+        let blocks = parse_markdown_blocks("- item1\n- item2");
         assert!(blocks.len() >= 2);
         assert_eq!(blocks[0].list_style, Some(ListStyle::Disc));
         assert_eq!(blocks[1].list_style, Some(ListStyle::Disc));
@@ -874,7 +1017,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_code_block() {
-        let blocks = parse_markdown("```\nfn main() {}\n```");
+        let blocks = parse_markdown_blocks("```\nfn main() {}\n```");
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].is_code_block);
         assert!(blocks[0].spans[0].code);
@@ -888,7 +1031,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_nested_formatting() {
-        let blocks = parse_markdown("***bold italic***");
+        let blocks = parse_markdown_blocks("***bold italic***");
         assert_eq!(blocks.len(), 1);
         let span = &blocks[0].spans[0];
         assert!(span.bold);
@@ -897,7 +1040,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_link() {
-        let blocks = parse_markdown("[click](http://example.com)");
+        let blocks = parse_markdown_blocks("[click](http://example.com)");
         assert_eq!(blocks.len(), 1);
         let span = &blocks[0].spans[0];
         assert_eq!(span.text, "click");
@@ -906,7 +1049,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_empty() {
-        let blocks = parse_markdown("");
+        let blocks = parse_markdown_blocks("");
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].spans[0].text.is_empty());
     }
@@ -945,7 +1088,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_ordered_list() {
-        let blocks = parse_markdown("1. first\n2. second");
+        let blocks = parse_markdown_blocks("1. first\n2. second");
         assert!(blocks.len() >= 2);
         assert_eq!(blocks[0].list_style, Some(ListStyle::Decimal));
     }
@@ -1019,7 +1162,7 @@ mod tests {
     #[test]
     fn test_parse_markdown_nested_list_indent() {
         let md = "- top\n  - nested\n    - deep";
-        let blocks = parse_markdown(md);
+        let blocks = parse_markdown_blocks(md);
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0].list_style, Some(ListStyle::Disc));
         assert_eq!(blocks[0].list_indent, 0);
@@ -1032,7 +1175,7 @@ mod tests {
     #[test]
     fn test_parse_markdown_nested_ordered_list_indent() {
         let md = "1. first\n   1. nested\n   2. nested2";
-        let blocks = parse_markdown(md);
+        let blocks = parse_markdown_blocks(md);
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0].list_indent, 0);
         assert_eq!(blocks[1].list_indent, 1);
@@ -1046,5 +1189,63 @@ mod tests {
         assert!(blocks.len() >= 2);
         assert_eq!(blocks[0].list_indent, 0);
         assert_eq!(blocks[1].list_indent, 1);
+    }
+
+    #[test]
+    fn test_parse_markdown_table() {
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let elements = parse_markdown(md);
+        assert_eq!(elements.len(), 1);
+        match &elements[0] {
+            ParsedElement::Table(table) => {
+                assert_eq!(table.header_rows, 1);
+                assert_eq!(table.rows.len(), 2); // 1 header + 1 body
+                // Header row
+                assert_eq!(table.rows[0].len(), 2);
+                assert_eq!(table.rows[0][0].spans[0].text, "A");
+                assert_eq!(table.rows[0][1].spans[0].text, "B");
+                // Body row
+                assert_eq!(table.rows[1].len(), 2);
+                assert_eq!(table.rows[1][0].spans[0].text, "1");
+                assert_eq!(table.rows[1][1].spans[0].text, "2");
+            }
+            _ => panic!("Expected ParsedElement::Table"),
+        }
+    }
+
+    #[test]
+    fn test_parse_markdown_table_with_formatting() {
+        let md = "| **bold** | `code` | *italic* |\n|---|---|---|\n| ~~strike~~ | plain | [link](http://x.com) |";
+        let elements = parse_markdown(md);
+        assert_eq!(elements.len(), 1);
+        match &elements[0] {
+            ParsedElement::Table(table) => {
+                assert_eq!(table.rows.len(), 2);
+                // Header: bold cell
+                assert!(table.rows[0][0].spans[0].bold);
+                // Header: code cell
+                assert!(table.rows[0][1].spans[0].code);
+                // Header: italic cell
+                assert!(table.rows[0][2].spans[0].italic);
+                // Body: strikeout cell
+                assert!(table.rows[1][0].spans[0].strikeout);
+                // Body: link cell
+                assert_eq!(
+                    table.rows[1][2].spans[0].link_href,
+                    Some("http://x.com".to_string())
+                );
+            }
+            _ => panic!("Expected ParsedElement::Table"),
+        }
+    }
+
+    #[test]
+    fn test_parse_markdown_mixed_content_with_table() {
+        let md = "Before\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter";
+        let elements = parse_markdown(md);
+        assert_eq!(elements.len(), 3);
+        assert!(matches!(&elements[0], ParsedElement::Block(_)));
+        assert!(matches!(&elements[1], ParsedElement::Table(_)));
+        assert!(matches!(&elements[2], ParsedElement::Block(_)));
     }
 }
