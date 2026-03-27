@@ -1041,6 +1041,16 @@ impl TextCursor {
         let (del_pos, del_anchor) = if pos != anchor {
             (pos, anchor)
         } else {
+            // No-op at end of document (symmetric with delete_previous_char at start)
+            let end = {
+                let inner = self.doc.lock();
+                document_inspection_commands::get_document_stats(&inner.ctx)
+                    .map(|s| max_cursor_position(&s))
+                    .unwrap_or(0)
+            };
+            if pos >= end {
+                return Ok(());
+            }
             (pos, pos + 1)
         };
         self.do_delete(del_pos, del_anchor)
