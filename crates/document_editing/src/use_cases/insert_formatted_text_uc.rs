@@ -1,4 +1,4 @@
-use super::editing_helpers::find_element_at_offset;
+use super::editing_helpers::{collect_block_ids_recursive, find_element_at_offset};
 use crate::InsertFormattedTextDto;
 use crate::InsertFormattedTextResultDto;
 use anyhow::{Result, anyhow};
@@ -78,30 +78,17 @@ fn execute_insert_formatted_text(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    // Get frame and its child_order (block IDs in document order)
+    // Get all block IDs in document order, traversing into nested frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-    let frame = uow
-        .get_frame(&frame_id)?
-        .ok_or_else(|| anyhow!("Frame not found"))?;
-
-    // Get ordered block IDs — prefer child_order (document order) for binary search,
-    // fall back to reading all blocks if child_order isn't populated.
-    let ordered_block_ids: Vec<EntityId> = if !frame.child_order.is_empty() {
-        frame
-            .child_order
-            .iter()
-            .filter(|&&id| id > 0)
-            .map(|&id| id as EntityId)
-            .collect()
-    } else {
-        // Fallback: read block IDs from relationship
-        use common::direct_access::frame::frame_repository::FrameRelationshipField;
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?
-    };
+    let ordered_block_ids = collect_block_ids_recursive(
+        &|id| uow.get_frame(id),
+        &|id, field| uow.get_frame_relationship(id, field),
+        &frame_id,
+    )?;
 
     if ordered_block_ids.is_empty() {
         return Err(anyhow!("No blocks in document"));

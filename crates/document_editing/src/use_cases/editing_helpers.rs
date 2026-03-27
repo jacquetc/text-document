@@ -1,5 +1,7 @@
 use anyhow::{Result, anyhow};
-use common::entities::{Block, InlineContent, InlineElement};
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
+use common::entities::{Block, Frame, InlineContent, InlineElement};
+use common::types::EntityId;
 
 /// Returns true for punctuation characters that should break undo merge groups.
 pub fn is_word_boundary_punct(c: char) -> bool {
@@ -61,4 +63,40 @@ pub fn find_element_at_offset(
         return Ok((elem.clone(), elements.len() - 1, elem_len));
     }
     Err(anyhow!("No inline elements found in block"))
+}
+
+/// Collect all block IDs in document order by traversing child_order recursively.
+///
+/// Negative entries in child_order are nested frame IDs (convention: -frame_id);
+/// this function recurses into them to include their blocks in the linear sequence.
+///
+/// Accepts closures so it can work with any UoW trait that provides frame access.
+pub fn collect_block_ids_recursive<F, G>(
+    get_frame: &F,
+    get_relationship: &G,
+    frame_id: &EntityId,
+) -> Result<Vec<EntityId>>
+where
+    F: Fn(&EntityId) -> Result<Option<Frame>>,
+    G: Fn(&EntityId, &FrameRelationshipField) -> Result<Vec<EntityId>>,
+{
+    let frame = get_frame(frame_id)?
+        .ok_or_else(|| anyhow!("Frame not found"))?;
+
+    if !frame.child_order.is_empty() {
+        let mut block_ids = Vec::new();
+        for &entry in &frame.child_order {
+            if entry > 0 {
+                block_ids.push(entry as EntityId);
+            } else if entry < 0 {
+                let sub_frame_id = (-entry) as EntityId;
+                let sub_ids =
+                    collect_block_ids_recursive(get_frame, get_relationship, &sub_frame_id)?;
+                block_ids.extend(sub_ids);
+            }
+        }
+        Ok(block_ids)
+    } else {
+        get_relationship(frame_id, &FrameRelationshipField::Blocks)
+    }
 }

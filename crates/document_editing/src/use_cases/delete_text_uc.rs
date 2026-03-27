@@ -1,11 +1,12 @@
-use super::editing_helpers::{find_block_at_position, is_word_boundary_punct};
+use super::editing_helpers::{
+    collect_block_ids_recursive, find_block_at_position, is_word_boundary_punct,
+};
 use crate::DeleteTextDto;
 use crate::DeleteTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
-use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
 use common::snapshot::EntityTreeSnapshot;
@@ -92,21 +93,20 @@ fn execute_delete(
     // Snapshot for undo before mutation
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
-    // Get frames
+    // Get all block IDs in document order, traversing into nested frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-    let frame = uow
-        .get_frame(&frame_id)?
-        .ok_or_else(|| anyhow!("Frame not found"))?;
-
-    // Get block IDs from frame
-    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let all_block_ids = collect_block_ids_recursive(
+        &|id| uow.get_frame(id),
+        &|id, field| uow.get_frame_relationship(id, field),
+        &frame_id,
+    )?;
 
     // Get all blocks
-    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
@@ -412,7 +412,10 @@ fn execute_delete(
             uow.remove_block(block_id)?;
         }
 
-        // Update frame's child_order
+        // Fetch the root frame to update its child_order
+        let frame = uow
+            .get_frame(&frame_id)?
+            .ok_or_else(|| anyhow!("Frame not found"))?;
         let mut updated_frame = frame.clone();
         updated_frame
             .child_order

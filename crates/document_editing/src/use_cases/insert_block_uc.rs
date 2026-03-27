@@ -1,4 +1,4 @@
-use super::editing_helpers::find_block_at_position;
+use super::editing_helpers::{collect_block_ids_recursive, find_block_at_position};
 use crate::InsertBlockDto;
 use crate::InsertBlockResultDto;
 use anyhow::{Result, anyhow};
@@ -67,21 +67,20 @@ fn execute_insert_block(
     // Snapshot for undo before mutation
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
-    // Get frames
+    // Get all block IDs in document order, traversing into nested frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-    let frame = uow
-        .get_frame(&frame_id)?
-        .ok_or_else(|| anyhow!("Frame not found"))?;
-
-    // Get block IDs from frame
-    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let all_block_ids = collect_block_ids_recursive(
+        &|id| uow.get_frame(id),
+        &|id, field| uow.get_frame_relationship(id, field),
+        &frame_id,
+    )?;
 
     // Get all blocks
-    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
@@ -233,25 +232,59 @@ fn execute_insert_block(
         fmt_code_language: current_block.fmt_code_language.clone(),
     };
 
-    let insert_index = (block_idx + 1) as i32;
-    let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
+    // Find the frame that owns the current block (may be a nested sub-frame)
+    fn find_owner_frame(
+        uow: &dyn InsertBlockUnitOfWorkTrait,
+        fid: &EntityId,
+        target_block_id: EntityId,
+    ) -> Result<Option<EntityId>> {
+        let f = uow
+            .get_frame(fid)?
+            .ok_or_else(|| anyhow!("Frame not found"))?;
+        for &entry in &f.child_order {
+            if entry > 0 && entry as EntityId == target_block_id {
+                return Ok(Some(*fid));
+            } else if entry < 0 {
+                let sub = (-entry) as EntityId;
+                if let Some(owner) = find_owner_frame(uow, &sub, target_block_id)? {
+                    return Ok(Some(owner));
+                }
+            }
+        }
+        let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
+        if block_ids.contains(&target_block_id) {
+            return Ok(Some(*fid));
+        }
+        Ok(None)
+    }
+    let owner_frame_id = find_owner_frame(&**uow, &frame_id, current_block.id)?
+        .unwrap_or(frame_id);
+
+    let created_block = uow.create_block(&new_block, owner_frame_id, -1)?;
 
     // Create inline elements for the new block, preserving formatting
     for after_elem in &after_elements {
         uow.create_inline_element(after_elem, created_block.id, -1)?;
     }
 
-    // Update frame's child_order to include the new block
+    // Update the owner frame's child_order to include the new block after the split point
+    let frame = uow
+        .get_frame(&owner_frame_id)?
+        .ok_or_else(|| anyhow!("Owner frame not found"))?;
     let mut updated_frame = frame.clone();
-    let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
+    // Find current_block's position in child_order and insert after it
+    let co_idx = updated_frame
+        .child_order
+        .iter()
+        .position(|&e| e > 0 && e as EntityId == current_block.id)
+        .map(|i| i + 1)
+        .unwrap_or(updated_frame.child_order.len());
     updated_frame
         .child_order
-        .insert(child_order_insert_pos, created_block.id as i64);
+        .insert(co_idx, created_block.id as i64);
     updated_frame.updated_at = now;
-    // Refresh blocks from junction table — create_block updated it, so
-    // the frame clone from earlier is stale.
     updated_frame.blocks =
-        uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+        uow.get_frame_relationship(&owner_frame_id, &FrameRelationshipField::Blocks)?;
     uow.update_frame(&updated_frame)?;
 
     // Update subsequent blocks' document_position (those after the new block)
