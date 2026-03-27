@@ -178,6 +178,7 @@ fn test_set_frame_format() -> Result<()> {
             right_margin: Some(40),
             padding: Some(5),
             border: Some(2),
+            is_blockquote: None,
         },
     )?;
 
@@ -222,6 +223,7 @@ fn test_set_frame_format_undo() -> Result<()> {
             right_margin: Some(45),
             padding: Some(8),
             border: Some(3),
+            is_blockquote: None,
         },
     )?;
 
@@ -397,6 +399,7 @@ fn test_merge_text_format_preserves_other_fields() -> Result<()> {
             font_bold: Some(false),
             font_italic: Some(true),
             font_underline: Some(true),
+            font_strikeout: None,
         },
     )?;
 
@@ -478,6 +481,7 @@ fn test_merge_text_format_undo() -> Result<()> {
             font_bold: Some(true),
             font_italic: Some(true),
             font_underline: Some(false),
+            font_strikeout: None,
         },
     )?;
 
