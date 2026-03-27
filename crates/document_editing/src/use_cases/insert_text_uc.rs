@@ -55,7 +55,8 @@ enum InsertTextUndo {
 }
 
 /// Delete a character range within a single block's inline elements.
-/// Updates the element content and returns the number of characters removed.
+/// Updates the element content and returns the number of positions removed
+/// (text characters + image positions).
 fn delete_range_in_block(
     uow: &mut Box<dyn InsertTextUnitOfWorkTrait>,
     block: &Block,
@@ -66,7 +67,10 @@ fn delete_range_in_block(
     let elements_opt = uow.get_inline_element_multi(&element_ids)?;
     let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
+    let mut new_plain_text = String::new();
+    let mut new_text_length: i64 = 0;
     let mut running: i64 = 0;
+
     for elem in &elements {
         let elem_len = match &elem.content {
             InlineContent::Text(s) => s.chars().count() as i64,
@@ -83,38 +87,55 @@ fn delete_range_in_block(
             let local_start = (overlap_start - elem_start) as usize;
             let local_end = (overlap_end - elem_start) as usize;
 
-            if let InlineContent::Text(s) = &elem.content {
-                let chars: Vec<char> = s.chars().collect();
-                let new_text: String = chars[..local_start]
-                    .iter()
-                    .chain(chars[local_end..].iter())
-                    .collect();
-                let mut updated = elem.clone();
-                updated.content = InlineContent::Text(new_text);
-                updated.updated_at = chrono::Utc::now();
-                uow.update_inline_element(&updated)?;
+            match &elem.content {
+                InlineContent::Text(s) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let new_text: String = chars[..local_start]
+                        .iter()
+                        .chain(chars[local_end..].iter())
+                        .collect();
+                    new_plain_text.push_str(&new_text);
+                    new_text_length += new_text.chars().count() as i64;
+                    let mut updated = elem.clone();
+                    updated.content = InlineContent::Text(new_text);
+                    updated.updated_at = chrono::Utc::now();
+                    uow.update_inline_element(&updated)?;
+                }
+                InlineContent::Image { .. } => {
+                    // Image fully within delete range — neutralize it
+                    let mut updated = elem.clone();
+                    updated.content = InlineContent::Empty;
+                    updated.updated_at = chrono::Utc::now();
+                    uow.update_inline_element(&updated)?;
+                }
+                InlineContent::Empty => {}
+            }
+        } else {
+            // Element not in delete range — preserve as-is
+            match &elem.content {
+                InlineContent::Text(s) => {
+                    new_plain_text.push_str(s);
+                    new_text_length += s.chars().count() as i64;
+                }
+                InlineContent::Image { .. } => {
+                    new_text_length += 1;
+                }
+                InlineContent::Empty => {}
             }
         }
         running += elem_len;
     }
 
-    let chars_removed = end_offset - start_offset;
+    let positions_removed = block.text_length - new_text_length;
 
-    // Update block cached fields
-    let plain_chars: Vec<char> = block.plain_text.chars().collect();
-    let so = start_offset as usize;
-    let eo = (end_offset as usize).min(plain_chars.len());
-    let new_plain: String = plain_chars[..so]
-        .iter()
-        .chain(plain_chars[eo..].iter())
-        .collect();
+    // Update block cached fields from element content (not from plain_text slicing)
     let mut updated_block = block.clone();
-    updated_block.plain_text = new_plain;
-    updated_block.text_length -= chars_removed;
+    updated_block.plain_text = new_plain_text;
+    updated_block.text_length = new_text_length;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
-    Ok(chars_removed)
+    Ok(positions_removed)
 }
 
 /// Execute insert with selection replacement — uses full document snapshot for undo.

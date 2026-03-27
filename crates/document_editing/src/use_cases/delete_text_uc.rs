@@ -49,17 +49,6 @@ pub struct DeleteTextUseCase {
     is_single_char_origin: bool,
 }
 
-/// Remove a range [start_offset..end_offset) from a text string, by char indices.
-fn remove_char_range(s: &str, start_offset: i64, end_offset: i64) -> (String, String) {
-    let chars: Vec<char> = s.chars().collect();
-    let start = start_offset as usize;
-    let end = end_offset.min(chars.len() as i64) as usize;
-    let before: String = chars[..start].iter().collect();
-    let removed: String = chars[start..end].iter().collect();
-    let after: String = chars[end..].iter().collect();
-    (format!("{}{}", before, after), removed)
-}
-
 fn execute_delete(
     uow: &mut Box<dyn DeleteTextUnitOfWorkTrait>,
     dto: &DeleteTextDto,
@@ -135,13 +124,10 @@ fn execute_delete(
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
         let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
-        // Collect deleted text from plain_text
-        let plain_chars: Vec<char> = start_block.plain_text.chars().collect();
-        let so = start_offset as usize;
-        let eo = end_offset as usize;
-        let deleted_text: String = plain_chars[so..eo.min(plain_chars.len())].iter().collect();
-
-        // Now update inline elements by removing text in range
+        // Walk elements: update/neutralize in delete range, rebuild cached fields
+        let mut deleted_text = String::new();
+        let mut new_plain_text = String::new();
+        let mut new_text_length: i64 = 0;
         let mut running_offset: i64 = 0;
         for elem in &elements {
             let elem_len = match &elem.content {
@@ -157,31 +143,60 @@ fn execute_delete(
             let overlap_end = std::cmp::min(end_offset, elem_end);
 
             if overlap_start < overlap_end {
-                // This element overlaps with the delete range
-                let local_start = overlap_start - elem_start;
-                let local_end = overlap_end - elem_start;
+                let local_start = (overlap_start - elem_start) as usize;
+                let local_end = (overlap_end - elem_start) as usize;
 
-                let mut updated_elem = elem.clone();
-                if let InlineContent::Text(s) = &updated_elem.content {
-                    let (new_text, _) = remove_char_range(s, local_start, local_end);
-                    updated_elem.content = if new_text.is_empty() {
-                        InlineContent::Text(String::new())
-                    } else {
-                        InlineContent::Text(new_text)
-                    };
+                match &elem.content {
+                    InlineContent::Text(s) => {
+                        let chars: Vec<char> = s.chars().collect();
+                        // Collect deleted text
+                        let removed: String =
+                            chars[local_start..local_end].iter().collect();
+                        deleted_text.push_str(&removed);
+                        // Build surviving text
+                        let new_text: String = chars[..local_start]
+                            .iter()
+                            .chain(chars[local_end..].iter())
+                            .collect();
+                        new_plain_text.push_str(&new_text);
+                        new_text_length += new_text.chars().count() as i64;
+                        let mut updated_elem = elem.clone();
+                        updated_elem.content = InlineContent::Text(new_text);
+                        updated_elem.updated_at = chrono::Utc::now();
+                        uow.update_inline_element(&updated_elem)?;
+                    }
+                    InlineContent::Image { .. } => {
+                        // Image in delete range — neutralize
+                        let mut updated_elem = elem.clone();
+                        updated_elem.content = InlineContent::Empty;
+                        updated_elem.updated_at = chrono::Utc::now();
+                        uow.update_inline_element(&updated_elem)?;
+                    }
+                    InlineContent::Empty => {}
                 }
-                updated_elem.updated_at = chrono::Utc::now();
-                uow.update_inline_element(&updated_elem)?;
+            } else {
+                // Not in delete range — preserve
+                match &elem.content {
+                    InlineContent::Text(s) => {
+                        new_plain_text.push_str(s);
+                        new_text_length += s.chars().count() as i64;
+                    }
+                    InlineContent::Image { .. } => {
+                        new_text_length += 1;
+                    }
+                    InlineContent::Empty => {}
+                }
             }
 
             running_offset += elem_len;
         }
 
-        // Update block
+        let _positions_removed = start_block.text_length - new_text_length;
+
+        // Update block cached fields from element content
         let mut updated_block = start_block.clone();
-        let (new_plain, _) = remove_char_range(&updated_block.plain_text, start_offset, end_offset);
-        updated_block.plain_text = new_plain;
-        updated_block.text_length -= delete_len;
+        updated_block.plain_text = new_plain_text;
+        updated_block.text_length = new_text_length;
         updated_block.updated_at = chrono::Utc::now();
         uow.update_block(&updated_block)?;
 
@@ -211,40 +226,23 @@ fn execute_delete(
             snapshot,
         ))
     } else {
-        // Cross-block deletion: collect the deleted text, then handle block merging
-
-        // Collect deleted text from all affected blocks
-        let mut deleted_text = String::new();
-
-        // From start block: text from start_offset to end of block
-        let start_chars: Vec<char> = start_block.plain_text.chars().collect();
-        let so = start_offset as usize;
-        deleted_text.extend(&start_chars[so..]);
-
-        // Add block separator for intermediate blocks + their full text
-        for b in &blocks[(start_block_idx + 1)..end_block_idx] {
-            deleted_text.push('\n'); // block separator
-            deleted_text.push_str(&b.plain_text);
-        }
-
-        // From end block: text from 0 to end_offset
-        deleted_text.push('\n'); // block separator
-        let end_chars: Vec<char> = end_block.plain_text.chars().collect();
-        let eo = end_offset as usize;
-        let end_remaining: String = end_chars[eo..].iter().collect();
-        deleted_text.extend(&end_chars[..eo.min(end_chars.len())]);
-
-        // Merge: keep start_block, append remaining text from end_block
-        let start_remaining: String = start_chars[..so].iter().collect();
-        let merged_text = format!("{}{}", start_remaining, end_remaining);
+        // Cross-block deletion: handle block merging
+        // Build deleted_text, start_remaining, end_remaining from element content
+        // (not from plain_text slicing, which breaks when images are present)
 
         let now = chrono::Utc::now();
+        let so = start_offset as usize;
+        let eo = end_offset as usize;
 
         // Update start block's inline elements: truncate at the delete start offset
         let start_element_ids =
             uow.get_block_relationship(&start_block.id, &BlockRelationshipField::Elements)?;
         let start_elements_opt = uow.get_inline_element_multi(&start_element_ids)?;
         let start_elements: Vec<InlineElement> = start_elements_opt.into_iter().flatten().collect();
+
+        let mut start_remaining = String::new();
+        let mut start_surviving_images: i64 = 0;
+        let mut deleted_text = String::new();
 
         // Walk start block elements to truncate at start_offset
         let mut char_cursor: usize = 0;
@@ -259,23 +257,43 @@ fn execute_delete(
             if !truncation_done {
                 if char_cursor + elem_char_len <= so {
                     // Entirely before delete point — keep
+                    match &elem.content {
+                        InlineContent::Text(s) => start_remaining.push_str(s),
+                        InlineContent::Image { .. } => start_surviving_images += 1,
+                        InlineContent::Empty => {}
+                    }
                     char_cursor += elem_char_len;
                     continue;
                 }
                 // This element contains the delete start
                 truncation_done = true;
                 let local_cut = so - char_cursor;
-                if let InlineContent::Text(s) = &elem.content {
-                    let chars: Vec<char> = s.chars().collect();
-                    let kept: String = chars[..local_cut].iter().collect();
-                    let mut updated = elem.clone();
-                    updated.content = InlineContent::Text(kept);
-                    updated.updated_at = now;
-                    uow.update_inline_element(&updated)?;
+                match &elem.content {
+                    InlineContent::Text(s) => {
+                        let chars: Vec<char> = s.chars().collect();
+                        let kept: String = chars[..local_cut].iter().collect();
+                        deleted_text.extend(&chars[local_cut..]);
+                        start_remaining.push_str(&kept);
+                        let mut updated = elem.clone();
+                        updated.content = InlineContent::Text(kept);
+                        updated.updated_at = now;
+                        uow.update_inline_element(&updated)?;
+                    }
+                    InlineContent::Image { .. } => {
+                        // Image at delete boundary — neutralize
+                        let mut cleared = elem.clone();
+                        cleared.content = InlineContent::Empty;
+                        cleared.updated_at = now;
+                        uow.update_inline_element(&cleared)?;
+                    }
+                    InlineContent::Empty => {}
                 }
                 char_cursor += elem_char_len;
             } else {
-                // After the delete start — clear
+                // After the delete start — clear and collect deleted text
+                if let InlineContent::Text(s) = &elem.content {
+                    deleted_text.push_str(s);
+                }
                 let mut cleared = elem.clone();
                 cleared.content = InlineContent::Text(String::new());
                 cleared.updated_at = now;
@@ -284,11 +302,23 @@ fn execute_delete(
             }
         }
 
-        // Now handle end block elements: keep text after end_offset, create them in start block
+        // Add intermediate blocks' text to deleted_text
+        for b in &blocks[(start_block_idx + 1)..end_block_idx] {
+            deleted_text.push('\n');
+            deleted_text.push_str(&b.plain_text);
+        }
+
+        // Separator before end block
+        deleted_text.push('\n');
+
+        // Handle end block elements: keep content after end_offset, move to start block
         let end_element_ids =
             uow.get_block_relationship(&end_block.id, &BlockRelationshipField::Elements)?;
         let end_elements_opt = uow.get_inline_element_multi(&end_element_ids)?;
         let end_elements: Vec<InlineElement> = end_elements_opt.into_iter().flatten().collect();
+
+        let mut end_remaining = String::new();
+        let mut end_surviving_images: i64 = 0;
 
         let mut end_char_cursor: usize = 0;
         let mut past_delete = false;
@@ -301,6 +331,10 @@ fn execute_delete(
 
             if !past_delete {
                 if end_char_cursor + elem_char_len <= eo {
+                    // In delete range — collect deleted text
+                    if let InlineContent::Text(s) = &elem.content {
+                        deleted_text.push_str(s);
+                    }
                     end_char_cursor += elem_char_len;
                     continue;
                 }
@@ -309,9 +343,14 @@ fn execute_delete(
                 match &elem.content {
                     InlineContent::Text(s) => {
                         let chars: Vec<char> = s.chars().collect();
+                        // Collect deleted portion
+                        let del: String = chars[..local_start].iter().collect();
+                        deleted_text.push_str(&del);
+                        // Keep the rest
                         if local_start < chars.len() {
                             let kept: String = chars[local_start..].iter().collect();
                             if !kept.is_empty() {
+                                end_remaining.push_str(&kept);
                                 let mut new_elem = elem.clone();
                                 new_elem.id = 0;
                                 new_elem.content = InlineContent::Text(kept);
@@ -323,6 +362,8 @@ fn execute_delete(
                     }
                     InlineContent::Image { .. } => {
                         if local_start == 0 {
+                            // Image after delete boundary — keep
+                            end_surviving_images += 1;
                             let mut new_elem = elem.clone();
                             new_elem.id = 0;
                             new_elem.created_at = now;
@@ -335,6 +376,11 @@ fn execute_delete(
                 end_char_cursor += elem_char_len;
             } else {
                 // Entirely after delete — move to start block
+                match &elem.content {
+                    InlineContent::Text(s) => end_remaining.push_str(s),
+                    InlineContent::Image { .. } => end_surviving_images += 1,
+                    InlineContent::Empty => {}
+                }
                 let mut new_elem = elem.clone();
                 new_elem.id = 0;
                 new_elem.created_at = now;
@@ -344,10 +390,14 @@ fn execute_delete(
             }
         }
 
-        // Update start block cached fields
+        let merged_text = format!("{}{}", start_remaining, end_remaining);
+
+        // Update start block cached fields from element content
         let mut updated_start = start_block.clone();
         updated_start.plain_text = merged_text.clone();
-        updated_start.text_length = merged_text.chars().count() as i64;
+        updated_start.text_length = merged_text.chars().count() as i64
+            + start_surviving_images
+            + end_surviving_images;
         updated_start.updated_at = now;
         uow.update_block(&updated_start)?;
 
