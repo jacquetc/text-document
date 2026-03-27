@@ -263,6 +263,8 @@ impl BlockFormat {
             non_breakable_lines: self.non_breakable_lines,
             direction: self.direction.clone(),
             background_color: self.background_color.clone(),
+            is_code_block: self.is_code_block,
+            code_language: self.code_language.clone(),
         }
     }
 }
@@ -284,6 +286,8 @@ impl From<&frontend::block::dtos::BlockDto> for BlockFormat {
             non_breakable_lines: b.fmt_non_breakable_lines,
             direction: b.fmt_direction.clone(),
             background_color: b.fmt_background_color.clone(),
+            is_code_block: b.fmt_is_code_block,
+            code_language: b.fmt_code_language.clone(),
         }
     }
 }
@@ -309,6 +313,7 @@ impl FrameFormat {
             right_margin: self.right_margin.map(|v| v as i64),
             padding: self.padding.map(|v| v as i64),
             border: self.border.map(|v| v as i64),
+            is_blockquote: self.is_blockquote,
         }
     }
 }

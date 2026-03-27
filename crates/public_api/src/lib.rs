@@ -164,6 +164,8 @@ pub struct BlockFormat {
     pub non_breakable_lines: Option<bool>,
     pub direction: Option<TextDirection>,
     pub background_color: Option<String>,
+    pub is_code_block: Option<bool>,
+    pub code_language: Option<String>,
 }
 
 /// List formatting. All fields are optional: `None` means
@@ -188,6 +190,7 @@ pub struct FrameFormat {
     pub padding: Option<i32>,
     pub border: Option<i32>,
     pub position: Option<FramePosition>,
+    pub is_blockquote: Option<bool>,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

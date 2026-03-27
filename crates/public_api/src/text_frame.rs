@@ -380,6 +380,7 @@ pub(crate) fn frame_dto_to_format(f: &frontend::frame::dtos::FrameDto) -> FrameF
         padding: f.fmt_padding.map(|v| v as i32),
         border: f.fmt_border.map(|v| v as i32),
         position: f.fmt_position.clone(),
+        is_blockquote: f.fmt_is_blockquote,
     }
 }
 

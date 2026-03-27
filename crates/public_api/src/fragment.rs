@@ -68,6 +68,8 @@ impl DocumentFragment {
                 non_breakable_lines: None,
                 direction: None,
                 background_color: None,
+                is_code_block: None,
+                code_language: None,
             })
             .collect();
 
@@ -582,6 +584,8 @@ fn parsed_blocks_to_fragment(
                 non_breakable_lines: pb.non_breakable_lines,
                 direction: pb.direction,
                 background_color: pb.background_color,
+                is_code_block: None,
+                code_language: None,
             }
         })
         .collect();
