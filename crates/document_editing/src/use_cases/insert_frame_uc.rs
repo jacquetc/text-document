@@ -140,7 +140,9 @@ fn execute_insert_frame(
 
     let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
-    // Create an empty block inside the new frame
+    // Create an empty block inside the new frame.
+    // Set document_position to the insertion point so it sorts correctly
+    // for operations that use stored positions (delete_text, insert_block, etc.)
     let new_block = Block {
         id: 0,
         created_at: now,
@@ -148,7 +150,7 @@ fn execute_insert_frame(
         elements: vec![],
         list: None,
         text_length: 0,
-        document_position: 0,
+        document_position: dto.position,
         plain_text: String::new(),
         ..Default::default()
     };
