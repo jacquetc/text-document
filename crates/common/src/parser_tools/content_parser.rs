@@ -161,10 +161,10 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             }
             Event::End(TagEnd::CodeBlock) => {
                 // pulldown-cmark appends a trailing '\n' to code block text — strip it
-                if let Some(last) = current_spans.last_mut() {
-                    if last.text.ends_with('\n') {
-                        last.text.truncate(last.text.len() - 1);
-                    }
+                if let Some(last) = current_spans.last_mut()
+                    && last.text.ends_with('\n')
+                {
+                    last.text.truncate(last.text.len() - 1);
                 }
                 blocks.push(ParsedBlock {
                     spans: std::mem::take(&mut current_spans),
@@ -826,7 +826,10 @@ mod tests {
         assert!(blocks[0].spans[0].code);
         // pulldown-cmark appends a trailing \n to code block text — verify it's stripped
         let text: String = blocks[0].spans.iter().map(|s| s.text.as_str()).collect();
-        assert_eq!(text, "fn main() {}", "code block text should not have trailing newline");
+        assert_eq!(
+            text, "fn main() {}",
+            "code block text should not have trailing newline"
+        );
     }
 
     #[test]

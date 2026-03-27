@@ -150,8 +150,7 @@ fn execute_delete(
                     InlineContent::Text(s) => {
                         let chars: Vec<char> = s.chars().collect();
                         // Collect deleted text
-                        let removed: String =
-                            chars[local_start..local_end].iter().collect();
+                        let removed: String = chars[local_start..local_end].iter().collect();
                         deleted_text.push_str(&removed);
                         // Build surviving text
                         let new_text: String = chars[..local_start]
@@ -395,9 +394,8 @@ fn execute_delete(
         // Update start block cached fields from element content
         let mut updated_start = start_block.clone();
         updated_start.plain_text = merged_text.clone();
-        updated_start.text_length = merged_text.chars().count() as i64
-            + start_surviving_images
-            + end_surviving_images;
+        updated_start.text_length =
+            merged_text.chars().count() as i64 + start_surviving_images + end_surviving_images;
         updated_start.updated_at = now;
         uow.update_block(&updated_start)?;
 

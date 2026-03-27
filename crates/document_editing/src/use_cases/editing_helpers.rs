@@ -80,8 +80,7 @@ where
     F: Fn(&EntityId) -> Result<Option<Frame>>,
     G: Fn(&EntityId, &FrameRelationshipField) -> Result<Vec<EntityId>>,
 {
-    let frame = get_frame(frame_id)?
-        .ok_or_else(|| anyhow!("Frame not found"))?;
+    let frame = get_frame(frame_id)?.ok_or_else(|| anyhow!("Frame not found"))?;
 
     if !frame.child_order.is_empty() {
         let mut block_ids = Vec::new();

@@ -358,7 +358,7 @@ fn multi_cursor_selection_adjusted_by_edit() {
     c1.insert_text("XX").unwrap();
 
     // c2's selection should be shifted by +2
-    assert_eq!(c2.anchor(), 8);  // 6 + 2
+    assert_eq!(c2.anchor(), 8); // 6 + 2
     assert_eq!(c2.position(), 13); // 11 + 2
 }
 

@@ -62,8 +62,7 @@ impl GetBlockAtPositionUseCase {
         // Separator (at block_end) maps to the next block.
         // Empty blocks (text_length == 0) match when position == running_pos.
         let mut running_pos: i64 = 0;
-        let mut block_number: usize = 0;
-        for &block_id in &ordered_block_ids {
+        for (block_number, &block_id) in ordered_block_ids.iter().enumerate() {
             let block = uow
                 .get_block(&block_id)?
                 .ok_or_else(|| anyhow!("Block not found"))?;
@@ -82,9 +81,7 @@ impl GetBlockAtPositionUseCase {
             }
 
             // Within block text, or empty block at exactly this position
-            if position < block_end
-                || (block.text_length == 0 && position == running_pos)
-            {
+            if position < block_end || (block.text_length == 0 && position == running_pos) {
                 uow.end_transaction()?;
                 return Ok(BlockInfoDto {
                     block_id: block.id as i64,
@@ -95,7 +92,6 @@ impl GetBlockAtPositionUseCase {
             }
 
             running_pos = block_end + 1;
-            block_number += 1;
         }
 
         // Fallback: position is at or past the end of the document — return last block

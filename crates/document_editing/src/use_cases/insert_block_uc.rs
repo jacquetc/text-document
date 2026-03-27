@@ -257,8 +257,7 @@ fn execute_insert_block(
         }
         Ok(None)
     }
-    let owner_frame_id = find_owner_frame(&**uow, &frame_id, current_block.id)?
-        .unwrap_or(frame_id);
+    let owner_frame_id = find_owner_frame(&**uow, &frame_id, current_block.id)?.unwrap_or(frame_id);
 
     let created_block = uow.create_block(&new_block, owner_frame_id, -1)?;
 
