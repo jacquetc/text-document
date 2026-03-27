@@ -69,7 +69,7 @@ fn concurrent_mixed_reads_and_writes() {
     // Just verify the document is still accessible and consistent.
     let text = doc.to_plain_text().unwrap();
     let stats = doc.stats();
-    assert_eq!(stats.character_count, text.len());
+    assert_eq!(stats.character_count, text.chars().count());
 }
 
 #[test]
