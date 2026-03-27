@@ -211,6 +211,7 @@ impl TextFormat {
             font_bold: self.font_bold,
             font_italic: self.font_italic,
             font_underline: self.font_underline,
+            font_strikeout: self.font_strikeout,
         }
     }
 }

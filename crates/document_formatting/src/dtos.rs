@@ -53,6 +53,7 @@ pub struct MergeTextFormatDto {
     pub font_bold: Option<bool>,
     pub font_italic: Option<bool>,
     pub font_underline: Option<bool>,
+    pub font_strikeout: Option<bool>,
 }
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetBlockFormatDto {

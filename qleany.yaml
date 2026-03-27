@@ -939,6 +939,9 @@ features:
             - name: font_underline
               type: boolean
               optional: true
+            - name: font_strikeout
+              type: boolean
+              optional: true
 
       - name: set_block_format
         undoable: true
