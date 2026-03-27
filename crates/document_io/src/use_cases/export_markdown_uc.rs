@@ -101,8 +101,7 @@ impl ExportMarkdownUseCase {
             }
 
             if let Some(ref f) = frame {
-                let frame_lines =
-                    self.render_frame_content(&*uow, f, &cell_frame_ids, "")?;
+                let frame_lines = self.render_frame_content(&*uow, f, &cell_frame_ids, "")?;
                 for line in frame_lines {
                     if !output_parts.is_empty() {
                         output_parts.push("\n\n".to_string());
@@ -195,12 +194,8 @@ impl ExportMarkdownUseCase {
                             quote_prefix.to_string()
                         };
 
-                        let sub_lines = self.render_frame_content(
-                            uow,
-                            sf,
-                            cell_frame_ids,
-                            &sub_prefix,
-                        )?;
+                        let sub_lines =
+                            self.render_frame_content(uow, sf, cell_frame_ids, &sub_prefix)?;
                         for sub_line in sub_lines {
                             if !result.is_empty() {
                                 result.push("\n\n".to_string());

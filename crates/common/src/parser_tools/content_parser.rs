@@ -463,15 +463,14 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 // Extract code language from <pre><code class="language-xxx">
                 let code_language = if is_code_block {
                     node.children().find_map(|child| {
-                        if let Node::Element(cel) = child.value() {
-                            if cel.name() == "code" {
-                                if let Some(cls) = cel.attr("class") {
-                                    return cls
-                                        .split_whitespace()
-                                        .find_map(|c| c.strip_prefix("language-"))
-                                        .map(|l| l.to_string());
-                                }
-                            }
+                        if let Node::Element(cel) = child.value()
+                            && cel.name() == "code"
+                            && let Some(cls) = cel.attr("class")
+                        {
+                            return cls
+                                .split_whitespace()
+                                .find_map(|c| c.strip_prefix("language-"))
+                                .map(|l| l.to_string());
                         }
                         None
                     })
@@ -509,7 +508,14 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 if tag == "blockquote" {
                     // Blockquote is a container — recurse into children with increased depth
                     for child in node.children() {
-                        walk_node(child, &new_state, blocks, &new_list_style, bq_depth, depth + 1);
+                        walk_node(
+                            child,
+                            &new_state,
+                            blocks,
+                            &new_list_style,
+                            bq_depth,
+                            depth + 1,
+                        );
                     }
                 } else if is_block_tag && tag != "br" {
                     // Start collecting spans for a new block
@@ -547,12 +553,26 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 } else if matches!(tag, "ul" | "ol" | "table" | "thead" | "tbody" | "tr") {
                     // Container elements: recurse into children
                     for child in node.children() {
-                        walk_node(child, &new_state, blocks, &new_list_style, bq_depth, depth + 1);
+                        walk_node(
+                            child,
+                            &new_state,
+                            blocks,
+                            &new_list_style,
+                            bq_depth,
+                            depth + 1,
+                        );
                     }
                 } else {
                     // Inline element or unknown: recurse
                     for child in node.children() {
-                        walk_node(child, &new_state, blocks, current_list_style, bq_depth, depth + 1);
+                        walk_node(
+                            child,
+                            &new_state,
+                            blocks,
+                            current_list_style,
+                            bq_depth,
+                            depth + 1,
+                        );
                     }
                 }
             }
@@ -586,7 +606,14 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
             _ => {
                 // Document, Comment, etc. — recurse children
                 for child in node.children() {
-                    walk_node(child, state, blocks, current_list_style, blockquote_depth, depth + 1);
+                    walk_node(
+                        child,
+                        state,
+                        blocks,
+                        current_list_style,
+                        blockquote_depth,
+                        depth + 1,
+                    );
                 }
             }
         }
@@ -667,7 +694,14 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         });
                     } else if nested_block {
                         // Flush as separate block
-                        walk_node(child, &new_state, blocks, current_list_style, blockquote_depth, depth + 1);
+                        walk_node(
+                            child,
+                            &new_state,
+                            blocks,
+                            current_list_style,
+                            blockquote_depth,
+                            depth + 1,
+                        );
                     } else {
                         // Inline element: recurse
                         collect_inline_spans(

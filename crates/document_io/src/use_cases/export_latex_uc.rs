@@ -7,8 +7,8 @@ use common::entities::{
     Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
     TextDirection,
 };
-use std::collections::HashMap;
 use common::types::{EntityId, ROOT_ENTITY_ID};
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub trait ExportLatexUnitOfWorkFactoryTrait: Send + Sync {
@@ -88,8 +88,7 @@ impl ExportLatexUseCase {
                 continue;
             }
 
-            let frame_latex =
-                self.render_frame_latex(&*uow, frame_id, &cell_frame_ids)?;
+            let frame_latex = self.render_frame_latex(&*uow, frame_id, &cell_frame_ids)?;
             if !frame_latex.is_empty() {
                 body_parts.push(frame_latex);
             }
@@ -178,8 +177,7 @@ impl ExportLatexUseCase {
                     if cell_frame_ids.contains(&sub_frame_id) {
                         continue;
                     }
-                    let sub_latex =
-                        self.render_frame_latex(uow, &sub_frame_id, cell_frame_ids)?;
+                    let sub_latex = self.render_frame_latex(uow, &sub_frame_id, cell_frame_ids)?;
                     if !sub_latex.is_empty() {
                         parts.push(sub_latex);
                     }

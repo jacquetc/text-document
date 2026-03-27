@@ -184,15 +184,13 @@ impl ExportHtmlUseCase {
                 if let Some(ref sf) = sub_frame {
                     if sf.fmt_is_blockquote == Some(true) {
                         // Recursively render the blockquote frame content
-                        let inner =
-                            self.render_frame_html(uow, &sub_frame_id, cell_frame_ids)?;
+                        let inner = self.render_frame_html(uow, &sub_frame_id, cell_frame_ids)?;
                         if !inner.is_empty() {
                             parts.push(format!("<blockquote>{}</blockquote>", inner));
                         }
                     } else {
                         // Non-blockquote sub-frame: render normally
-                        let inner =
-                            self.render_frame_html(uow, &sub_frame_id, cell_frame_ids)?;
+                        let inner = self.render_frame_html(uow, &sub_frame_id, cell_frame_ids)?;
                         if !inner.is_empty() {
                             parts.push(inner);
                         }
