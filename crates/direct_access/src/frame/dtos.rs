@@ -23,6 +23,7 @@ pub struct FrameDto {
     pub fmt_padding: Option<i64>,
     pub fmt_border: Option<i64>,
     pub fmt_position: Option<FramePosition>,
+    pub fmt_is_blockquote: Option<bool>,
     pub table: Option<EntityId>,
 }
 
@@ -44,6 +45,7 @@ impl From<FrameDto> for Frame {
             fmt_padding: dto.fmt_padding,
             fmt_border: dto.fmt_border,
             fmt_position: dto.fmt_position,
+            fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
         }
     }
@@ -67,6 +69,7 @@ impl From<&FrameDto> for Frame {
             fmt_padding: dto.fmt_padding,
             fmt_border: dto.fmt_border,
             fmt_position: dto.fmt_position.clone(),
+            fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
         }
     }
@@ -90,6 +93,7 @@ impl From<Frame> for FrameDto {
             fmt_padding: entity.fmt_padding,
             fmt_border: entity.fmt_border,
             fmt_position: entity.fmt_position,
+            fmt_is_blockquote: entity.fmt_is_blockquote,
             table: entity.table,
         }
     }
@@ -111,6 +115,7 @@ pub struct CreateFrameDto {
     pub fmt_padding: Option<i64>,
     pub fmt_border: Option<i64>,
     pub fmt_position: Option<FramePosition>,
+    pub fmt_is_blockquote: Option<bool>,
     pub table: Option<EntityId>,
 }
 
@@ -132,6 +137,7 @@ impl From<CreateFrameDto> for Frame {
             fmt_padding: dto.fmt_padding,
             fmt_border: dto.fmt_border,
             fmt_position: dto.fmt_position,
+            fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
         }
     }
@@ -155,6 +161,7 @@ impl From<&CreateFrameDto> for Frame {
             fmt_padding: dto.fmt_padding,
             fmt_border: dto.fmt_border,
             fmt_position: dto.fmt_position.clone(),
+            fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
         }
     }
@@ -177,6 +184,7 @@ impl From<Frame> for CreateFrameDto {
             fmt_padding: entity.fmt_padding,
             fmt_border: entity.fmt_border,
             fmt_position: entity.fmt_position,
+            fmt_is_blockquote: entity.fmt_is_blockquote,
             table: entity.table,
         }
     }
@@ -197,6 +205,7 @@ pub struct UpdateFrameDto {
     pub fmt_padding: Option<i64>,
     pub fmt_border: Option<i64>,
     pub fmt_position: Option<FramePosition>,
+    pub fmt_is_blockquote: Option<bool>,
 }
 
 impl From<UpdateFrameDto> for Frame {
@@ -215,6 +224,7 @@ impl From<UpdateFrameDto> for Frame {
             fmt_padding: dto.fmt_padding,
             fmt_border: dto.fmt_border,
             fmt_position: dto.fmt_position,
+            fmt_is_blockquote: dto.fmt_is_blockquote,
             parent_frame: Default::default(),
             blocks: Default::default(),
             table: Default::default(),
@@ -238,6 +248,7 @@ impl From<&UpdateFrameDto> for Frame {
             fmt_padding: dto.fmt_padding,
             fmt_border: dto.fmt_border,
             fmt_position: dto.fmt_position.clone(),
+            fmt_is_blockquote: dto.fmt_is_blockquote,
             parent_frame: Default::default(),
             blocks: Default::default(),
             table: Default::default(),
@@ -261,6 +272,7 @@ impl From<Frame> for UpdateFrameDto {
             fmt_padding: entity.fmt_padding,
             fmt_border: entity.fmt_border,
             fmt_position: entity.fmt_position,
+            fmt_is_blockquote: entity.fmt_is_blockquote,
         }
     }
 }
@@ -281,6 +293,7 @@ impl From<FrameDto> for UpdateFrameDto {
             fmt_padding: dto.fmt_padding,
             fmt_border: dto.fmt_border,
             fmt_position: dto.fmt_position,
+            fmt_is_blockquote: dto.fmt_is_blockquote,
         }
     }
 }

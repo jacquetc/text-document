@@ -26,6 +26,8 @@ pub struct FragmentBlock {
     pub non_breakable_lines: Option<bool>,
     pub direction: Option<TextDirection>,
     pub background_color: Option<String>,
+    pub is_code_block: Option<bool>,
+    pub code_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +126,8 @@ impl FragmentBlock {
             && self.non_breakable_lines.is_none()
             && self.direction.is_none()
             && self.background_color.is_none()
+            && self.is_code_block.is_none()
+            && self.code_language.is_none()
     }
 
     pub fn from_entity(block: &Block, elements: &[InlineElement], list: Option<&List>) -> Self {
@@ -145,6 +149,8 @@ impl FragmentBlock {
             non_breakable_lines: block.fmt_non_breakable_lines,
             direction: block.fmt_direction.clone(),
             background_color: block.fmt_background_color.clone(),
+            is_code_block: block.fmt_is_code_block,
+            code_language: block.fmt_code_language.clone(),
         }
     }
 }

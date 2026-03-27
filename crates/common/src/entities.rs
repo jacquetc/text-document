@@ -77,6 +77,7 @@ pub struct Frame {
     pub fmt_padding: Option<i64>,
     pub fmt_border: Option<i64>,
     pub fmt_position: Option<FramePosition>,
+    pub fmt_is_blockquote: Option<bool>,
     pub table: Option<EntityId>,
 }
 
@@ -119,6 +120,8 @@ pub struct Block {
     pub fmt_non_breakable_lines: Option<bool>,
     pub fmt_direction: Option<TextDirection>,
     pub fmt_background_color: Option<String>,
+    pub fmt_is_code_block: Option<bool>,
+    pub fmt_code_language: Option<String>,
 }
 
 impl HasId for Block {

@@ -19,6 +19,8 @@ pub struct ParsedBlock {
     pub heading_level: Option<i64>,
     pub list_style: Option<ListStyle>,
     pub is_code_block: bool,
+    pub code_language: Option<String>,
+    pub blockquote_depth: u32,
     pub line_height: Option<i64>,
     pub non_breakable_lines: Option<bool>,
     pub direction: Option<TextDirection>,
@@ -32,6 +34,7 @@ impl ParsedBlock {
         self.heading_level.is_none()
             && self.list_style.is_none()
             && !self.is_code_block
+            && self.blockquote_depth == 0
             && self.line_height.is_none()
             && self.non_breakable_lines.is_none()
             && self.direction.is_none()
@@ -53,6 +56,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
     let mut current_heading: Option<i64> = None;
     let mut current_list_style: Option<ListStyle> = None;
     let mut is_code_block = false;
+    let mut code_language: Option<String> = None;
+    let mut blockquote_depth: u32 = 0;
     let mut in_block = false;
 
     // Formatting state stack
@@ -78,6 +83,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
                         is_code_block: false,
+                        code_language: None,
+                        blockquote_depth,
                         line_height: None,
                         non_breakable_lines: None,
                         direction: None,
@@ -98,6 +105,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     heading_level: current_heading.take(),
                     list_style: None,
                     is_code_block: false,
+                    code_language: None,
+                    blockquote_depth,
                     line_height: None,
                     non_breakable_lines: None,
                     direction: None,
@@ -129,6 +138,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         heading_level: None,
                         list_style: current_list_style.clone(),
                         is_code_block: false,
+                        code_language: None,
+                        blockquote_depth,
                         line_height: None,
                         non_breakable_lines: None,
                         direction: None,
@@ -138,9 +149,15 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                 in_block = false;
                 current_list_style = None;
             }
-            Event::Start(Tag::CodeBlock(_)) => {
+            Event::Start(Tag::CodeBlock(kind)) => {
                 in_block = true;
                 is_code_block = true;
+                code_language = match &kind {
+                    pulldown_cmark::CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
+                        Some(lang.to_string())
+                    }
+                    _ => None,
+                };
             }
             Event::End(TagEnd::CodeBlock) => {
                 blocks.push(ParsedBlock {
@@ -148,6 +165,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                     heading_level: None,
                     list_style: None,
                     is_code_block: true,
+                    code_language: code_language.take(),
+                    blockquote_depth,
                     line_height: None,
                     non_breakable_lines: None,
                     direction: None,
@@ -229,12 +248,20 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
                         heading_level: current_heading.take(),
                         list_style: current_list_style.clone(),
                         is_code_block,
+                        code_language: code_language.clone(),
+                        blockquote_depth,
                         line_height: None,
                         non_breakable_lines: None,
                         direction: None,
                         background_color: None,
                     });
                 }
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                blockquote_depth += 1;
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                blockquote_depth = blockquote_depth.saturating_sub(1);
             }
             _ => {}
         }
@@ -247,6 +274,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             heading_level: current_heading,
             list_style: current_list_style,
             is_code_block,
+            code_language: code_language.take(),
+            blockquote_depth,
             line_height: None,
             non_breakable_lines: None,
             direction: None,
@@ -264,6 +293,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedBlock> {
             heading_level: None,
             list_style: None,
             is_code_block: false,
+            code_language: None,
+            blockquote_depth: 0,
             line_height: None,
             non_breakable_lines: None,
             direction: None,
@@ -363,6 +394,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
         state: &FmtState,
         blocks: &mut Vec<ParsedBlock>,
         current_list_style: &Option<ListStyle>,
+        blockquote_depth: u32,
         depth: usize,
     ) {
         if depth > MAX_RECURSION_DEPTH {
@@ -373,6 +405,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 let tag = el.name();
                 let mut new_state = state.clone();
                 let mut new_list_style = current_list_style.clone();
+                let mut bq_depth = blockquote_depth;
 
                 // Determine if this is a block-level element
                 let is_block_tag = matches!(
@@ -408,6 +441,9 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                     "ol" => {
                         new_list_style = Some(ListStyle::Decimal);
                     }
+                    "blockquote" => {
+                        bq_depth += 1;
+                    }
                     _ => {}
                 }
 
@@ -423,6 +459,25 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 };
 
                 let is_code_block = tag == "pre";
+
+                // Extract code language from <pre><code class="language-xxx">
+                let code_language = if is_code_block {
+                    node.children().find_map(|child| {
+                        if let Node::Element(cel) = child.value() {
+                            if cel.name() == "code" {
+                                if let Some(cls) = cel.attr("class") {
+                                    return cls
+                                        .split_whitespace()
+                                        .find_map(|c| c.strip_prefix("language-"))
+                                        .map(|l| l.to_string());
+                                }
+                            }
+                        }
+                        None
+                    })
+                } else {
+                    None
+                };
 
                 // Extract CSS styles from block-level elements
                 let css = if is_block_tag {
@@ -441,6 +496,8 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         heading_level: None,
                         list_style: None,
                         is_code_block: false,
+                        code_language: None,
+                        blockquote_depth: bq_depth,
                         line_height: None,
                         non_breakable_lines: None,
                         direction: None,
@@ -449,7 +506,12 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                     return;
                 }
 
-                if is_block_tag && tag != "br" {
+                if tag == "blockquote" {
+                    // Blockquote is a container — recurse into children with increased depth
+                    for child in node.children() {
+                        walk_node(child, &new_state, blocks, &new_list_style, bq_depth, depth + 1);
+                    }
+                } else if is_block_tag && tag != "br" {
                     // Start collecting spans for a new block
                     let mut spans: Vec<ParsedSpan> = Vec::new();
                     collect_inline_spans(
@@ -458,6 +520,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         &mut spans,
                         &new_list_style,
                         blocks,
+                        bq_depth,
                         depth + 1,
                     );
 
@@ -473,6 +536,8 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             heading_level,
                             list_style: list_style_for_block,
                             is_code_block,
+                            code_language,
+                            blockquote_depth: bq_depth,
                             line_height: css.line_height,
                             non_breakable_lines: css.non_breakable_lines,
                             direction: css.direction,
@@ -482,12 +547,12 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 } else if matches!(tag, "ul" | "ol" | "table" | "thead" | "tbody" | "tr") {
                     // Container elements: recurse into children
                     for child in node.children() {
-                        walk_node(child, &new_state, blocks, &new_list_style, depth + 1);
+                        walk_node(child, &new_state, blocks, &new_list_style, bq_depth, depth + 1);
                     }
                 } else {
                     // Inline element or unknown: recurse
                     for child in node.children() {
-                        walk_node(child, &new_state, blocks, current_list_style, depth + 1);
+                        walk_node(child, &new_state, blocks, current_list_style, bq_depth, depth + 1);
                     }
                 }
             }
@@ -509,6 +574,8 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         heading_level: None,
                         list_style: None,
                         is_code_block: false,
+                        code_language: None,
+                        blockquote_depth,
                         line_height: None,
                         non_breakable_lines: None,
                         direction: None,
@@ -519,7 +586,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
             _ => {
                 // Document, Comment, etc. — recurse children
                 for child in node.children() {
-                    walk_node(child, state, blocks, current_list_style, depth + 1);
+                    walk_node(child, state, blocks, current_list_style, blockquote_depth, depth + 1);
                 }
             }
         }
@@ -534,6 +601,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
         spans: &mut Vec<ParsedSpan>,
         current_list_style: &Option<ListStyle>,
         blocks: &mut Vec<ParsedBlock>,
+        blockquote_depth: u32,
         depth: usize,
     ) {
         if depth > MAX_RECURSION_DEPTH {
@@ -599,7 +667,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         });
                     } else if nested_block {
                         // Flush as separate block
-                        walk_node(child, &new_state, blocks, current_list_style, depth + 1);
+                        walk_node(child, &new_state, blocks, current_list_style, blockquote_depth, depth + 1);
                     } else {
                         // Inline element: recurse
                         collect_inline_spans(
@@ -608,6 +676,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             spans,
                             current_list_style,
                             blocks,
+                            blockquote_depth,
                             depth + 1,
                         );
                     }
@@ -619,7 +688,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
 
     let initial_state = FmtState::default();
     for child in root.children() {
-        walk_node(child, &initial_state, &mut blocks, &None, 0);
+        walk_node(child, &initial_state, &mut blocks, &None, 0, 0);
     }
 
     // If no blocks were parsed, create a single empty paragraph
@@ -632,6 +701,8 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
             heading_level: None,
             list_style: None,
             is_code_block: false,
+            code_language: None,
+            blockquote_depth: 0,
             line_height: None,
             non_breakable_lines: None,
             direction: None,

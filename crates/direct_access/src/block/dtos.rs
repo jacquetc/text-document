@@ -32,6 +32,8 @@ pub struct BlockDto {
     pub fmt_non_breakable_lines: Option<bool>,
     pub fmt_direction: Option<TextDirection>,
     pub fmt_background_color: Option<String>,
+    pub fmt_is_code_block: Option<bool>,
+    pub fmt_code_language: Option<String>,
 }
 
 impl From<BlockDto> for Block {
@@ -59,6 +61,8 @@ impl From<BlockDto> for Block {
             fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
             fmt_direction: dto.fmt_direction,
             fmt_background_color: dto.fmt_background_color,
+            fmt_is_code_block: dto.fmt_is_code_block,
+            fmt_code_language: dto.fmt_code_language,
         }
     }
 }
@@ -88,6 +92,8 @@ impl From<&BlockDto> for Block {
             fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
             fmt_direction: dto.fmt_direction.clone(),
             fmt_background_color: dto.fmt_background_color.clone(),
+            fmt_is_code_block: dto.fmt_is_code_block,
+            fmt_code_language: dto.fmt_code_language.clone(),
         }
     }
 }
@@ -117,6 +123,8 @@ impl From<Block> for BlockDto {
             fmt_non_breakable_lines: entity.fmt_non_breakable_lines,
             fmt_direction: entity.fmt_direction,
             fmt_background_color: entity.fmt_background_color,
+            fmt_is_code_block: entity.fmt_is_code_block,
+            fmt_code_language: entity.fmt_code_language,
         }
     }
 }
@@ -144,6 +152,8 @@ pub struct CreateBlockDto {
     pub fmt_non_breakable_lines: Option<bool>,
     pub fmt_direction: Option<TextDirection>,
     pub fmt_background_color: Option<String>,
+    pub fmt_is_code_block: Option<bool>,
+    pub fmt_code_language: Option<String>,
 }
 
 impl From<CreateBlockDto> for Block {
@@ -171,6 +181,8 @@ impl From<CreateBlockDto> for Block {
             fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
             fmt_direction: dto.fmt_direction,
             fmt_background_color: dto.fmt_background_color,
+            fmt_is_code_block: dto.fmt_is_code_block,
+            fmt_code_language: dto.fmt_code_language,
         }
     }
 }
@@ -200,6 +212,8 @@ impl From<&CreateBlockDto> for Block {
             fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
             fmt_direction: dto.fmt_direction.clone(),
             fmt_background_color: dto.fmt_background_color.clone(),
+            fmt_is_code_block: dto.fmt_is_code_block,
+            fmt_code_language: dto.fmt_code_language.clone(),
         }
     }
 }
@@ -228,6 +242,8 @@ impl From<Block> for CreateBlockDto {
             fmt_non_breakable_lines: entity.fmt_non_breakable_lines,
             fmt_direction: entity.fmt_direction,
             fmt_background_color: entity.fmt_background_color,
+            fmt_is_code_block: entity.fmt_is_code_block,
+            fmt_code_language: entity.fmt_code_language,
         }
     }
 }
@@ -254,6 +270,8 @@ pub struct UpdateBlockDto {
     pub fmt_non_breakable_lines: Option<bool>,
     pub fmt_direction: Option<TextDirection>,
     pub fmt_background_color: Option<String>,
+    pub fmt_is_code_block: Option<bool>,
+    pub fmt_code_language: Option<String>,
 }
 
 impl From<UpdateBlockDto> for Block {
@@ -279,6 +297,8 @@ impl From<UpdateBlockDto> for Block {
             fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
             fmt_direction: dto.fmt_direction,
             fmt_background_color: dto.fmt_background_color,
+            fmt_is_code_block: dto.fmt_is_code_block,
+            fmt_code_language: dto.fmt_code_language,
             elements: Default::default(),
             list: Default::default(),
         }
@@ -308,6 +328,8 @@ impl From<&UpdateBlockDto> for Block {
             fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
             fmt_direction: dto.fmt_direction.clone(),
             fmt_background_color: dto.fmt_background_color.clone(),
+            fmt_is_code_block: dto.fmt_is_code_block,
+            fmt_code_language: dto.fmt_code_language.clone(),
             elements: Default::default(),
             list: Default::default(),
         }
@@ -337,6 +359,8 @@ impl From<Block> for UpdateBlockDto {
             fmt_non_breakable_lines: entity.fmt_non_breakable_lines,
             fmt_direction: entity.fmt_direction,
             fmt_background_color: entity.fmt_background_color,
+            fmt_is_code_block: entity.fmt_is_code_block,
+            fmt_code_language: entity.fmt_code_language,
         }
     }
 }
@@ -364,6 +388,8 @@ impl From<BlockDto> for UpdateBlockDto {
             fmt_non_breakable_lines: dto.fmt_non_breakable_lines,
             fmt_direction: dto.fmt_direction,
             fmt_background_color: dto.fmt_background_color,
+            fmt_is_code_block: dto.fmt_is_code_block,
+            fmt_code_language: dto.fmt_code_language,
         }
     }
 }
