@@ -67,6 +67,8 @@ pub struct SetBlockFormatDto {
     pub non_breakable_lines: Option<bool>,
     pub direction: Option<TextDirection>,
     pub background_color: Option<String>,
+    pub is_code_block: Option<bool>,
+    pub code_language: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
@@ -98,6 +100,7 @@ pub struct SetFrameFormatDto {
     pub right_margin: Option<i64>,
     pub padding: Option<i64>,
     pub border: Option<i64>,
+    pub is_blockquote: Option<bool>,
 }
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SetTableFormatDto {

@@ -116,6 +116,12 @@ fn execute_set_block_format(
             if let Some(ref c) = dto.background_color {
                 updated.fmt_background_color = Some(c.clone());
             }
+            if let Some(v) = dto.is_code_block {
+                updated.fmt_is_code_block = Some(v);
+            }
+            if let Some(ref l) = dto.code_language {
+                updated.fmt_code_language = Some(l.clone());
+            }
             updated.updated_at = chrono::Utc::now();
             blocks_to_update.push(updated);
         }

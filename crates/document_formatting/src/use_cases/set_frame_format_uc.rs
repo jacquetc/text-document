@@ -73,6 +73,9 @@ fn execute_set_frame_format(
     if let Some(v) = dto.border {
         updated.fmt_border = Some(v);
     }
+    if let Some(v) = dto.is_blockquote {
+        updated.fmt_is_blockquote = Some(v);
+    }
     updated.updated_at = chrono::Utc::now();
     uow.update_frame(&updated)?;
 

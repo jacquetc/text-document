@@ -59,6 +59,9 @@ fn apply_merge_format(elem: &mut InlineElement, dto: &MergeTextFormatDto) {
     if let Some(underline) = dto.font_underline {
         elem.fmt_font_underline = Some(underline);
     }
+    if let Some(strikeout) = dto.font_strikeout {
+        elem.fmt_font_strikeout = Some(strikeout);
+    }
     elem.updated_at = chrono::Utc::now();
 }
 
