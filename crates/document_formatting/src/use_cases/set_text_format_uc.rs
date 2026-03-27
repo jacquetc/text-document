@@ -154,15 +154,16 @@ fn execute_set_text_format(
 
     // Get frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
-    let frame_id = *frame_ids
-        .first()
-        .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-    // Get block IDs from frame
-    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    // Get block IDs from all frames
+    let mut all_block_ids = Vec::new();
+    for fid in &frame_ids {
+        let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
+        all_block_ids.extend(block_ids);
+    }
 
     // Get all blocks
-    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
