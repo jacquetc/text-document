@@ -49,10 +49,6 @@ struct UndoData {
     /// Document ID and original character_count.
     doc_id: EntityId,
     original_character_count: i64,
-    /// Number of chars inserted (to reverse position shifts).
-    text_len: i64,
-    /// Frame ID (to find subsequent blocks on undo).
-    frame_id: EntityId,
     /// Block ID.
     block_id: EntityId,
 }
@@ -111,10 +107,10 @@ fn execute_insert_formatted_text(
         return Err(anyhow!("No blocks in document"));
     }
 
-    // Binary search to find the block at position
-    let (block, block_idx) =
-        find_block_at_position_binary(uow, &ordered_block_ids, position)?;
-    let offset = position - block.document_position;
+    // Find block at position by computing positions on the fly
+    let (block, _block_idx, block_pos) =
+        find_block_at_position_sequential(uow, &ordered_block_ids, position)?;
+    let offset = position - block_pos;
 
     // Save original block for undo (cheap clone, no DB serialization)
     let original_block = block.clone();
@@ -241,21 +237,8 @@ fn execute_insert_formatted_text(
     updated_block.updated_at = now;
     uow.update_block(&updated_block)?;
 
-    // Update subsequent blocks' document_position — only read blocks AFTER the target
-    let subsequent_ids: Vec<EntityId> = ordered_block_ids[(block_idx + 1)..].to_vec();
-    if !subsequent_ids.is_empty() {
-        let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
-        let mut blocks_to_update: Vec<Block> = Vec::new();
-        for b in subsequent_opt.into_iter().flatten() {
-            let mut ub = b;
-            ub.document_position += text_len;
-            ub.updated_at = now;
-            blocks_to_update.push(ub);
-        }
-        if !blocks_to_update.is_empty() {
-            uow.update_block_multi(&blocks_to_update)?;
-        }
-    }
+    // Note: we intentionally do NOT update subsequent blocks' document_position here.
+    // Positions are computed on the fly from child_order + text_length.
 
     // Update Document.character_count
     let mut updated_doc = document.clone();
@@ -270,8 +253,6 @@ fn execute_insert_formatted_text(
         original_block,
         doc_id,
         original_character_count: document.character_count,
-        text_len,
-        frame_id,
         block_id: block.id,
     };
 
@@ -284,35 +265,28 @@ fn execute_insert_formatted_text(
 }
 
 /// Binary search through ordered block IDs to find the block containing `position`.
-fn find_block_at_position_binary(
+/// Find the block containing `position` by computing positions on the fly
+/// from child_order + text_length. No dependency on stored document_position.
+fn find_block_at_position_sequential(
     uow: &Box<dyn InsertFormattedTextUnitOfWorkTrait>,
     ordered_block_ids: &[EntityId],
     position: i64,
-) -> Result<(Block, usize)> {
+) -> Result<(Block, usize, i64)> {
     if ordered_block_ids.is_empty() {
         return Err(anyhow!("No blocks in document"));
     }
 
-    let mut left = 0usize;
-    let mut right = ordered_block_ids.len() - 1;
-
-    while left <= right {
-        let mid = left + (right - left) / 2;
+    let mut running_pos: i64 = 0;
+    for (idx, &block_id) in ordered_block_ids.iter().enumerate() {
         let block = uow
-            .get_block(&ordered_block_ids[mid])?
+            .get_block(&block_id)?
             .ok_or_else(|| anyhow!("Block not found"))?;
-        let block_end = block.document_position + block.text_length;
+        let block_end = running_pos + block.text_length;
 
-        if position >= block.document_position && position <= block_end {
-            return Ok((block, mid));
-        } else if position < block.document_position {
-            if mid == 0 {
-                return Ok((block, mid));
-            }
-            right = mid - 1;
-        } else {
-            left = mid + 1;
+        if position >= running_pos && position <= block_end {
+            return Ok((block, idx, running_pos));
         }
+        running_pos = block_end + 1;
     }
 
     // Fallback to last block
@@ -320,7 +294,13 @@ fn find_block_at_position_binary(
     let block = uow
         .get_block(&ordered_block_ids[last_idx])?
         .ok_or_else(|| anyhow!("Block not found"))?;
-    Ok((block, last_idx))
+    let mut pos: i64 = 0;
+    for &id in &ordered_block_ids[..last_idx] {
+        if let Some(b) = uow.get_block(&id)? {
+            pos += b.text_length + 1;
+        }
+    }
+    Ok((block, last_idx, pos))
 }
 
 impl InsertFormattedTextUseCase {
@@ -376,40 +356,10 @@ impl UndoRedoCommand for InsertFormattedTextUseCase {
         // 4. Restore the original block (plain_text, text_length, etc.)
         uow.update_block(&undo_data.original_block)?;
 
-        // 5. Reverse position shifts on subsequent blocks
-        let frame = uow
-            .get_frame(&undo_data.frame_id)?
-            .ok_or_else(|| anyhow!("Frame not found"))?;
-        let ordered_block_ids: Vec<EntityId> = frame
-            .child_order
-            .iter()
-            .filter(|&&id| id > 0)
-            .map(|&id| id as EntityId)
-            .collect();
+        // No position shifts to reverse — insert doesn't update them.
+        // Positions are computed on the fly from child_order + text_length.
 
-        if let Some(block_idx) = ordered_block_ids
-            .iter()
-            .position(|&id| id == undo_data.block_id)
-        {
-            let subsequent_ids: Vec<EntityId> =
-                ordered_block_ids[(block_idx + 1)..].to_vec();
-            if !subsequent_ids.is_empty() {
-                let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
-                let now = chrono::Utc::now();
-                let mut blocks_to_update: Vec<Block> = Vec::new();
-                for b in subsequent_opt.into_iter().flatten() {
-                    let mut ub = b;
-                    ub.document_position -= undo_data.text_len;
-                    ub.updated_at = now;
-                    blocks_to_update.push(ub);
-                }
-                if !blocks_to_update.is_empty() {
-                    uow.update_block_multi(&blocks_to_update)?;
-                }
-            }
-        }
-
-        // 6. Restore document character_count
+        // 5. Restore document character_count
         let mut doc = uow
             .get_document(&undo_data.doc_id)?
             .ok_or_else(|| anyhow!("Document not found"))?;

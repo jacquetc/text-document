@@ -44,9 +44,6 @@ struct UndoData {
     original_block: Block,
     doc_id: EntityId,
     original_character_count: i64,
-    text_len: i64,
-    frame_id: EntityId,
-    block_id: EntityId,
 }
 
 /// Undo data for the selection-replacement path (needs full snapshot).
@@ -303,10 +300,10 @@ fn execute_insert_simple(
         return Err(anyhow!("No blocks in document"));
     }
 
-    // Binary search to find the block at position
-    let (block, block_idx) =
-        find_block_at_position_binary(uow, &ordered_block_ids, position)?;
-    let offset = position - block.document_position;
+    // Find block at position by computing positions on the fly
+    let (block, block_idx, block_pos) =
+        find_block_at_position_sequential(uow, &ordered_block_ids, position)?;
+    let offset = position - block_pos;
 
     // Save originals for undo (cheap clones, no serialization)
     let original_block = block.clone();
@@ -353,22 +350,10 @@ fn execute_insert_simple(
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
-    // Update subsequent blocks' document_position — only read blocks AFTER the target
-    let subsequent_ids: Vec<EntityId> = ordered_block_ids[(block_idx + 1)..].to_vec();
-    if !subsequent_ids.is_empty() {
-        let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
-        let now = chrono::Utc::now();
-        let mut blocks_to_update: Vec<Block> = Vec::new();
-        for b in subsequent_opt.into_iter().flatten() {
-            let mut ub = b;
-            ub.document_position += text_len;
-            ub.updated_at = now;
-            blocks_to_update.push(ub);
-        }
-        if !blocks_to_update.is_empty() {
-            uow.update_block_multi(&blocks_to_update)?;
-        }
-    }
+    // Note: we intentionally do NOT update subsequent blocks' document_position here.
+    // Positions are computed on the fly from child_order + text_length by
+    // find_block_at_position_sequential(). This avoids O(n) reads+writes per keystroke.
+    // Structural operations (insert_block, delete_text, etc.) still update positions.
 
     // Update Document.character_count
     let mut updated_doc = document.clone();
@@ -381,9 +366,6 @@ fn execute_insert_simple(
         original_block,
         doc_id,
         original_character_count: document.character_count,
-        text_len,
-        frame_id,
-        block_id: block.id,
     };
 
     Ok((
@@ -395,36 +377,29 @@ fn execute_insert_simple(
     ))
 }
 
-/// Binary search through ordered block IDs to find the block containing `position`.
-fn find_block_at_position_binary(
+/// Find the block containing `position` by computing positions on the fly
+/// from child_order + text_length. No dependency on stored document_position.
+/// Returns (block, index_in_ordered_ids, computed_position_of_block).
+fn find_block_at_position_sequential(
     uow: &Box<dyn InsertTextUnitOfWorkTrait>,
     ordered_block_ids: &[EntityId],
     position: i64,
-) -> Result<(Block, usize)> {
+) -> Result<(Block, usize, i64)> {
     if ordered_block_ids.is_empty() {
         return Err(anyhow!("No blocks in document"));
     }
 
-    let mut left = 0usize;
-    let mut right = ordered_block_ids.len() - 1;
-
-    while left <= right {
-        let mid = left + (right - left) / 2;
+    let mut running_pos: i64 = 0;
+    for (idx, &block_id) in ordered_block_ids.iter().enumerate() {
         let block = uow
-            .get_block(&ordered_block_ids[mid])?
+            .get_block(&block_id)?
             .ok_or_else(|| anyhow!("Block not found"))?;
-        let block_end = block.document_position + block.text_length;
+        let block_end = running_pos + block.text_length;
 
-        if position >= block.document_position && position <= block_end {
-            return Ok((block, mid));
-        } else if position < block.document_position {
-            if mid == 0 {
-                return Ok((block, mid));
-            }
-            right = mid - 1;
-        } else {
-            left = mid + 1;
+        if position >= running_pos && position <= block_end {
+            return Ok((block, idx, running_pos));
         }
+        running_pos = block_end + 1; // +1 for block separator
     }
 
     // Fallback to last block
@@ -432,7 +407,14 @@ fn find_block_at_position_binary(
     let block = uow
         .get_block(&ordered_block_ids[last_idx])?
         .ok_or_else(|| anyhow!("Block not found"))?;
-    Ok((block, last_idx))
+    // Recompute position for last block
+    let mut pos: i64 = 0;
+    for &id in &ordered_block_ids[..last_idx] {
+        if let Some(b) = uow.get_block(&id)? {
+            pos += b.text_length + 1;
+        }
+    }
+    Ok((block, last_idx, pos))
 }
 
 /// Convert a char offset to a byte offset in a string.
@@ -514,41 +496,11 @@ impl UndoRedoCommand for InsertTextUseCase {
                 // Restore original element
                 uow.update_inline_element(&data.original_element)?;
 
-                // Restore original block
+                // Restore original block (plain_text, text_length)
                 uow.update_block(&data.original_block)?;
 
-                // Reverse position shifts on subsequent blocks
-                let frame = uow
-                    .get_frame(&data.frame_id)?
-                    .ok_or_else(|| anyhow!("Frame not found"))?;
-                let ordered_block_ids: Vec<EntityId> = frame
-                    .child_order
-                    .iter()
-                    .filter(|&&id| id > 0)
-                    .map(|&id| id as EntityId)
-                    .collect();
-
-                if let Some(block_idx) = ordered_block_ids
-                    .iter()
-                    .position(|&id| id == data.block_id)
-                {
-                    let subsequent_ids: Vec<EntityId> =
-                        ordered_block_ids[(block_idx + 1)..].to_vec();
-                    if !subsequent_ids.is_empty() {
-                        let subsequent_opt = uow.get_block_multi(&subsequent_ids)?;
-                        let now = chrono::Utc::now();
-                        let mut blocks_to_update: Vec<Block> = Vec::new();
-                        for b in subsequent_opt.into_iter().flatten() {
-                            let mut ub = b;
-                            ub.document_position -= data.text_len;
-                            ub.updated_at = now;
-                            blocks_to_update.push(ub);
-                        }
-                        if !blocks_to_update.is_empty() {
-                            uow.update_block_multi(&blocks_to_update)?;
-                        }
-                    }
-                }
+                // No position shifts to reverse — insert_simple doesn't update them.
+                // Positions are computed on the fly from child_order + text_length.
 
                 // Restore document character_count
                 let mut doc = uow
@@ -614,15 +566,22 @@ impl UndoRedoCommand for InsertTextUseCase {
             return false;
         }
 
-        // Rule 4: Word boundary — break on space/punctuation after non-space
+        // Rule 4: Max merge length — 200 characters
+        if self_dto.text.len() + other_dto.text.len() > 200 {
+            return false;
+        }
+
+        // Rule 5: Word boundary — break after whitespace/punctuation when followed by
+        // a non-whitespace/non-punctuation character (start of a new word)
         let self_text = &self_dto.text;
         let other_text = &other_dto.text;
         if let (Some(last_self), Some(first_other)) =
             (self_text.chars().next_back(), other_text.chars().next())
         {
-            if !last_self.is_whitespace()
-                && (first_other.is_whitespace() || is_word_boundary_punct(first_other))
-            {
+            let self_is_boundary =
+                last_self.is_whitespace() || is_word_boundary_punct(last_self);
+            let other_is_word = !first_other.is_whitespace() && !is_word_boundary_punct(first_other);
+            if self_is_boundary && other_is_word {
                 return false;
             }
         }
