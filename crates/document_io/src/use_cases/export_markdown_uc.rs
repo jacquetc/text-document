@@ -17,7 +17,9 @@ pub trait ExportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Document", action = "GetRO")]
 #[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRO")]
+#[macros::uow_action(entity = "Frame", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
@@ -98,129 +100,15 @@ impl ExportMarkdownUseCase {
                 continue;
             }
 
-            let block_ids = uow.get_frame_relationship(
-                frame_id,
-                &common::direct_access::frame::FrameRelationshipField::Blocks,
-            )?;
-
-            if block_ids.is_empty() {
-                continue;
-            }
-
-            let blocks_opt = uow.get_block_multi(&block_ids)?;
-            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
-            blocks.sort_by_key(|b| b.document_position);
-
-            let mut prev_was_list = false;
-            let mut ordered_list_counter: i64 = 0;
-            let mut current_list_id: Option<EntityId> = None;
-
-            for block in &blocks {
-                // Get inline elements
-                let element_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::Elements,
-                )?;
-
-                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
-
-                // Check if block has a list
-                let list_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::List,
-                )?;
-                let list = if let Some(list_id) = list_ids.first() {
-                    uow.get_list(list_id)?
-                } else {
-                    None
-                };
-
-                let is_list_item = list.is_some();
-
-                // Build inline markdown text
-                let mut inline_md = String::new();
-                for elem in &elements {
-                    let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
-                    let text = match &elem.content {
-                        InlineContent::Text(t) => {
-                            if is_code {
-                                t.clone()
-                            } else {
-                                escape_markdown(t)
-                            }
-                        }
-                        InlineContent::Image { name, .. } => {
-                            format!("![{}]({})", name, name)
-                        }
-                        InlineContent::Empty => String::new(),
-                    };
-
-                    if text.is_empty() {
-                        continue;
-                    }
-
-                    let mut formatted = text.clone();
-
-                    // Apply formatting (innermost first)
-                    if elem.fmt_font_family.as_deref() == Some("monospace") {
-                        formatted = format!("`{}`", formatted);
-                    }
-                    if elem.fmt_font_strikeout == Some(true) {
-                        formatted = format!("~~{}~~", formatted);
-                    }
-                    if elem.fmt_font_bold == Some(true) && elem.fmt_font_italic == Some(true) {
-                        formatted = format!("***{}***", formatted);
-                    } else if elem.fmt_font_bold == Some(true) {
-                        formatted = format!("**{}**", formatted);
-                    } else if elem.fmt_font_italic == Some(true) {
-                        formatted = format!("*{}*", formatted);
-                    }
-                    if let Some(ref href) = elem.fmt_anchor_href {
-                        formatted = format!("[{}]({})", formatted, href);
-                    }
-
-                    inline_md.push_str(&formatted);
-                }
-
-                // Build the block line
-                let block_line = if let Some(level) = block.fmt_heading_level {
-                    let prefix = "#".repeat(level as usize);
-                    format!("{} {}", prefix, inline_md)
-                } else if let Some(ref list_entity) = list {
-                    match list_entity.style {
-                        ListStyle::Decimal
-                        | ListStyle::LowerAlpha
-                        | ListStyle::UpperAlpha
-                        | ListStyle::LowerRoman
-                        | ListStyle::UpperRoman => {
-                            let this_list_id = list_ids.first().copied();
-                            if this_list_id != current_list_id {
-                                ordered_list_counter = 1;
-                                current_list_id = this_list_id;
-                            } else {
-                                ordered_list_counter += 1;
-                            }
-                            format!("{}. {}", ordered_list_counter, inline_md)
-                        }
-                        _ => format!("- {}", inline_md),
-                    }
-                } else {
-                    current_list_id = None;
-                    ordered_list_counter = 0;
-                    inline_md
-                };
-
-                // Separator logic: blank line between paragraphs, single newline between list items
-                if !output_parts.is_empty() {
-                    if is_list_item && prev_was_list {
-                        output_parts.push("\n".to_string());
-                    } else {
+            if let Some(ref f) = frame {
+                let frame_lines =
+                    self.render_frame_content(&*uow, f, &cell_frame_ids, "")?;
+                for line in frame_lines {
+                    if !output_parts.is_empty() {
                         output_parts.push("\n\n".to_string());
                     }
+                    output_parts.push(line);
                 }
-                output_parts.push(block_line);
-                prev_was_list = is_list_item;
             }
         }
 
@@ -229,6 +117,293 @@ impl ExportMarkdownUseCase {
         let markdown_text = output_parts.concat();
 
         Ok(ExportMarkdownDto { markdown_text })
+    }
+
+    /// Render the content of a frame by walking its `child_order`.
+    /// Positive entries are block IDs, negative entries are negated sub-frame IDs.
+    /// `quote_prefix` is prepended to every output line (e.g. "> " for blockquotes).
+    /// Returns a vec of block-level strings (each is one rendered block or sub-frame output).
+    fn render_frame_content(
+        &self,
+        uow: &dyn ExportMarkdownUnitOfWorkTrait,
+        frame: &Frame,
+        cell_frame_ids: &HashSet<EntityId>,
+        quote_prefix: &str,
+    ) -> Result<Vec<String>> {
+        let mut result: Vec<String> = Vec::new();
+        let mut prev_was_list = false;
+        let mut ordered_list_counter: i64 = 0;
+        let mut current_list_id: Option<EntityId> = None;
+
+        // If child_order is empty, fall back to iterating blocks directly
+        let use_child_order = !frame.child_order.is_empty();
+
+        if use_child_order {
+            for &entry in &frame.child_order {
+                if entry > 0 {
+                    // Positive: block ID
+                    let block_id = entry as EntityId;
+                    let block = uow.get_block(&block_id)?;
+                    if let Some(ref b) = block {
+                        let (line, is_list_item) = self.render_block_line(
+                            uow,
+                            b,
+                            quote_prefix,
+                            &mut ordered_list_counter,
+                            &mut current_list_id,
+                        )?;
+                        if !result.is_empty() {
+                            if is_list_item && prev_was_list {
+                                result.push("\n".to_string());
+                            } else {
+                                result.push("\n\n".to_string());
+                            }
+                        }
+                        result.push(line);
+                        prev_was_list = is_list_item;
+                    }
+                } else {
+                    // Negative: negated sub-frame ID
+                    let sub_frame_id = (-entry) as EntityId;
+                    if cell_frame_ids.contains(&sub_frame_id) {
+                        continue;
+                    }
+                    let sub_frame = uow.get_frame(&sub_frame_id)?;
+                    if let Some(ref sf) = sub_frame {
+                        // Check if sub-frame is a table anchor
+                        if let Some(table_id) = sf.table {
+                            let table_md = self.render_table_markdown(uow, &table_id)?;
+                            let prefixed = if !quote_prefix.is_empty() {
+                                prefix_lines(&table_md, quote_prefix)
+                            } else {
+                                table_md
+                            };
+                            if !result.is_empty() {
+                                result.push("\n\n".to_string());
+                            }
+                            result.push(prefixed);
+                            prev_was_list = false;
+                            current_list_id = None;
+                            ordered_list_counter = 0;
+                            continue;
+                        }
+
+                        // Blockquote sub-frame
+                        let sub_prefix = if sf.fmt_is_blockquote == Some(true) {
+                            format!("{}> ", quote_prefix)
+                        } else {
+                            quote_prefix.to_string()
+                        };
+
+                        let sub_lines = self.render_frame_content(
+                            uow,
+                            sf,
+                            cell_frame_ids,
+                            &sub_prefix,
+                        )?;
+                        for sub_line in sub_lines {
+                            if !result.is_empty() {
+                                result.push("\n\n".to_string());
+                            }
+                            result.push(sub_line);
+                        }
+                        prev_was_list = false;
+                        current_list_id = None;
+                        ordered_list_counter = 0;
+                    }
+                }
+            }
+        } else {
+            // Fallback: iterate blocks from the Blocks relationship
+            let block_ids = uow.get_frame_relationship(
+                &frame.id,
+                &common::direct_access::frame::FrameRelationshipField::Blocks,
+            )?;
+
+            if block_ids.is_empty() {
+                return Ok(result);
+            }
+
+            let blocks_opt = uow.get_block_multi(&block_ids)?;
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+            blocks.sort_by_key(|b| b.document_position);
+
+            for block in &blocks {
+                let (line, is_list_item) = self.render_block_line(
+                    uow,
+                    block,
+                    quote_prefix,
+                    &mut ordered_list_counter,
+                    &mut current_list_id,
+                )?;
+                if !result.is_empty() {
+                    if is_list_item && prev_was_list {
+                        result.push("\n".to_string());
+                    } else {
+                        result.push("\n\n".to_string());
+                    }
+                }
+                result.push(line);
+                prev_was_list = is_list_item;
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Render a single block into a markdown line string.
+    /// Returns (rendered_line, is_list_item).
+    fn render_block_line(
+        &self,
+        uow: &dyn ExportMarkdownUnitOfWorkTrait,
+        block: &Block,
+        quote_prefix: &str,
+        ordered_list_counter: &mut i64,
+        current_list_id: &mut Option<EntityId>,
+    ) -> Result<(String, bool)> {
+        // Check if this is a code block
+        if block.fmt_is_code_block == Some(true) {
+            let lang = block.fmt_code_language.as_deref().unwrap_or("");
+            let element_ids = uow.get_block_relationship(
+                &block.id,
+                &common::direct_access::block::BlockRelationshipField::Elements,
+            )?;
+            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+            let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+
+            // Concatenate raw text from elements, no formatting
+            let mut raw_text = String::new();
+            for elem in &elements {
+                match &elem.content {
+                    InlineContent::Text(t) => raw_text.push_str(t),
+                    InlineContent::Empty => {}
+                    InlineContent::Image { .. } => {}
+                }
+            }
+
+            let code_block = if quote_prefix.is_empty() {
+                format!("```{}\n{}\n```", lang, raw_text)
+            } else {
+                let mut lines = Vec::new();
+                lines.push(format!("{}```{}", quote_prefix, lang));
+                for line in raw_text.lines() {
+                    lines.push(format!("{}{}", quote_prefix, line));
+                }
+                // Handle the case where raw_text is empty or ends without newline
+                if raw_text.is_empty() {
+                    lines.push(quote_prefix.to_string());
+                }
+                lines.push(format!("{}```", quote_prefix));
+                lines.join("\n")
+            };
+
+            *current_list_id = None;
+            *ordered_list_counter = 0;
+            return Ok((code_block, false));
+        }
+
+        // Get inline elements
+        let element_ids = uow.get_block_relationship(
+            &block.id,
+            &common::direct_access::block::BlockRelationshipField::Elements,
+        )?;
+
+        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+
+        // Check if block has a list
+        let list_ids = uow.get_block_relationship(
+            &block.id,
+            &common::direct_access::block::BlockRelationshipField::List,
+        )?;
+        let list = if let Some(list_id) = list_ids.first() {
+            uow.get_list(list_id)?
+        } else {
+            None
+        };
+
+        let is_list_item = list.is_some();
+
+        // Build inline markdown text
+        let inline_md = self.render_inline_elements(&elements)?;
+
+        // Build the block line
+        let block_line = if let Some(level) = block.fmt_heading_level {
+            let prefix = "#".repeat(level as usize);
+            format!("{}{} {}", quote_prefix, prefix, inline_md)
+        } else if let Some(ref list_entity) = list {
+            match list_entity.style {
+                ListStyle::Decimal
+                | ListStyle::LowerAlpha
+                | ListStyle::UpperAlpha
+                | ListStyle::LowerRoman
+                | ListStyle::UpperRoman => {
+                    let this_list_id = list_ids.first().copied();
+                    if this_list_id != *current_list_id {
+                        *ordered_list_counter = 1;
+                        *current_list_id = this_list_id;
+                    } else {
+                        *ordered_list_counter += 1;
+                    }
+                    format!("{}{}. {}", quote_prefix, ordered_list_counter, inline_md)
+                }
+                _ => format!("{}- {}", quote_prefix, inline_md),
+            }
+        } else {
+            *current_list_id = None;
+            *ordered_list_counter = 0;
+            format!("{}{}", quote_prefix, inline_md)
+        };
+
+        Ok((block_line, is_list_item))
+    }
+
+    /// Render inline elements into markdown text with formatting.
+    fn render_inline_elements(&self, elements: &[InlineElement]) -> Result<String> {
+        let mut inline_md = String::new();
+        for elem in elements {
+            let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
+            let text = match &elem.content {
+                InlineContent::Text(t) => {
+                    if is_code {
+                        t.clone()
+                    } else {
+                        escape_markdown(t)
+                    }
+                }
+                InlineContent::Image { name, .. } => {
+                    format!("![{}]({})", name, name)
+                }
+                InlineContent::Empty => String::new(),
+            };
+
+            if text.is_empty() {
+                continue;
+            }
+
+            let mut formatted = text.clone();
+
+            // Apply formatting (innermost first)
+            if elem.fmt_font_family.as_deref() == Some("monospace") {
+                formatted = format!("`{}`", formatted);
+            }
+            if elem.fmt_font_strikeout == Some(true) {
+                formatted = format!("~~{}~~", formatted);
+            }
+            if elem.fmt_font_bold == Some(true) && elem.fmt_font_italic == Some(true) {
+                formatted = format!("***{}***", formatted);
+            } else if elem.fmt_font_bold == Some(true) {
+                formatted = format!("**{}**", formatted);
+            } else if elem.fmt_font_italic == Some(true) {
+                formatted = format!("*{}*", formatted);
+            }
+            if let Some(ref href) = elem.fmt_anchor_href {
+                formatted = format!("[{}]({})", formatted, href);
+            }
+
+            inline_md.push_str(&formatted);
+        }
+        Ok(inline_md)
     }
 
     fn render_table_markdown(
@@ -327,51 +502,16 @@ impl ExportMarkdownUseCase {
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
         let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
-        let mut inline_md = String::new();
-        for elem in &elements {
-            let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
-            let text = match &elem.content {
-                InlineContent::Text(t) => {
-                    if is_code {
-                        t.clone()
-                    } else {
-                        escape_markdown(t)
-                    }
-                }
-                InlineContent::Image { name, .. } => {
-                    format!("![{}]({})", name, name)
-                }
-                InlineContent::Empty => String::new(),
-            };
-
-            if text.is_empty() {
-                continue;
-            }
-
-            let mut formatted = text.clone();
-
-            if elem.fmt_font_family.as_deref() == Some("monospace") {
-                formatted = format!("`{}`", formatted);
-            }
-            if elem.fmt_font_strikeout == Some(true) {
-                formatted = format!("~~{}~~", formatted);
-            }
-            if elem.fmt_font_bold == Some(true) && elem.fmt_font_italic == Some(true) {
-                formatted = format!("***{}***", formatted);
-            } else if elem.fmt_font_bold == Some(true) {
-                formatted = format!("**{}**", formatted);
-            } else if elem.fmt_font_italic == Some(true) {
-                formatted = format!("*{}*", formatted);
-            }
-            if let Some(ref href) = elem.fmt_anchor_href {
-                formatted = format!("[{}]({})", formatted, href);
-            }
-
-            inline_md.push_str(&formatted);
-        }
-
-        Ok(inline_md)
+        self.render_inline_elements(&elements)
     }
+}
+
+/// Prefix every line of `text` with `prefix`.
+fn prefix_lines(text: &str, prefix: &str) -> String {
+    text.lines()
+        .map(|line| format!("{}{}", prefix, line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn escape_markdown(s: &str) -> String {
