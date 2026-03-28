@@ -5,71 +5,73 @@ pub mod write {
     use crate::{
         database::transactions::Transaction,
         direct_access::{
-            block::{block_repository::BlockRepository, block_table::BlockRedbTable},
-            document::{
-                document_repository::DocumentRepository, document_table::DocumentRedbTable,
-            },
-            frame::{frame_repository::FrameRepository, frame_table::FrameRedbTable},
-            inline_element::{
-                inline_element_repository::InlineElementRepository,
-                inline_element_table::InlineElementRedbTable,
-            },
-            list::{list_repository::ListRepository, list_table::ListRedbTable},
-            resource::{
-                resource_repository::ResourceRepository, resource_table::ResourceRedbTable,
-            },
-            root::{root_repository::RootRepository, root_table::RootRedbTable},
-            table::{table_repository::TableRepository, table_table::TableRedbTable},
-            table_cell::{
-                table_cell_repository::TableCellRepository, table_cell_table::TableCellRedbTable,
-            },
+            block::block_repository::BlockRepository,
+            document::document_repository::DocumentRepository,
+            frame::frame_repository::FrameRepository,
+            inline_element::inline_element_repository::InlineElementRepository,
+            list::list_repository::ListRepository,
+            resource::resource_repository::ResourceRepository,
+            root::root_repository::RootRepository,
+            table::table_repository::TableRepository,
+            table_cell::table_cell_repository::TableCellRepository,
+        },
+        direct_access::{
+            block::block_table::BlockHashMapTable,
+            document::document_table::DocumentHashMapTable,
+            frame::frame_table::FrameHashMapTable,
+            inline_element::inline_element_table::InlineElementHashMapTable,
+            list::list_table::ListHashMapTable,
+            resource::resource_table::ResourceHashMapTable,
+            root::root_table::RootHashMapTable,
+            table::table_table::TableHashMapTable,
+            table_cell::table_cell_table::TableCellHashMapTable,
         },
     };
 
     pub fn create_root_repository(transaction: &'_ Transaction) -> RootRepository<'_> {
-        let root_table = RootRedbTable::new(transaction.get_write_transaction());
+        let root_table = RootHashMapTable::new(transaction.get_store());
         RootRepository::new(Box::new(root_table), transaction)
     }
 
     pub fn create_document_repository(transaction: &'_ Transaction) -> DocumentRepository<'_> {
-        let document_table = DocumentRedbTable::new(transaction.get_write_transaction());
+        let document_table = DocumentHashMapTable::new(transaction.get_store());
         DocumentRepository::new(Box::new(document_table), transaction)
     }
 
     pub fn create_frame_repository(transaction: &'_ Transaction) -> FrameRepository<'_> {
-        let frame_table = FrameRedbTable::new(transaction.get_write_transaction());
+        let frame_table = FrameHashMapTable::new(transaction.get_store());
         FrameRepository::new(Box::new(frame_table), transaction)
     }
 
     pub fn create_block_repository(transaction: &'_ Transaction) -> BlockRepository<'_> {
-        let block_table = BlockRedbTable::new(transaction.get_write_transaction());
+        let block_table = BlockHashMapTable::new(transaction.get_store());
         BlockRepository::new(Box::new(block_table), transaction)
     }
 
     pub fn create_inline_element_repository(
         transaction: &'_ Transaction,
     ) -> InlineElementRepository<'_> {
-        let inline_element_table = InlineElementRedbTable::new(transaction.get_write_transaction());
+        let inline_element_table = InlineElementHashMapTable::new(transaction.get_store());
         InlineElementRepository::new(Box::new(inline_element_table), transaction)
     }
 
     pub fn create_list_repository(transaction: &'_ Transaction) -> ListRepository<'_> {
-        let list_table = ListRedbTable::new(transaction.get_write_transaction());
+        let list_table = ListHashMapTable::new(transaction.get_store());
         ListRepository::new(Box::new(list_table), transaction)
     }
 
     pub fn create_resource_repository(transaction: &'_ Transaction) -> ResourceRepository<'_> {
-        let resource_table = ResourceRedbTable::new(transaction.get_write_transaction());
+        let resource_table = ResourceHashMapTable::new(transaction.get_store());
         ResourceRepository::new(Box::new(resource_table), transaction)
     }
 
     pub fn create_table_repository(transaction: &'_ Transaction) -> TableRepository<'_> {
-        let table_table = TableRedbTable::new(transaction.get_write_transaction());
+        let table_table = TableHashMapTable::new(transaction.get_store());
         TableRepository::new(Box::new(table_table), transaction)
     }
 
     pub fn create_table_cell_repository(transaction: &'_ Transaction) -> TableCellRepository<'_> {
-        let table_cell_table = TableCellRedbTable::new(transaction.get_write_transaction());
+        let table_cell_table = TableCellHashMapTable::new(transaction.get_store());
         TableCellRepository::new(Box::new(table_cell_table), transaction)
     }
 }
@@ -78,73 +80,75 @@ pub mod read {
     use crate::{
         database::transactions::Transaction,
         direct_access::{
-            block::{block_repository::BlockRepositoryRO, block_table::BlockRedbTableRO},
-            document::{
-                document_repository::DocumentRepositoryRO, document_table::DocumentRedbTableRO,
-            },
-            frame::{frame_repository::FrameRepositoryRO, frame_table::FrameRedbTableRO},
-            inline_element::{
-                inline_element_repository::InlineElementRepositoryRO,
-                inline_element_table::InlineElementRedbTableRO,
-            },
-            list::{list_repository::ListRepositoryRO, list_table::ListRedbTableRO},
-            resource::{
-                resource_repository::ResourceRepositoryRO, resource_table::ResourceRedbTableRO,
-            },
-            root::{root_repository::RootRepositoryRO, root_table::RootRedbTableRO},
-            table::{table_repository::TableRepositoryRO, table_table::TableRedbTableRO},
-            table_cell::{
-                table_cell_repository::TableCellRepositoryRO,
-                table_cell_table::TableCellRedbTableRO,
-            },
+            block::block_repository::BlockRepositoryRO,
+            document::document_repository::DocumentRepositoryRO,
+            frame::frame_repository::FrameRepositoryRO,
+            inline_element::inline_element_repository::InlineElementRepositoryRO,
+            list::list_repository::ListRepositoryRO,
+            resource::resource_repository::ResourceRepositoryRO,
+            root::root_repository::RootRepositoryRO,
+            table::table_repository::TableRepositoryRO,
+            table_cell::table_cell_repository::TableCellRepositoryRO,
+        },
+        direct_access::{
+            block::block_table::BlockHashMapTableRO,
+            document::document_table::DocumentHashMapTableRO,
+            frame::frame_table::FrameHashMapTableRO,
+            inline_element::inline_element_table::InlineElementHashMapTableRO,
+            list::list_table::ListHashMapTableRO,
+            resource::resource_table::ResourceHashMapTableRO,
+            root::root_table::RootHashMapTableRO,
+            table::table_table::TableHashMapTableRO,
+            table_cell::table_cell_table::TableCellHashMapTableRO,
         },
     };
 
     pub fn create_root_repository(transaction: &'_ Transaction) -> RootRepositoryRO<'_> {
-        let root_table = RootRedbTableRO::new(transaction.get_read_transaction());
+        let root_table = RootHashMapTableRO::new(transaction.get_store());
         RootRepositoryRO::new(Box::new(root_table))
     }
 
     pub fn create_document_repository(transaction: &'_ Transaction) -> DocumentRepositoryRO<'_> {
-        let document_table = DocumentRedbTableRO::new(transaction.get_read_transaction());
+        let document_table = DocumentHashMapTableRO::new(transaction.get_store());
         DocumentRepositoryRO::new(Box::new(document_table))
     }
 
     pub fn create_frame_repository(transaction: &'_ Transaction) -> FrameRepositoryRO<'_> {
-        let frame_table = FrameRedbTableRO::new(transaction.get_read_transaction());
+        let frame_table = FrameHashMapTableRO::new(transaction.get_store());
         FrameRepositoryRO::new(Box::new(frame_table))
     }
 
     pub fn create_block_repository(transaction: &'_ Transaction) -> BlockRepositoryRO<'_> {
-        let block_table = BlockRedbTableRO::new(transaction.get_read_transaction());
+        let block_table = BlockHashMapTableRO::new(transaction.get_store());
         BlockRepositoryRO::new(Box::new(block_table))
     }
 
     pub fn create_inline_element_repository(
         transaction: &'_ Transaction,
     ) -> InlineElementRepositoryRO<'_> {
-        let inline_element_table =
-            InlineElementRedbTableRO::new(transaction.get_read_transaction());
+        let inline_element_table = InlineElementHashMapTableRO::new(transaction.get_store());
         InlineElementRepositoryRO::new(Box::new(inline_element_table))
     }
 
     pub fn create_list_repository(transaction: &'_ Transaction) -> ListRepositoryRO<'_> {
-        let list_table = ListRedbTableRO::new(transaction.get_read_transaction());
+        let list_table = ListHashMapTableRO::new(transaction.get_store());
         ListRepositoryRO::new(Box::new(list_table))
     }
 
     pub fn create_resource_repository(transaction: &'_ Transaction) -> ResourceRepositoryRO<'_> {
-        let resource_table = ResourceRedbTableRO::new(transaction.get_read_transaction());
+        let resource_table = ResourceHashMapTableRO::new(transaction.get_store());
         ResourceRepositoryRO::new(Box::new(resource_table))
     }
 
     pub fn create_table_repository(transaction: &'_ Transaction) -> TableRepositoryRO<'_> {
-        let table_table = TableRedbTableRO::new(transaction.get_read_transaction());
+        let table_table = TableHashMapTableRO::new(transaction.get_store());
         TableRepositoryRO::new(Box::new(table_table))
     }
 
-    pub fn create_table_cell_repository(transaction: &'_ Transaction) -> TableCellRepositoryRO<'_> {
-        let table_cell_table = TableCellRedbTableRO::new(transaction.get_read_transaction());
+    pub fn create_table_cell_repository(
+        transaction: &'_ Transaction,
+    ) -> TableCellRepositoryRO<'_> {
+        let table_cell_table = TableCellHashMapTableRO::new(transaction.get_store());
         TableCellRepositoryRO::new(Box::new(table_cell_table))
     }
 }

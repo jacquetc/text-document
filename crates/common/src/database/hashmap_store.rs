@@ -1,0 +1,632 @@
+//! HashMap-based storage backend — drop-in replacement for the redb `*Table` layer.
+//!
+//! # Architecture
+//!
+//! ```text
+//! Repository (unchanged)
+//!   └─ Box<dyn BlockTable>
+//!        ├─ BlockRedbTable     — old (serialize → B-tree → deserialize)
+//!        └─ BlockHashMapTable  — new (HashMap::get → clone)
+//! ```
+//!
+//! The store uses `RwLock` for interior mutability and thread safety,
+//! allowing `&HashMapStore` to be shared across threads via `Arc`.
+
+use crate::entities::*;
+use crate::snapshot::JunctionSnapshot;
+use crate::types::EntityId;
+use std::sync::RwLock;
+use std::collections::HashMap;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The Store
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// All document data, held in plain `HashMap`s behind `RefCell` for interior
+/// mutability.  One instance per `DbContext`, shared by all tables within a
+/// transaction scope via `&HashMapStore`.
+#[derive(Debug, Default)]
+pub struct HashMapStore {
+    // ── Entity tables ──────────────────────────────────────────────────
+    pub roots: RwLock<HashMap<EntityId, Root>>,
+    pub documents: RwLock<HashMap<EntityId, Document>>,
+    pub frames: RwLock<HashMap<EntityId, Frame>>,
+    pub blocks: RwLock<HashMap<EntityId, Block>>,
+    pub inline_elements: RwLock<HashMap<EntityId, InlineElement>>,
+    pub lists: RwLock<HashMap<EntityId, List>>,
+    pub resources: RwLock<HashMap<EntityId, Resource>>,
+    pub tables: RwLock<HashMap<EntityId, Table>>,
+    pub table_cells: RwLock<HashMap<EntityId, TableCell>>,
+
+    // ── Forward junction tables (owner_id → Vec<child_id>) ─────────
+    pub jn_document_from_root_document: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_frame_from_document_frames: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_list_from_document_lists: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_resource_from_document_resources: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_table_from_document_tables: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_block_from_frame_blocks: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_frame_from_frame_parent_frame: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_table_from_frame_table: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_inline_element_from_block_elements: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_list_from_block_list: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_table_cell_from_table_cells: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_frame_from_table_cell_cell_frame: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+
+    // ── Backward junction tables (child_id → Vec<owner_id>) ────────
+    pub jn_back_root_document: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_back_document_frames: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_back_frame_blocks: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    pub jn_back_frame_parent_frame: RwLock<HashMap<EntityId, Vec<EntityId>>>,
+
+    // ── ID counters (one per entity type) ──────────────────────────
+    pub counters: RwLock<HashMap<String, EntityId>>,
+
+    // ── Savepoints ──────────────────────────────────────────────────
+    savepoints: RwLock<HashMap<u64, HashMapStoreSnapshot>>,
+    next_savepoint_id: RwLock<u64>,
+}
+
+impl HashMapStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Deep-clone the entire store for savepoint support.
+    pub fn snapshot(&self) -> HashMapStoreSnapshot {
+        HashMapStoreSnapshot {
+            roots: self.roots.read().unwrap().clone(),
+            documents: self.documents.read().unwrap().clone(),
+            frames: self.frames.read().unwrap().clone(),
+            blocks: self.blocks.read().unwrap().clone(),
+            inline_elements: self.inline_elements.read().unwrap().clone(),
+            lists: self.lists.read().unwrap().clone(),
+            resources: self.resources.read().unwrap().clone(),
+            tables: self.tables.read().unwrap().clone(),
+            table_cells: self.table_cells.read().unwrap().clone(),
+            jn_document_from_root_document: self.jn_document_from_root_document.read().unwrap().clone(),
+            jn_frame_from_document_frames: self.jn_frame_from_document_frames.read().unwrap().clone(),
+            jn_list_from_document_lists: self.jn_list_from_document_lists.read().unwrap().clone(),
+            jn_resource_from_document_resources: self
+                .jn_resource_from_document_resources
+                .read().unwrap()
+                .clone(),
+            jn_table_from_document_tables: self.jn_table_from_document_tables.read().unwrap().clone(),
+            jn_block_from_frame_blocks: self.jn_block_from_frame_blocks.read().unwrap().clone(),
+            jn_frame_from_frame_parent_frame: self
+                .jn_frame_from_frame_parent_frame
+                .read().unwrap()
+                .clone(),
+            jn_table_from_frame_table: self.jn_table_from_frame_table.read().unwrap().clone(),
+            jn_inline_element_from_block_elements: self
+                .jn_inline_element_from_block_elements
+                .read().unwrap()
+                .clone(),
+            jn_list_from_block_list: self.jn_list_from_block_list.read().unwrap().clone(),
+            jn_table_cell_from_table_cells: self.jn_table_cell_from_table_cells.read().unwrap().clone(),
+            jn_frame_from_table_cell_cell_frame: self
+                .jn_frame_from_table_cell_cell_frame
+                .read().unwrap()
+                .clone(),
+            jn_back_root_document: self.jn_back_root_document.read().unwrap().clone(),
+            jn_back_document_frames: self.jn_back_document_frames.read().unwrap().clone(),
+            jn_back_frame_blocks: self.jn_back_frame_blocks.read().unwrap().clone(),
+            jn_back_frame_parent_frame: self.jn_back_frame_parent_frame.read().unwrap().clone(),
+            counters: self.counters.read().unwrap().clone(),
+        }
+    }
+
+    /// Restore from a savepoint snapshot.
+    pub fn restore(&self, snap: &HashMapStoreSnapshot) {
+        *self.roots.write().unwrap() = snap.roots.clone();
+        *self.documents.write().unwrap() = snap.documents.clone();
+        *self.frames.write().unwrap() = snap.frames.clone();
+        *self.blocks.write().unwrap() = snap.blocks.clone();
+        *self.inline_elements.write().unwrap() = snap.inline_elements.clone();
+        *self.lists.write().unwrap() = snap.lists.clone();
+        *self.resources.write().unwrap() = snap.resources.clone();
+        *self.tables.write().unwrap() = snap.tables.clone();
+        *self.table_cells.write().unwrap() = snap.table_cells.clone();
+        *self.jn_document_from_root_document.write().unwrap() =
+            snap.jn_document_from_root_document.clone();
+        *self.jn_frame_from_document_frames.write().unwrap() =
+            snap.jn_frame_from_document_frames.clone();
+        *self.jn_list_from_document_lists.write().unwrap() = snap.jn_list_from_document_lists.clone();
+        *self.jn_resource_from_document_resources.write().unwrap() =
+            snap.jn_resource_from_document_resources.clone();
+        *self.jn_table_from_document_tables.write().unwrap() =
+            snap.jn_table_from_document_tables.clone();
+        *self.jn_block_from_frame_blocks.write().unwrap() = snap.jn_block_from_frame_blocks.clone();
+        *self.jn_frame_from_frame_parent_frame.write().unwrap() =
+            snap.jn_frame_from_frame_parent_frame.clone();
+        *self.jn_table_from_frame_table.write().unwrap() = snap.jn_table_from_frame_table.clone();
+        *self.jn_inline_element_from_block_elements.write().unwrap() =
+            snap.jn_inline_element_from_block_elements.clone();
+        *self.jn_list_from_block_list.write().unwrap() = snap.jn_list_from_block_list.clone();
+        *self.jn_table_cell_from_table_cells.write().unwrap() =
+            snap.jn_table_cell_from_table_cells.clone();
+        *self.jn_frame_from_table_cell_cell_frame.write().unwrap() =
+            snap.jn_frame_from_table_cell_cell_frame.clone();
+        *self.jn_back_root_document.write().unwrap() = snap.jn_back_root_document.clone();
+        *self.jn_back_document_frames.write().unwrap() = snap.jn_back_document_frames.clone();
+        *self.jn_back_frame_blocks.write().unwrap() = snap.jn_back_frame_blocks.clone();
+        *self.jn_back_frame_parent_frame.write().unwrap() = snap.jn_back_frame_parent_frame.clone();
+        *self.counters.write().unwrap() = snap.counters.clone();
+    }
+
+    /// Create a savepoint by snapshotting the entire store. Returns a savepoint id.
+    pub fn create_savepoint(&self) -> u64 {
+        let snap = self.snapshot();
+        let mut id_counter = self.next_savepoint_id.write().unwrap();
+        let id = *id_counter;
+        *id_counter += 1;
+        self.savepoints.write().unwrap().insert(id, snap);
+        id
+    }
+
+    /// Restore the store to a previously created savepoint.
+    pub fn restore_savepoint(&self, savepoint_id: u64) {
+        let snap = self
+            .savepoints
+            .read().unwrap()
+            .get(&savepoint_id)
+            .expect("savepoint not found")
+            .clone();
+        self.restore(&snap);
+    }
+
+    /// Get-and-increment counter for an entity type.
+    pub(crate) fn next_id(&self, entity_name: &str) -> EntityId {
+        let mut counters = self.counters.write().unwrap();
+        let counter = counters.entry(entity_name.to_string()).or_insert(1);
+        let id = *counter;
+        *counter += 1;
+        id
+    }
+}
+
+/// Owned deep copy of the entire store, used for savepoints.
+#[derive(Debug, Clone)]
+pub struct HashMapStoreSnapshot {
+    roots: HashMap<EntityId, Root>,
+    documents: HashMap<EntityId, Document>,
+    frames: HashMap<EntityId, Frame>,
+    blocks: HashMap<EntityId, Block>,
+    inline_elements: HashMap<EntityId, InlineElement>,
+    lists: HashMap<EntityId, List>,
+    resources: HashMap<EntityId, Resource>,
+    tables: HashMap<EntityId, Table>,
+    table_cells: HashMap<EntityId, TableCell>,
+    jn_document_from_root_document: HashMap<EntityId, Vec<EntityId>>,
+    jn_frame_from_document_frames: HashMap<EntityId, Vec<EntityId>>,
+    jn_list_from_document_lists: HashMap<EntityId, Vec<EntityId>>,
+    jn_resource_from_document_resources: HashMap<EntityId, Vec<EntityId>>,
+    jn_table_from_document_tables: HashMap<EntityId, Vec<EntityId>>,
+    jn_block_from_frame_blocks: HashMap<EntityId, Vec<EntityId>>,
+    jn_frame_from_frame_parent_frame: HashMap<EntityId, Vec<EntityId>>,
+    jn_table_from_frame_table: HashMap<EntityId, Vec<EntityId>>,
+    jn_inline_element_from_block_elements: HashMap<EntityId, Vec<EntityId>>,
+    jn_list_from_block_list: HashMap<EntityId, Vec<EntityId>>,
+    jn_table_cell_from_table_cells: HashMap<EntityId, Vec<EntityId>>,
+    jn_frame_from_table_cell_cell_frame: HashMap<EntityId, Vec<EntityId>>,
+    jn_back_root_document: HashMap<EntityId, Vec<EntityId>>,
+    jn_back_document_frames: HashMap<EntityId, Vec<EntityId>>,
+    jn_back_frame_blocks: HashMap<EntityId, Vec<EntityId>>,
+    jn_back_frame_parent_frame: HashMap<EntityId, Vec<EntityId>>,
+    counters: HashMap<String, EntityId>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn delete_from_backward_junction(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    id: &EntityId,
+) {
+    let mut jn = junction.write().unwrap();
+    for right_ids in jn.values_mut() {
+        right_ids.retain(|eid| eid != id);
+    }
+}
+
+pub(crate) fn junction_get(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    id: &EntityId,
+) -> Vec<EntityId> {
+    junction.read().unwrap().get(id).cloned().unwrap_or_default()
+}
+
+pub(crate) fn junction_set(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    id: EntityId,
+    ids: Vec<EntityId>,
+) {
+    junction.write().unwrap().insert(id, ids);
+}
+
+pub(crate) fn junction_remove(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    id: &EntityId,
+) {
+    junction.write().unwrap().remove(id);
+}
+
+pub(crate) fn junction_snapshot(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    ids: &[EntityId],
+    table_name: &str,
+) -> JunctionSnapshot {
+    let jn = junction.read().unwrap();
+    let entries: Vec<(EntityId, Vec<EntityId>)> = ids
+        .iter()
+        .filter_map(|id| jn.get(id).map(|v| (*id, v.clone())))
+        .collect();
+    JunctionSnapshot {
+        table_name: table_name.to_string(),
+        entries,
+    }
+}
+
+pub(crate) fn junction_restore(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    snap: &JunctionSnapshot,
+) {
+    let mut jn = junction.write().unwrap();
+    for (left_id, right_ids) in &snap.entries {
+        jn.insert(*left_id, right_ids.clone());
+    }
+}
+
+pub(crate) fn junction_snapshot_backward(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    ids: &[EntityId],
+    table_name: &str,
+) -> Option<JunctionSnapshot> {
+    let jn = junction.read().unwrap();
+    let entries: Vec<(EntityId, Vec<EntityId>)> = jn
+        .iter()
+        .filter(|(_, right_ids)| ids.iter().any(|id| right_ids.contains(id)))
+        .map(|(left_id, right_ids)| (*left_id, right_ids.clone()))
+        .collect();
+    if entries.is_empty() {
+        None
+    } else {
+        Some(JunctionSnapshot {
+            table_name: table_name.to_string(),
+            entries,
+        })
+    }
+}
+
+pub(crate) fn junction_get_relationships_from_right_ids(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    right_ids: &[EntityId],
+) -> Vec<(EntityId, Vec<EntityId>)> {
+    let jn = junction.read().unwrap();
+    jn.iter()
+        .filter(|(_, rids)| right_ids.iter().any(|eid| rids.contains(eid)))
+        .map(|(left_id, rids)| (*left_id, rids.clone()))
+        .collect()
+}
+
+pub(crate) fn junction_move_ids(
+    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
+    id: &EntityId,
+    ids_to_move: &[EntityId],
+    new_index: i32,
+) -> Vec<EntityId> {
+    let current = junction_get(junction, id);
+    if ids_to_move.is_empty() {
+        return current;
+    }
+    let move_set: std::collections::HashSet<EntityId> = ids_to_move.iter().copied().collect();
+    let mut remaining: Vec<EntityId> = current
+        .into_iter()
+        .filter(|eid| !move_set.contains(eid))
+        .collect();
+    let insert_pos = if new_index < 0 || (new_index as usize) > remaining.len() {
+        remaining.len()
+    } else {
+        new_index as usize
+    };
+    for (i, &eid) in ids_to_move.iter().enumerate() {
+        remaining.insert(insert_pos + i, eid);
+    }
+    junction_set(junction, *id, remaining.clone());
+    remaining
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Macros for entities WITH relationships (reduces boilerplate)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Generate standard relationship methods for a HashMap table implementation.
+/// This avoids repeating the same 7+6 methods for every entity.
+#[macro_export]
+macro_rules! impl_relationship_methods {
+    ($table_type:ty, $field_enum:ty) => {
+        fn get_relationship(
+            &self,
+            id: &$crate::types::EntityId,
+            field: &$field_enum,
+        ) -> Result<Vec<$crate::types::EntityId>, $crate::error::RepositoryError> {
+            Ok($crate::database::hashmap_store::junction_get(self.resolve_junction(field), id))
+        }
+
+        fn get_relationship_many(
+            &self,
+            ids: &[$crate::types::EntityId],
+            field: &$field_enum,
+        ) -> Result<std::collections::HashMap<$crate::types::EntityId, Vec<$crate::types::EntityId>>, $crate::error::RepositoryError> {
+            let jn = self.resolve_junction(field);
+            let mut map = std::collections::HashMap::new();
+            for id in ids {
+                map.insert(*id, $crate::database::hashmap_store::junction_get(jn, id));
+            }
+            Ok(map)
+        }
+
+        fn get_relationship_count(
+            &self,
+            id: &$crate::types::EntityId,
+            field: &$field_enum,
+        ) -> Result<usize, $crate::error::RepositoryError> {
+            Ok($crate::database::hashmap_store::junction_get(self.resolve_junction(field), id).len())
+        }
+
+        fn get_relationship_in_range(
+            &self,
+            id: &$crate::types::EntityId,
+            field: &$field_enum,
+            offset: usize,
+            limit: usize,
+        ) -> Result<Vec<$crate::types::EntityId>, $crate::error::RepositoryError> {
+            let all = $crate::database::hashmap_store::junction_get(self.resolve_junction(field), id);
+            Ok(all.into_iter().skip(offset).take(limit).collect())
+        }
+
+        fn get_relationships_from_right_ids(
+            &self,
+            field: &$field_enum,
+            right_ids: &[$crate::types::EntityId],
+        ) -> Result<Vec<($crate::types::EntityId, Vec<$crate::types::EntityId>)>, $crate::error::RepositoryError> {
+            Ok($crate::database::hashmap_store::junction_get_relationships_from_right_ids(
+                self.resolve_junction(field),
+                right_ids,
+            ))
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_write_relationship_methods {
+    ($table_type:ty, $field_enum:ty) => {
+        $crate::impl_relationship_methods!($table_type, $field_enum);
+
+        fn set_relationship_multi(
+            &mut self,
+            field: &$field_enum,
+            relationships: Vec<($crate::types::EntityId, Vec<$crate::types::EntityId>)>,
+        ) -> Result<(), $crate::error::RepositoryError> {
+            let jn = self.resolve_junction(field);
+            for (left_id, entities) in relationships {
+                $crate::database::hashmap_store::junction_set(jn, left_id, entities);
+            }
+            Ok(())
+        }
+
+        fn set_relationship(
+            &mut self,
+            id: &$crate::types::EntityId,
+            field: &$field_enum,
+            right_ids: &[$crate::types::EntityId],
+        ) -> Result<(), $crate::error::RepositoryError> {
+            $crate::database::hashmap_store::junction_set(self.resolve_junction(field), *id, right_ids.to_vec());
+            Ok(())
+        }
+
+        fn move_relationship_ids(
+            &mut self,
+            id: &$crate::types::EntityId,
+            field: &$field_enum,
+            ids_to_move: &[$crate::types::EntityId],
+            new_index: i32,
+        ) -> Result<Vec<$crate::types::EntityId>, $crate::error::RepositoryError> {
+            Ok($crate::database::hashmap_store::junction_move_ids(
+                self.resolve_junction(field),
+                id,
+                ids_to_move,
+                new_index,
+            ))
+        }
+    };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Leaf entity macro (InlineElement, List, Resource — no forward relationships)
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[macro_export]
+macro_rules! impl_leaf_entity_table {
+    (
+        entity: $Entity:ident,
+        entity_name: $entity_name:expr,
+        store_field: $store_field:ident,
+        table_trait: $TableTrait:ident,
+        table_ro_trait: $TableROTrait:ident,
+        table_struct: $TableStruct:ident,
+        table_ro_struct: $TableROStruct:ident,
+        backward_junctions: [ $( ($bj_field:ident, $bj_name:expr) ),* ],
+    ) => {
+        pub struct $TableStruct<'a> {
+            store: &'a $crate::database::hashmap_store::HashMapStore,
+        }
+
+        impl<'a> $TableStruct<'a> {
+            pub fn new(store: &'a $crate::database::hashmap_store::HashMapStore) -> Self {
+                Self { store }
+            }
+        }
+
+        impl<'a> $TableTrait for $TableStruct<'a> {
+            fn create(&mut self, entity: &$Entity) -> Result<$Entity, $crate::error::RepositoryError> {
+                self.create_multi(std::slice::from_ref(entity))
+                    .map(|v| v.into_iter().next().unwrap())
+            }
+
+            fn create_multi(&mut self, entities: &[$Entity]) -> Result<Vec<$Entity>, $crate::error::RepositoryError> {
+                let mut created = Vec::with_capacity(entities.len());
+                let mut map = self.store.$store_field.write().unwrap();
+
+                for entity in entities {
+                    let new_entity = if entity.id == $crate::types::EntityId::default() {
+                        let id = self.store.next_id($entity_name);
+                        $Entity {
+                            id,
+                            ..entity.clone()
+                        }
+                    } else {
+                        if map.contains_key(&entity.id) {
+                            return Err($crate::error::RepositoryError::DuplicateId {
+                                entity: stringify!($Entity),
+                                id: entity.id,
+                            });
+                        }
+                        entity.clone()
+                    };
+
+                    map.insert(new_entity.id, new_entity.clone());
+                    created.push(new_entity);
+                }
+                Ok(created)
+            }
+
+            fn get(&self, id: &$crate::types::EntityId) -> Result<Option<$Entity>, $crate::error::RepositoryError> {
+                Ok(self.store.$store_field.read().unwrap().get(id).cloned())
+            }
+
+            fn get_multi(&self, ids: &[$crate::types::EntityId]) -> Result<Vec<Option<$Entity>>, $crate::error::RepositoryError> {
+                let map = self.store.$store_field.read().unwrap();
+                Ok(ids.iter().map(|id| map.get(id).cloned()).collect())
+            }
+
+            fn get_all(&self) -> Result<Vec<$Entity>, $crate::error::RepositoryError> {
+                Ok(self.store.$store_field.read().unwrap().values().cloned().collect())
+            }
+
+            fn update(&mut self, entity: &$Entity) -> Result<$Entity, $crate::error::RepositoryError> {
+                self.update_multi(std::slice::from_ref(entity))
+                    .map(|v| v.into_iter().next().unwrap())
+            }
+
+            fn update_multi(&mut self, entities: &[$Entity]) -> Result<Vec<$Entity>, $crate::error::RepositoryError> {
+                let mut map = self.store.$store_field.write().unwrap();
+                let mut result = Vec::with_capacity(entities.len());
+                for entity in entities {
+                    map.insert(entity.id, entity.clone());
+                    result.push(entity.clone());
+                }
+                Ok(result)
+            }
+
+            fn update_with_relationships(&mut self, entity: &$Entity) -> Result<$Entity, $crate::error::RepositoryError> {
+                self.update(entity)
+            }
+
+            fn update_with_relationships_multi(&mut self, entities: &[$Entity]) -> Result<Vec<$Entity>, $crate::error::RepositoryError> {
+                self.update_multi(entities)
+            }
+
+            fn remove(&mut self, id: &$crate::types::EntityId) -> Result<(), $crate::error::RepositoryError> {
+                self.remove_multi(std::slice::from_ref(id))
+            }
+
+            fn remove_multi(&mut self, ids: &[$crate::types::EntityId]) -> Result<(), $crate::error::RepositoryError> {
+                let mut map = self.store.$store_field.write().unwrap();
+                for id in ids {
+                    map.remove(id);
+                    $(
+                        $crate::database::hashmap_store::delete_from_backward_junction(&self.store.$bj_field, id);
+                    )*
+                }
+                Ok(())
+            }
+
+            fn snapshot_rows(&self, ids: &[$crate::types::EntityId]) -> Result<$crate::snapshot::TableLevelSnapshot, $crate::error::RepositoryError> {
+                let map = self.store.$store_field.read().unwrap();
+                let mut rows = Vec::new();
+                for id in ids {
+                    if let Some(entity) = map.get(id) {
+                        let bytes = postcard::to_allocvec(entity)
+                            .map_err(|e| $crate::error::RepositoryError::Serialization(e.to_string()))?;
+                        rows.push((*id, bytes));
+                    }
+                }
+
+                let forward_junctions = Vec::new();
+                let mut backward_junctions = Vec::new();
+                $(
+                    if let Some(snap) = $crate::database::hashmap_store::junction_snapshot_backward(
+                        &self.store.$bj_field,
+                        ids,
+                        $bj_name,
+                    ) {
+                        backward_junctions.push(snap);
+                    }
+                )*
+
+                Ok($crate::snapshot::TableLevelSnapshot {
+                    entity_rows: $crate::snapshot::TableSnapshot {
+                        table_name: $entity_name.to_string(),
+                        rows,
+                    },
+                    forward_junctions,
+                    backward_junctions,
+                })
+            }
+
+            fn restore_rows(&mut self, snap: &$crate::snapshot::TableLevelSnapshot) -> Result<(), $crate::error::RepositoryError> {
+                let mut map = self.store.$store_field.write().unwrap();
+                for (id, bytes) in &snap.entity_rows.rows {
+                    let entity: $Entity = postcard::from_bytes(bytes)
+                        .map_err(|e| $crate::error::RepositoryError::Serialization(e.to_string()))?;
+                    map.insert(*id, entity);
+                }
+                drop(map);
+                $(
+                    for js in &snap.backward_junctions {
+                        if js.table_name == $bj_name {
+                            $crate::database::hashmap_store::junction_restore(&self.store.$bj_field, js);
+                        }
+                    }
+                )*
+                Ok(())
+            }
+        }
+
+        pub struct $TableROStruct<'a> {
+            store: &'a $crate::database::hashmap_store::HashMapStore,
+        }
+
+        impl<'a> $TableROStruct<'a> {
+            pub fn new(store: &'a $crate::database::hashmap_store::HashMapStore) -> Self {
+                Self { store }
+            }
+        }
+
+        impl<'a> $TableROTrait for $TableROStruct<'a> {
+            fn get(&self, id: &$crate::types::EntityId) -> Result<Option<$Entity>, $crate::error::RepositoryError> {
+                Ok(self.store.$store_field.read().unwrap().get(id).cloned())
+            }
+
+            fn get_multi(&self, ids: &[$crate::types::EntityId]) -> Result<Vec<Option<$Entity>>, $crate::error::RepositoryError> {
+                let map = self.store.$store_field.read().unwrap();
+                Ok(ids.iter().map(|id| map.get(id).cloned()).collect())
+            }
+
+            fn get_all(&self) -> Result<Vec<$Entity>, $crate::error::RepositoryError> {
+                Ok(self.store.$store_field.read().unwrap().values().cloned().collect())
+            }
+        }
+    };
+}
