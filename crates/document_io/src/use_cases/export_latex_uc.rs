@@ -467,19 +467,34 @@ impl ExportLatexUseCase {
                         String::new()
                     };
 
-                    if cell.column_span > 1 {
-                        // Use \multicolumn for column spans
-                        let span = cell.column_span as usize;
-                        row_parts.push(format!("\\multicolumn{{{}}}{{|l|}}{{{}}}", span, content));
-                        // Mark spanned columns as covered
-                        for sc in 1..span {
+                    // Wrap content with \multirow and/or \multicolumn as needed
+                    let wrapped = if cell.row_span > 1 && cell.column_span > 1 {
+                        let cs = cell.column_span as usize;
+                        let rs = cell.row_span as usize;
+                        for sc in 1..cs {
                             if c + sc < cols {
                                 covered[r][c + sc] = true;
                             }
                         }
+                        format!(
+                            "\\multicolumn{{{}}}{{|l|}}{{\\multirow{{{}}}{{*}}{{{}}}}}",
+                            cs, rs, content
+                        )
+                    } else if cell.column_span > 1 {
+                        let cs = cell.column_span as usize;
+                        for sc in 1..cs {
+                            if c + sc < cols {
+                                covered[r][c + sc] = true;
+                            }
+                        }
+                        format!("\\multicolumn{{{}}}{{|l|}}{{{}}}", cs, content)
+                    } else if cell.row_span > 1 {
+                        let rs = cell.row_span as usize;
+                        format!("\\multirow{{{}}}{{*}}{{{}}}", rs, content)
                     } else {
-                        row_parts.push(content);
-                    }
+                        content
+                    };
+                    row_parts.push(wrapped);
 
                     // Mark row-spanned cells as covered
                     for sr in 1..cell.row_span as usize {
