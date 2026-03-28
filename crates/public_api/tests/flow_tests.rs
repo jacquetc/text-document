@@ -474,3 +474,132 @@ fn blocks_in_range_out_of_bounds() {
         "should return empty for out-of-bounds range"
     );
 }
+
+#[test]
+fn snapshot_flow_position_after_table_does_not_overlap() {
+    // Regression: snapshot_from_child_order must advance running_pos past table
+    // content so that the block after the table gets a correct position.
+    let doc = new_doc();
+    doc.set_markdown("Before\n\n| A | B |\n|---|---|\n| c | d |\n\nAfter")
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let snap = doc.snapshot_flow();
+
+    // Find positions of the "Before" block, the table, and the "After" block
+    let mut table_max_pos = 0;
+    let mut after_pos = None;
+
+    for el in &snap.elements {
+        match el {
+            FlowElementSnapshot::Table(ts) => {
+                for cell in &ts.cells {
+                    for block in &cell.blocks {
+                        let end = block.position + block.length + 1;
+                        if end > table_max_pos {
+                            table_max_pos = end;
+                        }
+                    }
+                }
+            }
+            FlowElementSnapshot::Block(bs) if bs.text == "After" => {
+                after_pos = Some(bs.position);
+            }
+            _ => {}
+        }
+    }
+
+    let after_pos = after_pos.expect("should find 'After' block in snapshot");
+
+    assert!(
+        table_max_pos > 0,
+        "table should have cell blocks with positions"
+    );
+    assert!(
+        after_pos >= table_max_pos,
+        "'After' block position ({after_pos}) must not overlap table content (max end {table_max_pos})"
+    );
+}
+
+#[test]
+fn snapshot_table_cell_positions_correct_after_edit() {
+    // Regression: table cell block positions must be computed from running_pos,
+    // not from stale document_position in the DB, so they stay consistent
+    // with insert_text's find_block_at_position_sequential after edits.
+    let doc = new_doc();
+    doc.set_markdown("Before\n\n| A | B |\n|---|---|\n| c | d |\n\nAfter")
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    // Snapshot before edit: collect all cell block positions
+    let snap_before = doc.snapshot_flow();
+    let cell_positions_before: Vec<(usize, usize, usize)> = snap_before
+        .elements
+        .iter()
+        .filter_map(|el| {
+            if let FlowElementSnapshot::Table(ts) = el {
+                Some(ts)
+            } else {
+                None
+            }
+        })
+        .flat_map(|ts| &ts.cells)
+        .flat_map(|cell| {
+            cell.blocks
+                .iter()
+                .map(|b| (b.position, b.length, b.block_id))
+        })
+        .collect();
+    assert!(!cell_positions_before.is_empty());
+
+    // Type into the first cell (cell 0,0)
+    let first_cell_pos = cell_positions_before[0].0;
+    let first_cell_len = cell_positions_before[0].1;
+    let cursor = doc.cursor_at(first_cell_pos + first_cell_len); // end of first cell text
+    cursor.insert_text("X").unwrap();
+
+    // Snapshot after edit
+    let snap_after = doc.snapshot_flow();
+
+    // Collect all block positions (flow blocks + cell blocks) and verify no overlaps
+    let mut all_positions: Vec<(usize, usize, String)> = Vec::new();
+    fn collect_positions(elements: &[FlowElementSnapshot], out: &mut Vec<(usize, usize, String)>) {
+        for el in elements {
+            match el {
+                FlowElementSnapshot::Block(bs) => {
+                    out.push((bs.position, bs.length, bs.text.clone()));
+                }
+                FlowElementSnapshot::Table(ts) => {
+                    for cell in &ts.cells {
+                        for block in &cell.blocks {
+                            out.push((block.position, block.length, block.text.clone()));
+                        }
+                    }
+                }
+                FlowElementSnapshot::Frame(fs) => {
+                    collect_positions(&fs.elements, out);
+                }
+            }
+        }
+    }
+    collect_positions(&snap_after.elements, &mut all_positions);
+    all_positions.sort_by_key(|(pos, _, _)| *pos);
+
+    // Verify no two blocks overlap and positions are monotonically increasing
+    for i in 1..all_positions.len() {
+        let (prev_pos, prev_len, ref prev_text) = all_positions[i - 1];
+        let (cur_pos, _, ref cur_text) = all_positions[i];
+        let prev_end = prev_pos + prev_len + 1; // +1 for block separator
+        assert!(
+            cur_pos >= prev_end,
+            "Block {:?} at pos {} (end {}) overlaps with block {:?} at pos {}",
+            prev_text,
+            prev_pos,
+            prev_end,
+            cur_text,
+            cur_pos
+        );
+    }
+}

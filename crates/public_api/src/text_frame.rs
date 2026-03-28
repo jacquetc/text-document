@@ -270,10 +270,10 @@ fn snapshot_from_child_order(
                 .flatten()
             {
                 if let Some(table_id) = sub_frame.table {
-                    if let Some(snap) = build_table_snapshot(inner, table_id) {
-                        // Table cells have their own position spaces — don't advance running_pos
-                        // for block separators here; the table occupies positions based on its
-                        // content. For now, treat the table as opaque.
+                    if let Some((snap, new_pos)) =
+                        build_table_snapshot_with_positions(inner, table_id, running_pos)
+                    {
+                        running_pos = new_pos;
                         elements.push(FlowElementSnapshot::Table(snap));
                     }
                 } else {
@@ -382,6 +382,71 @@ pub(crate) fn build_table_snapshot(
         format: table_dto_to_format(&table_dto),
         cells,
     })
+}
+
+/// Build a TableSnapshot with computed positions for cell blocks, starting from
+/// `start_pos`. Returns `(snapshot, running_pos_after_last_cell_block)`.
+///
+/// Cells are processed in row-major order, and block positions within each cell
+/// are computed sequentially — matching `find_block_at_position_sequential` in
+/// the editing use cases.
+fn build_table_snapshot_with_positions(
+    inner: &TextDocumentInner,
+    table_id: u64,
+    start_pos: usize,
+) -> Option<(TableSnapshot, usize)> {
+    let table_dto = table_commands::get_table(&inner.ctx, &table_id)
+        .ok()
+        .flatten()?;
+
+    // Collect and sort cell DTOs in row-major order
+    let mut cell_dtos: Vec<_> = table_dto
+        .cells
+        .iter()
+        .filter_map(|&cell_id| {
+            table_cell_commands::get_table_cell(&inner.ctx, &{ cell_id })
+                .ok()
+                .flatten()
+        })
+        .collect();
+    cell_dtos.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+
+    let mut running_pos = start_pos;
+    let mut cells = Vec::with_capacity(cell_dtos.len());
+    for cell_dto in &cell_dtos {
+        let blocks = if let Some(cell_frame_id) = cell_dto.cell_frame {
+            let (snaps, new_pos) =
+                crate::text_block::build_blocks_snapshot_for_frame_with_positions(
+                    inner,
+                    cell_frame_id,
+                    running_pos,
+                );
+            running_pos = new_pos;
+            snaps
+        } else {
+            Vec::new()
+        };
+        cells.push(CellSnapshot {
+            row: to_usize(cell_dto.row),
+            column: to_usize(cell_dto.column),
+            row_span: to_usize(cell_dto.row_span),
+            column_span: to_usize(cell_dto.column_span),
+            format: cell_dto_to_format(cell_dto),
+            blocks,
+        });
+    }
+
+    Some((
+        TableSnapshot {
+            table_id: table_id as usize,
+            rows: to_usize(table_dto.rows),
+            columns: to_usize(table_dto.columns),
+            column_widths: table_dto.column_widths.iter().map(|&v| v as i32).collect(),
+            format: table_dto_to_format(&table_dto),
+            cells,
+        },
+        running_pos,
+    ))
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -11,7 +11,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use crate::{ResourceType, TextDirection, WrapMode};
 use frontend::commands::{
     block_commands, document_commands, document_inspection_commands, document_io_commands,
-    document_search_commands, frame_commands, resource_commands, undo_redo_commands,
+    document_search_commands, frame_commands, resource_commands, table_cell_commands,
+    table_commands, undo_redo_commands,
 };
 
 use crate::convert::{self, to_i64, to_usize};
@@ -1100,8 +1101,39 @@ fn collect_frame_block_ids(
                 block_ids.push(entry as u64);
             } else if entry < 0 {
                 let sub_frame_id = (-entry) as u64;
-                if let Some(sub_ids) = collect_frame_block_ids(inner, sub_frame_id) {
-                    block_ids.extend(sub_ids);
+                let sub_frame = frame_commands::get_frame(&inner.ctx, &sub_frame_id)
+                    .ok()
+                    .flatten();
+                if let Some(ref sf) = sub_frame {
+                    if let Some(table_id) = sf.table {
+                        // Table anchor frame: collect blocks from cell frames
+                        // in row-major order, matching collect_block_ids_recursive.
+                        if let Some(table_dto) = table_commands::get_table(&inner.ctx, &table_id)
+                            .ok()
+                            .flatten()
+                        {
+                            let mut cell_dtos: Vec<_> = table_dto
+                                .cells
+                                .iter()
+                                .filter_map(|&cid| {
+                                    table_cell_commands::get_table_cell(&inner.ctx, &cid)
+                                        .ok()
+                                        .flatten()
+                                })
+                                .collect();
+                            cell_dtos
+                                .sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+                            for cell_dto in &cell_dtos {
+                                if let Some(cf_id) = cell_dto.cell_frame
+                                    && let Some(cf_ids) = collect_frame_block_ids(inner, cf_id)
+                                {
+                                    block_ids.extend(cf_ids);
+                                }
+                            }
+                        }
+                    } else if let Some(sub_ids) = collect_frame_block_ids(inner, sub_frame_id) {
+                        block_ids.extend(sub_ids);
+                    }
                 }
             }
         }

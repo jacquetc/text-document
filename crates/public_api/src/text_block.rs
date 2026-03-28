@@ -636,3 +636,43 @@ pub(crate) fn build_blocks_snapshot_for_frame(
         .filter_map(|b| build_block_snapshot(inner, b.id))
         .collect()
 }
+
+/// Build BlockSnapshots with computed positions starting from `start_pos`.
+///
+/// Returns `(snapshots, running_pos_after_last_block)`.
+/// Positions are computed sequentially from `start_pos` using each block's
+/// `text_length`, matching the logic in `find_block_at_position_sequential`.
+pub(crate) fn build_blocks_snapshot_for_frame_with_positions(
+    inner: &TextDocumentInner,
+    frame_id: u64,
+    start_pos: usize,
+) -> (Vec<BlockSnapshot>, usize) {
+    let frame_dto = match frame_commands::get_frame(&inner.ctx, &(frame_id as EntityId))
+        .ok()
+        .flatten()
+    {
+        Some(f) => f,
+        None => return (Vec::new(), start_pos),
+    };
+
+    let mut block_dtos: Vec<_> = frame_dto
+        .blocks
+        .iter()
+        .filter_map(|&id| {
+            block_commands::get_block(&inner.ctx, &{ id })
+                .ok()
+                .flatten()
+        })
+        .collect();
+    block_dtos.sort_by_key(|b| b.document_position);
+
+    let mut running_pos = start_pos;
+    let mut snapshots = Vec::with_capacity(block_dtos.len());
+    for b in &block_dtos {
+        if let Some(snap) = build_block_snapshot_with_position(inner, b.id, Some(running_pos)) {
+            running_pos += snap.length + 1; // +1 for block separator
+            snapshots.push(snap);
+        }
+    }
+    (snapshots, running_pos)
+}
