@@ -570,17 +570,12 @@ impl<'a> TableCellRepository<'a> {
         repo.set_relationship(event_buffer, owner_id, &TableRelationshipField::Cells, ids)
     }
 
-    pub fn snapshot(&self, ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
-        let table_data = self.redb_table.snapshot_rows(ids)?;
-
-        // Recursively snapshot strong children
-        #[allow(unused_mut)]
-        let mut children = Vec::new();
-
+    pub fn snapshot(&self, _ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
+        let store_snap = self.transaction.snapshot_store();
         Ok(EntityTreeSnapshot {
-            table_data,
-            children,
-            store_snapshot: None,
+            table_data: TableLevelSnapshot::default(),
+            children: Vec::new(),
+            store_snapshot: Some(store_snap),
         })
     }
 
@@ -589,34 +584,32 @@ impl<'a> TableCellRepository<'a> {
         event_buffer: &mut EventBuffer,
         snap: &EntityTreeSnapshot,
     ) -> Result<(), RepositoryError> {
-        // Restore children first (bottom-up)
+        let store_snap = snap
+            .store_snapshot
+            .as_ref()
+            .ok_or_else(|| RepositoryError::Serialization("missing store snapshot".into()))?;
+        self.transaction.restore_store(store_snap);
 
-        // Restore this entity's rows
-        self.redb_table.restore_rows(&snap.table_data)?;
+        let store = self.transaction.get_store();
 
-        // Emit Created events for restored entity IDs
-        let restored_ids: Vec<EntityId> = snap
-            .table_data
-            .entity_rows
-            .rows
-            .iter()
-            .map(|(id, _)| *id)
-            .collect();
-        if !restored_ids.is_empty() {
-            event_buffer.push(Event {
-                origin: Origin::DirectAccess(DirectAccessEntity::TableCell(EntityEvent::Created)),
-                ids: restored_ids.clone(),
-                data: None,
-            });
-        }
-        // Emit Updated events for restored relationships
-        if !restored_ids.is_empty() {
-            event_buffer.push(Event {
-                origin: Origin::DirectAccess(DirectAccessEntity::TableCell(EntityEvent::Updated)),
-                ids: restored_ids,
-                data: None,
-            });
-        }
+        let mut emit = |entity: DirectAccessEntity, ids: Vec<EntityId>| {
+            if !ids.is_empty() {
+                event_buffer.push(Event {
+                    origin: Origin::DirectAccess(entity),
+                    ids,
+                    data: None,
+                });
+            }
+        };
+
+        // TableCell: Created + Updated (has CellFrame relationship)
+        let tc_ids: Vec<_> = store.table_cells.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::TableCell(EntityEvent::Created),
+            tc_ids.clone(),
+        );
+        emit(DirectAccessEntity::TableCell(EntityEvent::Updated), tc_ids);
+
         Ok(())
     }
 }

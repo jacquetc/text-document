@@ -454,37 +454,12 @@ impl<'a> RootRepository<'a> {
         Ok(reordered)
     }
 
-    pub fn snapshot(&self, ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
-        let table_data = self.redb_table.snapshot_rows(ids)?;
-
-        // Recursively snapshot strong children
-        #[allow(unused_mut)]
-        let mut children = Vec::new();
-
-        {
-            // Extract child IDs from the forward junction snapshot for document
-            let junction_name = "document_from_root_document_junction";
-            let child_ids: Vec<EntityId> = table_data
-                .forward_junctions
-                .iter()
-                .filter(|j| j.table_name == junction_name)
-                .flat_map(|j| {
-                    j.entries
-                        .iter()
-                        .flat_map(|(_, right_ids)| right_ids.iter().copied())
-                })
-                .collect();
-            if !child_ids.is_empty() {
-                let child_repo =
-                    repository_factory::write::create_document_repository(self.transaction);
-                children.push(child_repo.snapshot(&child_ids)?);
-            }
-        }
-
+    pub fn snapshot(&self, _ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
+        let store_snap = self.transaction.snapshot_store();
         Ok(EntityTreeSnapshot {
-            table_data,
-            children,
-            store_snapshot: None,
+            table_data: TableLevelSnapshot::default(),
+            children: Vec::new(),
+            store_snapshot: Some(store_snap),
         })
     }
 
@@ -493,41 +468,93 @@ impl<'a> RootRepository<'a> {
         event_buffer: &mut EventBuffer,
         snap: &EntityTreeSnapshot,
     ) -> Result<(), RepositoryError> {
-        // Restore children first (bottom-up)
+        let store_snap = snap
+            .store_snapshot
+            .as_ref()
+            .ok_or_else(|| RepositoryError::Serialization("missing store snapshot".into()))?;
+        self.transaction.restore_store(store_snap);
 
-        for child_snap in &snap.children {
-            if child_snap.table_data.entity_rows.table_name == "document" {
-                repository_factory::write::create_document_repository(self.transaction)
-                    .restore(event_buffer, child_snap)?;
+        let store = self.transaction.get_store();
+
+        let mut emit = |entity: DirectAccessEntity, ids: Vec<EntityId>| {
+            if !ids.is_empty() {
+                event_buffer.push(Event {
+                    origin: Origin::DirectAccess(entity),
+                    ids,
+                    data: None,
+                });
             }
-        }
+        };
 
-        // Restore this entity's rows
-        self.redb_table.restore_rows(&snap.table_data)?;
+        // Root: Created + Updated (has Document relationship)
+        let root_ids: Vec<_> = store.roots.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::Root(EntityEvent::Created),
+            root_ids.clone(),
+        );
+        emit(DirectAccessEntity::Root(EntityEvent::Updated), root_ids);
 
-        // Emit Created events for restored entity IDs
-        let restored_ids: Vec<EntityId> = snap
-            .table_data
-            .entity_rows
-            .rows
-            .iter()
-            .map(|(id, _)| *id)
+        // Document: Created + Updated (strong child, has relationships)
+        let doc_ids: Vec<_> = store.documents.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::Document(EntityEvent::Created),
+            doc_ids.clone(),
+        );
+        emit(DirectAccessEntity::Document(EntityEvent::Updated), doc_ids);
+
+        // Frame: Created + Updated
+        let frame_ids: Vec<_> = store.frames.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::Frame(EntityEvent::Created),
+            frame_ids.clone(),
+        );
+        emit(DirectAccessEntity::Frame(EntityEvent::Updated), frame_ids);
+
+        // Block: Created + Updated
+        let block_ids: Vec<_> = store.blocks.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::Block(EntityEvent::Created),
+            block_ids.clone(),
+        );
+        emit(DirectAccessEntity::Block(EntityEvent::Updated), block_ids);
+
+        // InlineElement: Created only (leaf)
+        let elem_ids: Vec<_> = store
+            .inline_elements
+            .read()
+            .unwrap()
+            .keys()
+            .copied()
             .collect();
-        if !restored_ids.is_empty() {
-            event_buffer.push(Event {
-                origin: Origin::DirectAccess(DirectAccessEntity::Root(EntityEvent::Created)),
-                ids: restored_ids.clone(),
-                data: None,
-            });
-        }
-        // Emit Updated events for restored relationships
-        if !restored_ids.is_empty() {
-            event_buffer.push(Event {
-                origin: Origin::DirectAccess(DirectAccessEntity::Root(EntityEvent::Updated)),
-                ids: restored_ids,
-                data: None,
-            });
-        }
+        emit(
+            DirectAccessEntity::InlineElement(EntityEvent::Created),
+            elem_ids,
+        );
+
+        // List: Created only (leaf)
+        let list_ids: Vec<_> = store.lists.read().unwrap().keys().copied().collect();
+        emit(DirectAccessEntity::List(EntityEvent::Created), list_ids);
+
+        // Resource: Created only (leaf)
+        let res_ids: Vec<_> = store.resources.read().unwrap().keys().copied().collect();
+        emit(DirectAccessEntity::Resource(EntityEvent::Created), res_ids);
+
+        // Table: Created + Updated
+        let table_ids: Vec<_> = store.tables.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::Table(EntityEvent::Created),
+            table_ids.clone(),
+        );
+        emit(DirectAccessEntity::Table(EntityEvent::Updated), table_ids);
+
+        // TableCell: Created + Updated
+        let tc_ids: Vec<_> = store.table_cells.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::TableCell(EntityEvent::Created),
+            tc_ids.clone(),
+        );
+        emit(DirectAccessEntity::TableCell(EntityEvent::Updated), tc_ids);
+
         Ok(())
     }
 }

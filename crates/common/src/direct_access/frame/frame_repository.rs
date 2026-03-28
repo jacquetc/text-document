@@ -659,37 +659,12 @@ impl<'a> FrameRepository<'a> {
         )
     }
 
-    pub fn snapshot(&self, ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
-        let table_data = self.redb_table.snapshot_rows(ids)?;
-
-        // Recursively snapshot strong children
-        #[allow(unused_mut)]
-        let mut children = Vec::new();
-
-        {
-            // Extract child IDs from the forward junction snapshot for blocks
-            let junction_name = "block_from_frame_blocks_junction";
-            let child_ids: Vec<EntityId> = table_data
-                .forward_junctions
-                .iter()
-                .filter(|j| j.table_name == junction_name)
-                .flat_map(|j| {
-                    j.entries
-                        .iter()
-                        .flat_map(|(_, right_ids)| right_ids.iter().copied())
-                })
-                .collect();
-            if !child_ids.is_empty() {
-                let child_repo =
-                    repository_factory::write::create_block_repository(self.transaction);
-                children.push(child_repo.snapshot(&child_ids)?);
-            }
-        }
-
+    pub fn snapshot(&self, _ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
+        let store_snap = self.transaction.snapshot_store();
         Ok(EntityTreeSnapshot {
-            table_data,
-            children,
-            store_snapshot: None,
+            table_data: TableLevelSnapshot::default(),
+            children: Vec::new(),
+            store_snapshot: Some(store_snap),
         })
     }
 
@@ -698,41 +673,53 @@ impl<'a> FrameRepository<'a> {
         event_buffer: &mut EventBuffer,
         snap: &EntityTreeSnapshot,
     ) -> Result<(), RepositoryError> {
-        // Restore children first (bottom-up)
+        let store_snap = snap
+            .store_snapshot
+            .as_ref()
+            .ok_or_else(|| RepositoryError::Serialization("missing store snapshot".into()))?;
+        self.transaction.restore_store(store_snap);
 
-        for child_snap in &snap.children {
-            if child_snap.table_data.entity_rows.table_name == "block" {
-                repository_factory::write::create_block_repository(self.transaction)
-                    .restore(event_buffer, child_snap)?;
+        let store = self.transaction.get_store();
+
+        let mut emit = |entity: DirectAccessEntity, ids: Vec<EntityId>| {
+            if !ids.is_empty() {
+                event_buffer.push(Event {
+                    origin: Origin::DirectAccess(entity),
+                    ids,
+                    data: None,
+                });
             }
-        }
+        };
 
-        // Restore this entity's rows
-        self.redb_table.restore_rows(&snap.table_data)?;
+        // Frame: Created + Updated (has Blocks, ParentFrame, Table relationships)
+        let frame_ids: Vec<_> = store.frames.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::Frame(EntityEvent::Created),
+            frame_ids.clone(),
+        );
+        emit(DirectAccessEntity::Frame(EntityEvent::Updated), frame_ids);
 
-        // Emit Created events for restored entity IDs
-        let restored_ids: Vec<EntityId> = snap
-            .table_data
-            .entity_rows
-            .rows
-            .iter()
-            .map(|(id, _)| *id)
+        // Block: Created + Updated (strong child, has Elements, List relationships)
+        let block_ids: Vec<_> = store.blocks.read().unwrap().keys().copied().collect();
+        emit(
+            DirectAccessEntity::Block(EntityEvent::Created),
+            block_ids.clone(),
+        );
+        emit(DirectAccessEntity::Block(EntityEvent::Updated), block_ids);
+
+        // InlineElement: Created only (leaf, strong child of Block)
+        let elem_ids: Vec<_> = store
+            .inline_elements
+            .read()
+            .unwrap()
+            .keys()
+            .copied()
             .collect();
-        if !restored_ids.is_empty() {
-            event_buffer.push(Event {
-                origin: Origin::DirectAccess(DirectAccessEntity::Frame(EntityEvent::Created)),
-                ids: restored_ids.clone(),
-                data: None,
-            });
-        }
-        // Emit Updated events for restored relationships
-        if !restored_ids.is_empty() {
-            event_buffer.push(Event {
-                origin: Origin::DirectAccess(DirectAccessEntity::Frame(EntityEvent::Updated)),
-                ids: restored_ids,
-                data: None,
-            });
-        }
+        emit(
+            DirectAccessEntity::InlineElement(EntityEvent::Created),
+            elem_ids,
+        );
+
         Ok(())
     }
 }

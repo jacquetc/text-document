@@ -336,17 +336,12 @@ impl<'a> ListRepository<'a> {
         )
     }
 
-    pub fn snapshot(&self, ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
-        let table_data = self.redb_table.snapshot_rows(ids)?;
-
-        // Recursively snapshot strong children
-        #[allow(unused_mut)]
-        let mut children = Vec::new();
-
+    pub fn snapshot(&self, _ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
+        let store_snap = self.transaction.snapshot_store();
         Ok(EntityTreeSnapshot {
-            table_data,
-            children,
-            store_snapshot: None,
+            table_data: TableLevelSnapshot::default(),
+            children: Vec::new(),
+            store_snapshot: Some(store_snap),
         })
     }
 
@@ -355,26 +350,24 @@ impl<'a> ListRepository<'a> {
         event_buffer: &mut EventBuffer,
         snap: &EntityTreeSnapshot,
     ) -> Result<(), RepositoryError> {
-        // Restore children first (bottom-up)
+        let store_snap = snap
+            .store_snapshot
+            .as_ref()
+            .ok_or_else(|| RepositoryError::Serialization("missing store snapshot".into()))?;
+        self.transaction.restore_store(store_snap);
 
-        // Restore this entity's rows
-        self.redb_table.restore_rows(&snap.table_data)?;
+        let store = self.transaction.get_store();
 
-        // Emit Created events for restored entity IDs
-        let restored_ids: Vec<EntityId> = snap
-            .table_data
-            .entity_rows
-            .rows
-            .iter()
-            .map(|(id, _)| *id)
-            .collect();
-        if !restored_ids.is_empty() {
+        // List: Created only (leaf, no strong children)
+        let list_ids: Vec<_> = store.lists.read().unwrap().keys().copied().collect();
+        if !list_ids.is_empty() {
             event_buffer.push(Event {
                 origin: Origin::DirectAccess(DirectAccessEntity::List(EntityEvent::Created)),
-                ids: restored_ids.clone(),
+                ids: list_ids,
                 data: None,
             });
         }
+
         Ok(())
     }
 }
