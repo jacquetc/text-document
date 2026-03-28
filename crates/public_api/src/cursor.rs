@@ -695,8 +695,7 @@ impl TextCursor {
                 position: to_i64(pos - 1),
             };
             let prev_info =
-                document_inspection_commands::get_block_at_position(&inner.ctx, &prev_dto)
-                    .ok()?;
+                document_inspection_commands::get_block_at_position(&inner.ctx, &prev_dto).ok()?;
             prev_info.block_id as usize
         } else {
             block_info.block_id as usize
@@ -1063,7 +1062,7 @@ impl TextCursor {
 
     /// Determine the kind of selection the cursor currently has.
     ///
-    /// Returns [`SelectionKind::Cells`] when position and anchor are in
+    /// Returns [`Cells`](crate::SelectionKind::Cells) when position and anchor are in
     /// different cells of the same table (rectangular cell selection), or
     /// when an explicit cell-selection override is active.
     pub fn selection_kind(&self) -> crate::flow::SelectionKind {
@@ -1270,16 +1269,14 @@ impl TextCursor {
     /// Collect `(row, col, row_span, col_span)` tuples for all cells in a table.
     fn collect_cell_spans(&self, table_id: usize) -> Vec<(usize, usize, usize, usize)> {
         let inner = self.doc.lock();
-        let table_dto = match frontend::commands::table_commands::get_table(
-            &inner.ctx,
-            &(table_id as u64),
-        )
-        .ok()
-        .flatten()
-        {
-            Some(t) => t,
-            None => return Vec::new(),
-        };
+        let table_dto =
+            match frontend::commands::table_commands::get_table(&inner.ctx, &(table_id as u64))
+                .ok()
+                .flatten()
+            {
+                Some(t) => t,
+                None => return Vec::new(),
+            };
 
         let mut spans = Vec::with_capacity(table_dto.cells.len());
         for &cell_id in &table_dto.cells {

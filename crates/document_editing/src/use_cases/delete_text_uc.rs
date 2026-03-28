@@ -1,13 +1,13 @@
 use super::editing_helpers::{
     collect_block_ids_recursive, find_block_at_position, is_word_boundary_punct,
 };
-use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use crate::DeleteTextDto;
 use crate::DeleteTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, TableCell};
@@ -131,8 +131,7 @@ fn execute_delete(
 
     // ── Cell selection safety: detect cross-cell deletion ──────────
     // Build block_id → cell_frame_id map from all tables in the document.
-    let table_ids =
-        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
+    let table_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
     let mut block_to_cell_frame: std::collections::HashMap<EntityId, EntityId> =
         std::collections::HashMap::new();
     for &tid in &table_ids {
@@ -153,9 +152,9 @@ fn execute_delete(
     let end_cell = block_to_cell_frame.get(&end_block_tmp.id).copied();
 
     let is_cross_cell = match (start_cell, end_cell) {
-        (Some(a), Some(b)) => a != b,           // different cells
+        (Some(a), Some(b)) => a != b,              // different cells
         (Some(_), None) | (None, Some(_)) => true, // one in table, one outside
-        (None, None) => false,                      // both outside tables
+        (None, None) => false,                     // both outside tables
     };
 
     if is_cross_cell {
@@ -169,12 +168,10 @@ fn execute_delete(
         for block in &blocks {
             if block.document_position + block.text_length >= start
                 && block.document_position <= end
+                && let Some(&cf_id) = block_to_cell_frame.get(&block.id)
+                && !affected_cell_frames.contains(&cf_id)
             {
-                if let Some(&cf_id) = block_to_cell_frame.get(&block.id) {
-                    if !affected_cell_frames.contains(&cf_id) {
-                        affected_cell_frames.push(cf_id);
-                    }
-                }
+                affected_cell_frames.push(cf_id);
             }
         }
 
@@ -183,8 +180,7 @@ fn execute_delete(
             let frame = uow
                 .get_frame(cf_id)?
                 .ok_or_else(|| anyhow!("Cell frame not found"))?;
-            let blk_ids =
-                uow.get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
+            let blk_ids = uow.get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
             let blk_opts = uow.get_block_multi(&blk_ids)?;
             let mut cell_blocks: Vec<Block> = blk_opts.into_iter().flatten().collect();
             cell_blocks.sort_by_key(|b| b.document_position);
@@ -199,10 +195,8 @@ fn execute_delete(
 
             // Reset first block to empty
             let first_block = &mut cell_blocks[0];
-            let elem_ids = uow.get_block_relationship(
-                &first_block.id,
-                &BlockRelationshipField::Elements,
-            )?;
+            let elem_ids =
+                uow.get_block_relationship(&first_block.id, &BlockRelationshipField::Elements)?;
             // Remove all existing elements
             if !elem_ids.is_empty() {
                 uow.remove_inline_element_multi(&elem_ids)?;
@@ -222,8 +216,7 @@ fn execute_delete(
             uow.update_block(&updated)?;
 
             // Remove extra blocks
-            let extra_block_ids: Vec<EntityId> =
-                cell_blocks[1..].iter().map(|b| b.id).collect();
+            let extra_block_ids: Vec<EntityId> = cell_blocks[1..].iter().map(|b| b.id).collect();
             for &eid in &extra_block_ids {
                 let elem_ids =
                     uow.get_block_relationship(&eid, &BlockRelationshipField::Elements)?;

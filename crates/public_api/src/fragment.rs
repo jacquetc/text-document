@@ -73,8 +73,11 @@ impl DocumentFragment {
             })
             .collect();
 
-        let data = serde_json::to_string(&FragmentData { blocks, tables: vec![] })
-            .expect("fragment serialization should not fail");
+        let data = serde_json::to_string(&FragmentData {
+            blocks,
+            tables: vec![],
+        })
+        .expect("fragment serialization should not fail");
 
         Self {
             data,
@@ -594,8 +597,11 @@ fn parsed_blocks_to_fragment(
         })
         .collect();
 
-    let data = serde_json::to_string(&FragmentData { blocks, tables: vec![] })
-        .expect("fragment serialization should not fail");
+    let data = serde_json::to_string(&FragmentData {
+        blocks,
+        tables: vec![],
+    })
+    .expect("fragment serialization should not fail");
 
     let plain_text = parsed_plain_text_from_data(&data);
 

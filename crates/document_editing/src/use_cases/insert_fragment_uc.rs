@@ -164,8 +164,7 @@ fn insert_table_fragment(
                         plain_text: extra_frag.plain_text.clone(),
                         ..Default::default()
                     };
-                    let created_extra =
-                        uow.create_block(&extra_block, cell_frame_id, -1)?;
+                    let created_extra = uow.create_block(&extra_block, cell_frame_id, -1)?;
                     for frag_elem in &extra_frag.elements {
                         let elem = frag_elem.to_entity();
                         uow.create_inline_element(&elem, created_extra.id, -1)?;

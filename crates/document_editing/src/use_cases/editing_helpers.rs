@@ -17,17 +17,32 @@ pub trait CellFrameCreator {
     fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame>;
 }
 
-/// Implement CellFrameCreator for a Box<dyn UowTrait> where the UoW trait has the needed methods.
+/// Implement `CellFrameCreator` for a `Box<dyn UowTrait>` where the UoW trait has the needed methods.
 macro_rules! impl_cell_frame_creator {
     ($trait_type:ty) => {
         impl CellFrameCreator for Box<$trait_type> {
-            fn cfc_create_frame(&mut self, frame: &Frame, owner_id: EntityId, index: i32) -> Result<Frame> {
+            fn cfc_create_frame(
+                &mut self,
+                frame: &Frame,
+                owner_id: EntityId,
+                index: i32,
+            ) -> Result<Frame> {
                 (**self).create_frame(frame, owner_id, index)
             }
-            fn cfc_create_block(&mut self, block: &Block, owner_id: EntityId, index: i32) -> Result<Block> {
+            fn cfc_create_block(
+                &mut self,
+                block: &Block,
+                owner_id: EntityId,
+                index: i32,
+            ) -> Result<Block> {
                 (**self).create_block(block, owner_id, index)
             }
-            fn cfc_create_inline_element(&mut self, elem: &InlineElement, owner_id: EntityId, index: i32) -> Result<InlineElement> {
+            fn cfc_create_inline_element(
+                &mut self,
+                elem: &InlineElement,
+                owner_id: EntityId,
+                index: i32,
+            ) -> Result<InlineElement> {
                 (**self).create_inline_element(elem, owner_id, index)
             }
             fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame> {
@@ -79,11 +94,15 @@ pub trait CellBlockReader {
     fn cbr_get_block_multi(&self, ids: &[EntityId]) -> Result<Vec<Option<Block>>>;
 }
 
-/// Implement CellBlockReader for a Box<dyn UowTrait> where the UoW trait has the needed methods.
+/// Implement `CellBlockReader` for a `Box<dyn UowTrait>` where the UoW trait has the needed methods.
 macro_rules! impl_cell_block_reader {
     ($trait_type:ty) => {
         impl CellBlockReader for Box<$trait_type> {
-            fn cbr_get_frame_relationship(&self, id: &EntityId, field: &FrameRelationshipField) -> Result<Vec<EntityId>> {
+            fn cbr_get_frame_relationship(
+                &self,
+                id: &EntityId,
+                field: &FrameRelationshipField,
+            ) -> Result<Vec<EntityId>> {
                 (**self).get_frame_relationship(id, field)
             }
             fn cbr_get_block_multi(&self, ids: &[EntityId]) -> Result<Vec<Option<Block>>> {
@@ -130,8 +149,7 @@ pub fn compute_table_base_pos(
 ) -> Result<i64> {
     let mut base_pos: Option<i64> = None;
     for cf_id in cell_frame_ids {
-        let block_ids =
-            uow.cbr_get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
+        let block_ids = uow.cbr_get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
         let blocks_opt = uow.cbr_get_block_multi(&block_ids)?;
         for block in blocks_opt.into_iter().flatten() {
             match base_pos {

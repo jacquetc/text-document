@@ -127,8 +127,10 @@ fn execute_remove_table_column(
     }
 
     // Remove cell frames for cells being fully removed
-    let column_cell_frame_ids: Vec<EntityId> =
-        cells_to_remove.iter().filter_map(|c| c.cell_frame).collect();
+    let column_cell_frame_ids: Vec<EntityId> = cells_to_remove
+        .iter()
+        .filter_map(|c| c.cell_frame)
+        .collect();
     for fid in &column_cell_frame_ids {
         uow.remove_frame(fid)?;
     }

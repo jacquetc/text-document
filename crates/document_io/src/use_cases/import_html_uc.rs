@@ -301,8 +301,7 @@ impl LongOperation for ImportHtmlUseCase {
                     for (r, row) in parsed_table.rows.iter().enumerate() {
                         for (c, cell) in row.iter().enumerate() {
                             let cell_frame = Frame::default();
-                            let created_cell_frame =
-                                uow.create_frame(&cell_frame, doc_id, -1)?;
+                            let created_cell_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
 
                             let plain_text: String =
                                 cell.spans.iter().map(|s| s.text.as_str()).collect();
@@ -317,8 +316,7 @@ impl LongOperation for ImportHtmlUseCase {
                             let created_block =
                                 uow.create_block(&block, created_cell_frame.id, -1)?;
 
-                            if cell.spans.is_empty()
-                                || cell.spans.iter().all(|s| s.text.is_empty())
+                            if cell.spans.is_empty() || cell.spans.iter().all(|s| s.text.is_empty())
                             {
                                 let elem = InlineElement {
                                     content: InlineContent::Empty,

@@ -636,16 +636,16 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
                         "tr" => {
                             let mut cells: Vec<ParsedTableCell> = Vec::new();
                             for td in child.children() {
-                                if let Node::Element(td_el) = td.value() {
-                                    if matches!(td_el.name(), "td" | "th") {
-                                        let mut spans = Vec::new();
-                                        let state = FmtState::default();
-                                        collect_cell_spans(td, &state, &mut spans, 0);
-                                        if spans.is_empty() {
-                                            spans.push(ParsedSpan::default());
-                                        }
-                                        cells.push(ParsedTableCell { spans });
+                                if let Node::Element(td_el) = td.value()
+                                    && matches!(td_el.name(), "td" | "th")
+                                {
+                                    let mut spans = Vec::new();
+                                    let state = FmtState::default();
+                                    collect_cell_spans(td, &state, &mut spans, 0);
+                                    if spans.is_empty() {
+                                        spans.push(ParsedSpan::default());
                                     }
+                                    cells.push(ParsedTableCell { spans });
                                 }
                             }
                             if !cells.is_empty() {

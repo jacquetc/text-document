@@ -50,7 +50,10 @@ impl ExtractFragmentUseCase {
         // Empty range
         if start == end {
             uow.end_transaction()?;
-            let empty = FragmentData { blocks: vec![], tables: vec![] };
+            let empty = FragmentData {
+                blocks: vec![],
+                tables: vec![],
+            };
             return Ok(ExtractFragmentResultDto {
                 fragment_data: serde_json::to_string(&empty)?,
                 plain_text: String::new(),
@@ -98,31 +101,27 @@ impl ExtractFragmentUseCase {
             all_block_ids.extend(block_ids);
 
             // Expand table anchor frames into cell blocks
-            let frame = uow.get_frame(frame_id)?;
-            if let Some(f) = frame {
+            if let Some(f) = uow.get_frame(frame_id)? {
                 for &entry in &f.child_order {
                     if entry < 0 {
                         let sub_frame_id = (-entry) as EntityId;
-                        if let Some(sub_frame) = uow.get_frame(&sub_frame_id)? {
-                            if let Some(table_entity_id) = sub_frame.table {
-                                let cell_ids = uow.get_table_relationship(
-                                    &table_entity_id,
-                                    &TableRelationshipField::Cells,
-                                )?;
-                                let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
-                                let mut cells: Vec<_> =
-                                    cells_opt.into_iter().flatten().collect();
-                                cells.sort_by(|a, b| {
-                                    a.row.cmp(&b.row).then(a.column.cmp(&b.column))
-                                });
-                                for c in cells {
-                                    if let Some(cf_id) = c.cell_frame {
-                                        let cf_block_ids = uow.get_frame_relationship(
-                                            &cf_id,
-                                            &FrameRelationshipField::Blocks,
-                                        )?;
-                                        all_block_ids.extend(cf_block_ids);
-                                    }
+                        if let Some(sub_frame) = uow.get_frame(&sub_frame_id)?
+                            && let Some(table_entity_id) = sub_frame.table
+                        {
+                            let cell_ids = uow.get_table_relationship(
+                                &table_entity_id,
+                                &TableRelationshipField::Cells,
+                            )?;
+                            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+                            let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
+                            cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+                            for c in cells {
+                                if let Some(cf_id) = c.cell_frame {
+                                    let cf_block_ids = uow.get_frame_relationship(
+                                        &cf_id,
+                                        &FrameRelationshipField::Blocks,
+                                    )?;
+                                    all_block_ids.extend(cf_block_ids);
                                 }
                             }
                         }
@@ -164,10 +163,9 @@ impl ExtractFragmentUseCase {
             for block in &blocks {
                 if block.document_position + block.text_length >= start
                     && block.document_position <= end
+                    && let Some((_, tid, cell)) = block_to_cell.get(&block.id)
                 {
-                    if let Some((_, tid, cell)) = block_to_cell.get(&block.id) {
-                        table_cells.entry(*tid).or_default().push(cell);
-                    }
+                    table_cells.entry(*tid).or_default().push(cell);
                 }
             }
 
@@ -203,8 +201,7 @@ impl ExtractFragmentUseCase {
                 let all_cell_ids =
                     uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
                 let all_cells_opt = uow.get_table_cell_multi(&all_cell_ids)?;
-                let all_cells: Vec<TableCell> =
-                    all_cells_opt.into_iter().flatten().collect();
+                let all_cells: Vec<TableCell> = all_cells_opt.into_iter().flatten().collect();
 
                 let mut frag_cells: Vec<FragmentTableCell> = Vec::new();
                 for cell in &all_cells {
@@ -221,13 +218,10 @@ impl ExtractFragmentUseCase {
 
                     // Extract blocks for this cell
                     let cell_blocks = if let Some(cf_id) = cell.cell_frame {
-                        let blk_ids = uow.get_frame_relationship(
-                            &cf_id,
-                            &FrameRelationshipField::Blocks,
-                        )?;
+                        let blk_ids =
+                            uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
                         let blk_opt = uow.get_block_multi(&blk_ids)?;
-                        let mut blks: Vec<Block> =
-                            blk_opt.into_iter().flatten().collect();
+                        let mut blks: Vec<Block> = blk_opt.into_iter().flatten().collect();
                         blks.sort_by_key(|b| b.document_position);
                         blks
                     } else {
@@ -237,7 +231,7 @@ impl ExtractFragmentUseCase {
                     let mut cell_frag_blocks: Vec<FragmentBlock> = Vec::new();
                     for block in &cell_blocks {
                         let (extracted_elements, extracted_text) =
-                            self.extract_full_block(&uow, block)?;
+                            self.extract_full_block(&*uow, block)?;
                         plain_texts.push(extracted_text.clone());
                         cell_frag_blocks.push(block_to_fragment_block(
                             block,
@@ -352,14 +346,18 @@ impl ExtractFragmentUseCase {
     /// Extract all elements from a full block.
     fn extract_full_block(
         &self,
-        uow: &Box<dyn ExtractFragmentUnitOfWorkTrait>,
+        uow: &dyn ExtractFragmentUnitOfWorkTrait,
         block: &Block,
     ) -> Result<(Vec<FragmentElement>, String)> {
         let element_ids =
             uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
         let elements_opt = uow.get_inline_element_multi(&element_ids)?;
         let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
-        Ok(extract_elements_in_range(&elements, 0, block.text_length as usize))
+        Ok(extract_elements_in_range(
+            &elements,
+            0,
+            block.text_length as usize,
+        ))
     }
 }
 
@@ -374,23 +372,87 @@ fn block_to_fragment_block(
     FragmentBlock {
         plain_text,
         elements,
-        heading_level: if is_full_block { block.fmt_heading_level } else { None },
+        heading_level: if is_full_block {
+            block.fmt_heading_level
+        } else {
+            None
+        },
         list,
-        alignment: if is_full_block { block.fmt_alignment.clone() } else { None },
-        indent: if is_full_block { block.fmt_indent } else { None },
-        text_indent: if is_full_block { block.fmt_text_indent } else { None },
-        marker: if is_full_block { block.fmt_marker.clone() } else { None },
-        top_margin: if is_full_block { block.fmt_top_margin } else { None },
-        bottom_margin: if is_full_block { block.fmt_bottom_margin } else { None },
-        left_margin: if is_full_block { block.fmt_left_margin } else { None },
-        right_margin: if is_full_block { block.fmt_right_margin } else { None },
-        tab_positions: if is_full_block { block.fmt_tab_positions.clone() } else { vec![] },
-        line_height: if is_full_block { block.fmt_line_height } else { None },
-        non_breakable_lines: if is_full_block { block.fmt_non_breakable_lines } else { None },
-        direction: if is_full_block { block.fmt_direction.clone() } else { None },
-        background_color: if is_full_block { block.fmt_background_color.clone() } else { None },
-        is_code_block: if is_full_block { block.fmt_is_code_block } else { None },
-        code_language: if is_full_block { block.fmt_code_language.clone() } else { None },
+        alignment: if is_full_block {
+            block.fmt_alignment.clone()
+        } else {
+            None
+        },
+        indent: if is_full_block {
+            block.fmt_indent
+        } else {
+            None
+        },
+        text_indent: if is_full_block {
+            block.fmt_text_indent
+        } else {
+            None
+        },
+        marker: if is_full_block {
+            block.fmt_marker.clone()
+        } else {
+            None
+        },
+        top_margin: if is_full_block {
+            block.fmt_top_margin
+        } else {
+            None
+        },
+        bottom_margin: if is_full_block {
+            block.fmt_bottom_margin
+        } else {
+            None
+        },
+        left_margin: if is_full_block {
+            block.fmt_left_margin
+        } else {
+            None
+        },
+        right_margin: if is_full_block {
+            block.fmt_right_margin
+        } else {
+            None
+        },
+        tab_positions: if is_full_block {
+            block.fmt_tab_positions.clone()
+        } else {
+            vec![]
+        },
+        line_height: if is_full_block {
+            block.fmt_line_height
+        } else {
+            None
+        },
+        non_breakable_lines: if is_full_block {
+            block.fmt_non_breakable_lines
+        } else {
+            None
+        },
+        direction: if is_full_block {
+            block.fmt_direction.clone()
+        } else {
+            None
+        },
+        background_color: if is_full_block {
+            block.fmt_background_color.clone()
+        } else {
+            None
+        },
+        is_code_block: if is_full_block {
+            block.fmt_is_code_block
+        } else {
+            None
+        },
+        code_language: if is_full_block {
+            block.fmt_code_language.clone()
+        } else {
+            None
+        },
     }
 }
 
