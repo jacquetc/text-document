@@ -101,17 +101,24 @@ fn execute_insert_table_column(
     }
     let base_pos = base_pos.unwrap_or(0);
 
-    let mut cells_to_shift: Vec<TableCell> = Vec::new();
+    let mut cells_to_update: Vec<TableCell> = Vec::new();
     for cell in &cells {
         if cell.column >= dto.column_index {
+            // Cell starts at or after the insertion point — shift it right
             let mut shifted = cell.clone();
             shifted.column += 1;
             shifted.updated_at = now;
-            cells_to_shift.push(shifted);
+            cells_to_update.push(shifted);
+        } else if cell.column + cell.column_span > dto.column_index {
+            // Cell starts before the insertion point but spans across it — expand span
+            let mut expanded = cell.clone();
+            expanded.column_span += 1;
+            expanded.updated_at = now;
+            cells_to_update.push(expanded);
         }
     }
-    if !cells_to_shift.is_empty() {
-        uow.update_table_cell_multi(&cells_to_shift)?;
+    if !cells_to_update.is_empty() {
+        uow.update_table_cell_multi(&cells_to_update)?;
     }
 
     // Create new cells for the inserted column (one per row)

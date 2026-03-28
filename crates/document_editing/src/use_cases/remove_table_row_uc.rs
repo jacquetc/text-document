@@ -87,35 +87,54 @@ fn execute_remove_table_row(
     let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
     let cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
 
-    // Identify cells in the target row
-    let row_cells: Vec<&TableCell> = cells.iter().filter(|c| c.row == dto.row_index).collect();
+    // Identify cells that start exactly at the target row and have row_span == 1
+    // These are the only cells to fully remove.
+    // Cells that start at the target row but span multiple rows are shifted down with span decremented.
+    // Cells that start before the target row but span across it just get span decremented.
+    let mut cells_to_remove: Vec<&TableCell> = Vec::new();
+    let mut cells_to_update: Vec<TableCell> = Vec::new();
 
-    // Collect cell frame IDs for the row being removed
-    let row_cell_frame_ids: Vec<EntityId> = row_cells.iter().filter_map(|c| c.cell_frame).collect();
+    for cell in &cells {
+        if cell.row == dto.row_index && cell.row_span == 1 {
+            // Single-row cell at the target row — remove it
+            cells_to_remove.push(cell);
+        } else if cell.row == dto.row_index && cell.row_span > 1 {
+            // Multi-row cell starting at target row — shift down and shrink span
+            let mut updated = cell.clone();
+            updated.row_span -= 1;
+            updated.updated_at = now;
+            cells_to_update.push(updated);
+        } else if cell.row < dto.row_index && cell.row + cell.row_span > dto.row_index {
+            // Cell starts before target row but spans across it — shrink span
+            let mut updated = cell.clone();
+            updated.row_span -= 1;
+            updated.updated_at = now;
+            cells_to_update.push(updated);
+        } else if cell.row > dto.row_index {
+            // Cell starts after the target row — shift up
+            let mut shifted = cell.clone();
+            shifted.row -= 1;
+            shifted.updated_at = now;
+            cells_to_update.push(shifted);
+        }
+    }
 
-    // Remove cell frames (cascade removes their blocks and elements)
+    // Remove cell frames for cells being fully removed
+    let row_cell_frame_ids: Vec<EntityId> =
+        cells_to_remove.iter().filter_map(|c| c.cell_frame).collect();
     for fid in &row_cell_frame_ids {
         uow.remove_frame(fid)?;
     }
 
-    // Remove the TableCell entities for the target row
-    let row_cell_ids: Vec<EntityId> = row_cells.iter().map(|c| c.id).collect();
+    // Remove the TableCell entities
+    let row_cell_ids: Vec<EntityId> = cells_to_remove.iter().map(|c| c.id).collect();
     if !row_cell_ids.is_empty() {
         uow.remove_table_cell_multi(&row_cell_ids)?;
     }
 
-    // Shift cells with row > row_index (decrement their row)
-    let mut cells_to_shift: Vec<TableCell> = Vec::new();
-    for cell in &cells {
-        if cell.row > dto.row_index {
-            let mut shifted = cell.clone();
-            shifted.row -= 1;
-            shifted.updated_at = now;
-            cells_to_shift.push(shifted);
-        }
-    }
-    if !cells_to_shift.is_empty() {
-        uow.update_table_cell_multi(&cells_to_shift)?;
+    // Apply updates (shifts and span changes)
+    if !cells_to_update.is_empty() {
+        uow.update_table_cell_multi(&cells_to_update)?;
     }
 
     // Update table row count
@@ -169,8 +188,8 @@ fn execute_remove_table_row(
         uow.update_block_multi(&cell_blocks_to_update)?;
     }
 
-    // Shift non-table blocks after the table (subtract table.columns for removed row)
-    let removed_cells = table.columns;
+    // Shift non-table blocks after the table
+    let removed_cells = cells_to_remove.len() as i64;
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let cell_frame_set: std::collections::HashSet<EntityId> =
         remaining_frame_ids.into_iter().collect();
@@ -199,7 +218,7 @@ fn execute_remove_table_row(
 
     // Update Document stats
     let mut updated_doc = document.clone();
-    updated_doc.block_count -= table.columns;
+    updated_doc.block_count -= removed_cells;
     updated_doc.updated_at = now;
     uow.update_document(&updated_doc)?;
 
