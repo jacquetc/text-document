@@ -1,4 +1,6 @@
-use super::editing_helpers::{CellBlockReader, compute_table_base_pos, impl_cell_block_reader};
+use super::editing_helpers::{
+    CellBlockReader, compute_table_base_pos, impl_cell_block_reader, reassign_cell_block_positions,
+};
 use crate::MergeTableCellsDto;
 use crate::MergeTableCellsResultDto;
 use anyhow::{Result, anyhow};
@@ -192,19 +194,9 @@ fn execute_merge_table_cells(
         .filter_map(|c| c.cell_frame)
         .collect();
 
-    // Assign positions in row-major order
-    let mut cell_blocks_to_update: Vec<Block> = Vec::new();
-    for (i, cell) in remaining_cells.iter().enumerate() {
-        if let Some(cf_id) = cell.cell_frame {
-            let block_ids = uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
-            let blocks_opt = uow.get_block_multi(&block_ids)?;
-            if let Some(Some(mut block)) = blocks_opt.into_iter().next() {
-                block.document_position = base_pos + i as i64;
-                block.updated_at = now;
-                cell_blocks_to_update.push(block);
-            }
-        }
-    }
+    // Assign positions in row-major order (handles multi-block cells)
+    let (cell_blocks_to_update, _) =
+        reassign_cell_block_positions(&*uow, &remaining_cells, base_pos, now)?;
     if !cell_blocks_to_update.is_empty() {
         uow.update_block_multi(&cell_blocks_to_update)?;
     }

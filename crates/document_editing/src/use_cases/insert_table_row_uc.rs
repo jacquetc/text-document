@@ -1,6 +1,6 @@
 use super::editing_helpers::{
     CellBlockReader, CellFrameCreator, compute_table_base_pos, create_cell_frame,
-    impl_cell_block_reader, impl_cell_frame_creator,
+    impl_cell_block_reader, impl_cell_frame_creator, reassign_cell_block_positions,
 };
 use crate::InsertTableRowDto;
 use crate::InsertTableRowResultDto;
@@ -147,19 +147,9 @@ fn execute_insert_table_row(
 
     let cell_frame_ids: Vec<EntityId> = all_cells.iter().filter_map(|c| c.cell_frame).collect();
 
-    // Assign positions in row-major order
-    let mut cell_blocks_to_update: Vec<Block> = Vec::new();
-    for (i, cell) in all_cells.iter().enumerate() {
-        if let Some(cf_id) = cell.cell_frame {
-            let block_ids = uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
-            let blocks_opt = uow.get_block_multi(&block_ids)?;
-            if let Some(Some(mut block)) = blocks_opt.into_iter().next() {
-                block.document_position = base_pos + i as i64;
-                block.updated_at = now;
-                cell_blocks_to_update.push(block);
-            }
-        }
-    }
+    // Assign positions in row-major order (handles multi-block cells)
+    let (cell_blocks_to_update, _) =
+        reassign_cell_block_positions(&*uow, &all_cells, base_pos, now)?;
     if !cell_blocks_to_update.is_empty() {
         uow.update_block_multi(&cell_blocks_to_update)?;
     }

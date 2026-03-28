@@ -96,6 +96,34 @@ macro_rules! impl_cell_block_reader {
 pub(crate) use impl_cell_block_reader;
 
 /// Compute the minimum document_position across all blocks in the given cell frames.
+/// Reassign document_position for all blocks across table cells in row-major order.
+/// Returns the blocks that need updating and the total block count.
+pub fn reassign_cell_block_positions(
+    uow: &dyn CellBlockReader,
+    cells: &[common::entities::TableCell],
+    base_pos: i64,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(Vec<Block>, i64)> {
+    let mut blocks_to_update: Vec<Block> = Vec::new();
+    let mut running_pos: i64 = 0;
+    for cell in cells {
+        if let Some(cf_id) = cell.cell_frame {
+            let block_ids =
+                uow.cbr_get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+            let blocks_opt = uow.cbr_get_block_multi(&block_ids)?;
+            let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+            blocks.sort_by_key(|b| b.document_position);
+            for mut block in blocks {
+                block.document_position = base_pos + running_pos;
+                block.updated_at = now;
+                blocks_to_update.push(block);
+                running_pos += 1;
+            }
+        }
+    }
+    Ok((blocks_to_update, running_pos))
+}
+
 pub fn compute_table_base_pos(
     uow: &dyn CellBlockReader,
     cell_frame_ids: &[EntityId],
