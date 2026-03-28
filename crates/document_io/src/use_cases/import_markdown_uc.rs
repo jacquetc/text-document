@@ -210,8 +210,7 @@ fn import_parsed_elements(
 
                 // Create inline elements from spans
                 for span in &parsed_block.spans {
-                    let element =
-                        create_inline_element_from_span(span, parsed_block.is_code_block);
+                    let element = create_inline_element_from_span(span, parsed_block.is_code_block);
                     uow.create_inline_element(&element, created_block.id, -1)?;
                 }
 
@@ -262,10 +261,7 @@ fn import_parsed_elements(
             ParsedElement::Table(parsed_table) => {
                 list_grouper.reset();
                 let num_rows = parsed_table.rows.len() as i64;
-                let num_cols = parsed_table
-                    .rows
-                    .first()
-                    .map_or(0, |r| r.len()) as i64;
+                let num_cols = parsed_table.rows.first().map_or(0, |r| r.len()) as i64;
                 if num_rows == 0 || num_cols == 0 {
                     continue;
                 }
@@ -288,8 +284,7 @@ fn import_parsed_elements(
                     for (c, cell) in row.iter().enumerate() {
                         // Create cell frame
                         let cell_frame = Frame::default();
-                        let created_cell_frame =
-                            uow.create_frame(&cell_frame, doc_id, -1)?;
+                        let created_cell_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
 
                         // Build plain text from spans
                         let plain_text: String =
@@ -303,13 +298,10 @@ fn import_parsed_elements(
                             document_position,
                             ..Block::default()
                         };
-                        let created_block =
-                            uow.create_block(&block, created_cell_frame.id, -1)?;
+                        let created_block = uow.create_block(&block, created_cell_frame.id, -1)?;
 
                         // Create inline elements from spans
-                        if cell.spans.is_empty()
-                            || cell.spans.iter().all(|s| s.text.is_empty())
-                        {
+                        if cell.spans.is_empty() || cell.spans.iter().all(|s| s.text.is_empty()) {
                             let elem = InlineElement {
                                 content: InlineContent::Empty,
                                 ..InlineElement::default()
@@ -317,20 +309,14 @@ fn import_parsed_elements(
                             uow.create_inline_element(&elem, created_block.id, -1)?;
                         } else {
                             for span in &cell.spans {
-                                let element =
-                                    create_inline_element_from_span(span, false);
-                                uow.create_inline_element(
-                                    &element,
-                                    created_block.id,
-                                    -1,
-                                )?;
+                                let element = create_inline_element_from_span(span, false);
+                                uow.create_inline_element(&element, created_block.id, -1)?;
                             }
                         }
 
                         // Update cell frame's child_order
                         let mut updated_cell_frame = created_cell_frame.clone();
-                        updated_cell_frame.child_order =
-                            vec![created_block.id as i64];
+                        updated_cell_frame.child_order = vec![created_block.id as i64];
                         uow.update_frame(&updated_cell_frame)?;
 
                         // Create TableCell entity
@@ -342,11 +328,7 @@ fn import_parsed_elements(
                             cell_frame: Some(created_cell_frame.id),
                             ..TableCell::default()
                         };
-                        uow.create_table_cell(
-                            &table_cell,
-                            created_table.id,
-                            -1,
-                        )?;
+                        uow.create_table_cell(&table_cell, created_table.id, -1)?;
 
                         total_chars += text_length;
                         total_block_count += 1;
@@ -364,8 +346,7 @@ fn import_parsed_elements(
                     table: Some(created_table.id),
                     ..Frame::default()
                 };
-                let created_anchor =
-                    uow.create_frame(&anchor_frame, doc_id, -1)?;
+                let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
 
                 // Add anchor to parent's child_order (negative = frame reference)
                 frame_stack
@@ -441,8 +422,12 @@ impl LongOperation for ImportMarkdownUseCase {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        let result =
-            import_parsed_elements(&mut uow, &parsed_elements, &*progress_callback, &cancel_flag);
+        let result = import_parsed_elements(
+            &mut uow,
+            &parsed_elements,
+            &*progress_callback,
+            &cancel_flag,
+        );
 
         match result {
             Ok(block_count) => {

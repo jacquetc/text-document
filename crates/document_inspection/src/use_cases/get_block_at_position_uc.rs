@@ -146,7 +146,8 @@ fn collect_block_ids(
                     .ok_or_else(|| anyhow!("Sub-frame not found"))?;
                 if let Some(table_id) = sub_frame.table {
                     // Table anchor frame: collect blocks from cell frames in row-major order
-                    let cell_ids = uow.get_table_relationship(&table_id, &TableRelationshipField::Cells)?;
+                    let cell_ids =
+                        uow.get_table_relationship(&table_id, &TableRelationshipField::Cells)?;
                     let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
                     let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
                     cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));

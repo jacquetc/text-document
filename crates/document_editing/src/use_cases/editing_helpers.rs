@@ -95,8 +95,8 @@ where
                 block_ids.push(entry as EntityId);
             } else if entry < 0 {
                 let sub_frame_id = (-entry) as EntityId;
-                let sub_frame = get_frame(&sub_frame_id)?
-                    .ok_or_else(|| anyhow!("Sub-frame not found"))?;
+                let sub_frame =
+                    get_frame(&sub_frame_id)?.ok_or_else(|| anyhow!("Sub-frame not found"))?;
                 if let Some(table_id) = sub_frame.table {
                     // Table anchor frame: collect blocks from cell frames
                     let cell_frame_ids = get_table_cell_frames(&table_id)?;

@@ -103,8 +103,7 @@ fn execute_delete(
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
     let get_table_cell_frames = |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
-        let cell_ids =
-            uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+        let cell_ids = uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
         let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
         let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
         cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));

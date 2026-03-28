@@ -11,19 +11,15 @@ pub mod write {
             inline_element::inline_element_repository::InlineElementRepository,
             list::list_repository::ListRepository,
             resource::resource_repository::ResourceRepository,
-            root::root_repository::RootRepository,
-            table::table_repository::TableRepository,
+            root::root_repository::RootRepository, table::table_repository::TableRepository,
             table_cell::table_cell_repository::TableCellRepository,
         },
         direct_access::{
-            block::block_table::BlockHashMapTable,
-            document::document_table::DocumentHashMapTable,
+            block::block_table::BlockHashMapTable, document::document_table::DocumentHashMapTable,
             frame::frame_table::FrameHashMapTable,
             inline_element::inline_element_table::InlineElementHashMapTable,
-            list::list_table::ListHashMapTable,
-            resource::resource_table::ResourceHashMapTable,
-            root::root_table::RootHashMapTable,
-            table::table_table::TableHashMapTable,
+            list::list_table::ListHashMapTable, resource::resource_table::ResourceHashMapTable,
+            root::root_table::RootHashMapTable, table::table_table::TableHashMapTable,
             table_cell::table_cell_table::TableCellHashMapTable,
         },
     };
@@ -86,8 +82,7 @@ pub mod read {
             inline_element::inline_element_repository::InlineElementRepositoryRO,
             list::list_repository::ListRepositoryRO,
             resource::resource_repository::ResourceRepositoryRO,
-            root::root_repository::RootRepositoryRO,
-            table::table_repository::TableRepositoryRO,
+            root::root_repository::RootRepositoryRO, table::table_repository::TableRepositoryRO,
             table_cell::table_cell_repository::TableCellRepositoryRO,
         },
         direct_access::{
@@ -95,10 +90,8 @@ pub mod read {
             document::document_table::DocumentHashMapTableRO,
             frame::frame_table::FrameHashMapTableRO,
             inline_element::inline_element_table::InlineElementHashMapTableRO,
-            list::list_table::ListHashMapTableRO,
-            resource::resource_table::ResourceHashMapTableRO,
-            root::root_table::RootHashMapTableRO,
-            table::table_table::TableHashMapTableRO,
+            list::list_table::ListHashMapTableRO, resource::resource_table::ResourceHashMapTableRO,
+            root::root_table::RootHashMapTableRO, table::table_table::TableHashMapTableRO,
             table_cell::table_cell_table::TableCellHashMapTableRO,
         },
     };
@@ -145,9 +138,7 @@ pub mod read {
         TableRepositoryRO::new(Box::new(table_table))
     }
 
-    pub fn create_table_cell_repository(
-        transaction: &'_ Transaction,
-    ) -> TableCellRepositoryRO<'_> {
+    pub fn create_table_cell_repository(transaction: &'_ Transaction) -> TableCellRepositoryRO<'_> {
         let table_cell_table = TableCellHashMapTableRO::new(transaction.get_store());
         TableCellRepositoryRO::new(Box::new(table_cell_table))
     }

@@ -13,9 +13,7 @@ pub struct ListGrouper {
 
 impl ListGrouper {
     pub fn new() -> Self {
-        Self {
-            active: Vec::new(),
-        }
+        Self { active: Vec::new() }
     }
 
     /// Returns an existing list entity id if the style and indent match

@@ -1,12 +1,11 @@
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use std::time::Duration;
 use text_document::{
     Alignment, BlockFormat, FindOptions, ListStyle, MoveMode, MoveOperation, SelectionType,
     TextDocument, TextFormat,
 };
 
-const PARAGRAPH: &str =
-    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+const PARAGRAPH: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 
 const SIZES: &[(usize, &str)] = &[
     (1, "small/1para"),
@@ -54,41 +53,53 @@ fn bench_insertion(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
 
     for &(n, label) in SIZES {
-        group.bench_with_input(BenchmarkId::new("insert_char_at_start", label), &n, |b, &n| {
-            b.iter_batched(
-                || {
-                    let (doc, _) = make_doc(n);
-                    let cursor = doc.cursor_at(0);
-                    (doc, cursor)
-                },
-                |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
-                BatchSize::SmallInput,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::new("insert_char_at_start", label),
+            &n,
+            |b, &n| {
+                b.iter_batched(
+                    || {
+                        let (doc, _) = make_doc(n);
+                        let cursor = doc.cursor_at(0);
+                        (doc, cursor)
+                    },
+                    |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("insert_char_at_middle", label), &n, |b, &n| {
-            b.iter_batched(
-                || {
-                    let (doc, len) = make_doc(n);
-                    let cursor = doc.cursor_at(len / 2);
-                    (doc, cursor)
-                },
-                |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
-                BatchSize::SmallInput,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::new("insert_char_at_middle", label),
+            &n,
+            |b, &n| {
+                b.iter_batched(
+                    || {
+                        let (doc, len) = make_doc(n);
+                        let cursor = doc.cursor_at(len / 2);
+                        (doc, cursor)
+                    },
+                    |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("insert_char_at_end", label), &n, |b, &n| {
-            b.iter_batched(
-                || {
-                    let (doc, len) = make_doc(n);
-                    let cursor = doc.cursor_at(len);
-                    (doc, cursor)
-                },
-                |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
-                BatchSize::SmallInput,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::new("insert_char_at_end", label),
+            &n,
+            |b, &n| {
+                b.iter_batched(
+                    || {
+                        let (doc, len) = make_doc(n);
+                        let cursor = doc.cursor_at(len);
+                        (doc, cursor)
+                    },
+                    |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
 
         group.bench_with_input(BenchmarkId::new("insert_word", label), &n, |b, &n| {
             b.iter_batched(
@@ -138,17 +149,21 @@ fn bench_deletion(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
 
     for &(n, label) in SIZES {
-        group.bench_with_input(BenchmarkId::new("delete_char_forward", label), &n, |b, &n| {
-            b.iter_batched(
-                || {
-                    let (doc, len) = make_doc(n);
-                    let cursor = doc.cursor_at(len / 2);
-                    (doc, cursor)
-                },
-                |(_doc, cursor)| cursor.delete_char().unwrap(),
-                BatchSize::SmallInput,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::new("delete_char_forward", label),
+            &n,
+            |b, &n| {
+                b.iter_batched(
+                    || {
+                        let (doc, len) = make_doc(n);
+                        let cursor = doc.cursor_at(len / 2);
+                        (doc, cursor)
+                    },
+                    |(_doc, cursor)| cursor.delete_char().unwrap(),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
 
         group.bench_with_input(
             BenchmarkId::new("delete_char_backward", label),
@@ -199,7 +214,11 @@ fn bench_cursor_movement(c: &mut Criterion) {
             let cursor = doc.cursor_at(0);
             b.iter(|| {
                 cursor.set_position(0, MoveMode::MoveAnchor);
-                black_box(cursor.move_position(MoveOperation::NextCharacter, MoveMode::MoveAnchor, 1));
+                black_box(cursor.move_position(
+                    MoveOperation::NextCharacter,
+                    MoveMode::MoveAnchor,
+                    1,
+                ));
             });
         });
 
@@ -760,32 +779,22 @@ fn bench_editing_session(c: &mut Criterion) {
 
 // ── Main ────────────────────────────────────────────────────────
 
-criterion_group!(
-    creation,
-    bench_document_creation
-);
-criterion_group!(
-    editing,
-    bench_insertion,
-    bench_deletion
-);
-criterion_group!(
-    navigation,
-    bench_cursor_movement,
-    bench_search
-);
-criterion_group!(
-    history,
-    bench_undo_redo
-);
+criterion_group!(creation, bench_document_creation);
+criterion_group!(editing, bench_insertion, bench_deletion);
+criterion_group!(navigation, bench_cursor_movement, bench_search);
+criterion_group!(history, bench_undo_redo);
 criterion_group!(
     formatting_group,
     bench_formatting,
     bench_tables,
     bench_lists
 );
-criterion_group!(
-    session,
-    bench_editing_session
+criterion_group!(session, bench_editing_session);
+criterion_main!(
+    creation,
+    editing,
+    navigation,
+    history,
+    formatting_group,
+    session
 );
-criterion_main!(creation, editing, navigation, history, formatting_group, session);
