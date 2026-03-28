@@ -36,6 +36,9 @@ use crate::highlight::HighlightData;
 pub(crate) struct CursorData {
     pub position: usize,
     pub anchor: usize,
+    /// When set, overrides the computed `SelectionKind` to force cell selection.
+    /// Cleared whenever position or anchor changes via normal editing/movement.
+    pub cell_selection_override: Option<crate::flow::CellRange>,
 }
 
 /// Callback entry for document event subscriptions.
@@ -121,6 +124,7 @@ impl TextDocumentInner {
         let data = Arc::new(Mutex::new(CursorData {
             position,
             anchor: position,
+            cell_selection_override: None,
         }));
         self.cursors.push(Arc::downgrade(&data));
         data

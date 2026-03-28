@@ -57,7 +57,11 @@ impl Clone for TextCursor {
         };
         let data = {
             let mut inner = self.doc.lock();
-            let data = Arc::new(Mutex::new(CursorData { position, anchor }));
+            let data = Arc::new(Mutex::new(CursorData {
+                position,
+                anchor,
+                cell_selection_override: None,
+            }));
             inner.cursors.push(Arc::downgrade(&data));
             data
         };
@@ -269,6 +273,7 @@ impl TextCursor {
         if mode == MoveMode::MoveAnchor {
             d.anchor = pos;
         }
+        d.cell_selection_override = None;
     }
 
     /// Move the cursor by a semantic operation.
@@ -296,6 +301,7 @@ impl TextCursor {
                 let mut d = self.data.lock();
                 d.anchor = 0;
                 d.position = end;
+                d.cell_selection_override = None;
             }
             SelectionType::BlockUnderCursor | SelectionType::LineUnderCursor => {
                 let pos = self.position();
@@ -312,6 +318,7 @@ impl TextCursor {
                     let mut d = self.data.lock();
                     d.anchor = start;
                     d.position = end;
+                    d.cell_selection_override = None;
                 }
             }
             SelectionType::WordUnderCursor => {
@@ -320,6 +327,7 @@ impl TextCursor {
                 let mut d = self.data.lock();
                 d.anchor = word_start;
                 d.position = word_end;
+                d.cell_selection_override = None;
             }
         }
     }
@@ -1049,6 +1057,246 @@ impl TextCursor {
             .cell(cell_ref.row, cell_ref.column)
             .ok_or_else(|| anyhow::anyhow!("cell not found"))?;
         self.set_table_cell_format(cell.id(), format)
+    }
+
+    // ── Cell selection queries ────────────────────────────────
+
+    /// Determine the kind of selection the cursor currently has.
+    ///
+    /// Returns [`SelectionKind::Cells`] when position and anchor are in
+    /// different cells of the same table (rectangular cell selection), or
+    /// when an explicit cell-selection override is active.
+    pub fn selection_kind(&self) -> crate::flow::SelectionKind {
+        use crate::flow::{CellRange, SelectionKind};
+
+        // Check override first
+        {
+            let d = self.data.lock();
+            if let Some(ref range) = d.cell_selection_override {
+                return SelectionKind::Cells(range.clone());
+            }
+            if d.position == d.anchor {
+                return SelectionKind::None;
+            }
+        }
+
+        let (pos, anchor) = self.read_cursor();
+
+        // Look up table cell for position and anchor
+        let pos_cell = self.table_cell_at(pos);
+        let anchor_cell = self.table_cell_at(anchor);
+
+        match (&pos_cell, &anchor_cell) {
+            (None, None) => SelectionKind::Text,
+            (Some(pc), Some(ac)) => {
+                if pc.table.id() != ac.table.id() {
+                    // Different tables — treat as text (whole tables selected between them)
+                    return SelectionKind::Text;
+                }
+                if pc.row == ac.row && pc.column == ac.column {
+                    // Same cell — text selection within one cell
+                    return SelectionKind::Text;
+                }
+                // Different cells, same table — rectangular cell selection
+                let range = CellRange {
+                    table_id: pc.table.id(),
+                    start_row: pc.row.min(ac.row),
+                    start_col: pc.column.min(ac.column),
+                    end_row: pc.row.max(ac.row),
+                    end_col: pc.column.max(ac.column),
+                };
+                let spans = self.collect_cell_spans(pc.table.id());
+                SelectionKind::Cells(range.expand_for_spans(&spans))
+            }
+            (Some(tc), None) | (None, Some(tc)) => {
+                // One endpoint inside a table, the other outside — mixed selection
+                let table_id = tc.table.id();
+                let rows = tc.table.rows();
+                let cols = tc.table.columns();
+                let text_before;
+                let text_after;
+                let range;
+
+                // Determine which endpoint is inside the table
+                let inside_pos = if pos_cell.is_some() { pos } else { anchor };
+                let outside_pos = if pos_cell.is_some() { anchor } else { pos };
+
+                if outside_pos < inside_pos {
+                    // Text before table, selection enters from above/left
+                    text_before = true;
+                    text_after = false;
+                    range = CellRange {
+                        table_id,
+                        start_row: 0,
+                        start_col: 0,
+                        end_row: tc.row,
+                        end_col: if cols > 0 { cols - 1 } else { 0 },
+                    };
+                } else {
+                    // Text after table, selection enters from below/right
+                    text_before = false;
+                    text_after = true;
+                    range = CellRange {
+                        table_id,
+                        start_row: tc.row,
+                        start_col: 0,
+                        end_row: if rows > 0 { rows - 1 } else { 0 },
+                        end_col: if cols > 0 { cols - 1 } else { 0 },
+                    };
+                }
+                let spans = self.collect_cell_spans(table_id);
+                SelectionKind::Mixed {
+                    cell_range: range.expand_for_spans(&spans),
+                    text_before,
+                    text_after,
+                }
+            }
+        }
+    }
+
+    /// Returns `true` when the current selection involves whole-cell selection.
+    pub fn is_cell_selection(&self) -> bool {
+        matches!(
+            self.selection_kind(),
+            crate::flow::SelectionKind::Cells(_) | crate::flow::SelectionKind::Mixed { .. }
+        )
+    }
+
+    /// Returns the rectangular cell range if the cursor has a cell selection.
+    pub fn selected_cell_range(&self) -> Option<crate::flow::CellRange> {
+        match self.selection_kind() {
+            crate::flow::SelectionKind::Cells(r) => Some(r),
+            crate::flow::SelectionKind::Mixed { cell_range, .. } => Some(cell_range),
+            _ => None,
+        }
+    }
+
+    /// Returns all cells in the selected rectangular range.
+    pub fn selected_cells(&self) -> Vec<TableCellRef> {
+        let range = match self.selected_cell_range() {
+            Some(r) => r,
+            None => return Vec::new(),
+        };
+        let table = TextTable {
+            doc: self.doc.clone(),
+            table_id: range.table_id,
+        };
+        let mut cells = Vec::new();
+        for row in range.start_row..=range.end_row {
+            for col in range.start_col..=range.end_col {
+                if table.cell(row, col).is_some() {
+                    cells.push(TableCellRef {
+                        table: table.clone(),
+                        row,
+                        column: col,
+                    });
+                }
+            }
+        }
+        cells
+    }
+
+    // ── Explicit cell selection ─────────────────────────────
+
+    /// Set an explicit single-cell selection override.
+    pub fn select_table_cell(&self, table_id: usize, row: usize, col: usize) {
+        let mut d = self.data.lock();
+        d.cell_selection_override = Some(crate::flow::CellRange {
+            table_id,
+            start_row: row,
+            start_col: col,
+            end_row: row,
+            end_col: col,
+        });
+    }
+
+    /// Set an explicit rectangular cell-range selection override.
+    pub fn select_cell_range(
+        &self,
+        table_id: usize,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+    ) {
+        let range = crate::flow::CellRange {
+            table_id,
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        };
+        let spans = self.collect_cell_spans(table_id);
+        let mut d = self.data.lock();
+        d.cell_selection_override = Some(range.expand_for_spans(&spans));
+    }
+
+    /// Clear any cell-selection override without changing position/anchor.
+    pub fn clear_cell_selection(&self) {
+        let mut d = self.data.lock();
+        d.cell_selection_override = None;
+    }
+
+    // ── Cell selection helpers (private) ─────────────────────
+
+    /// Look up which table cell contains the given document position, if any.
+    fn table_cell_at(&self, position: usize) -> Option<TableCellRef> {
+        let inner = self.doc.lock();
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(position),
+        };
+        let block_info =
+            document_inspection_commands::get_block_at_position(&inner.ctx, &dto).ok()?;
+
+        let block_id = if to_i64(position) < block_info.block_start && position > 0 {
+            let prev_dto = frontend::document_inspection::GetBlockAtPositionDto {
+                position: to_i64(position - 1),
+            };
+            let prev_info =
+                document_inspection_commands::get_block_at_position(&inner.ctx, &prev_dto).ok()?;
+            prev_info.block_id as usize
+        } else {
+            block_info.block_id as usize
+        };
+
+        let block = crate::text_block::TextBlock {
+            doc: self.doc.clone(),
+            block_id,
+        };
+        drop(inner);
+        block.table_cell()
+    }
+
+    /// Collect `(row, col, row_span, col_span)` tuples for all cells in a table.
+    fn collect_cell_spans(&self, table_id: usize) -> Vec<(usize, usize, usize, usize)> {
+        let inner = self.doc.lock();
+        let table_dto = match frontend::commands::table_commands::get_table(
+            &inner.ctx,
+            &(table_id as u64),
+        )
+        .ok()
+        .flatten()
+        {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+
+        let mut spans = Vec::with_capacity(table_dto.cells.len());
+        for &cell_id in &table_dto.cells {
+            if let Some(cell) =
+                frontend::commands::table_cell_commands::get_table_cell(&inner.ctx, &cell_id)
+                    .ok()
+                    .flatten()
+            {
+                spans.push((
+                    cell.row as usize,
+                    cell.column as usize,
+                    cell.row_span.max(1) as usize,
+                    cell.column_span.max(1) as usize,
+                ));
+            }
+        }
+        spans
     }
 
     /// Delete the character after the cursor (Delete key).

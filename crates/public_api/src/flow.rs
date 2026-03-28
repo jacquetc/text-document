@@ -142,6 +142,83 @@ pub struct TableCellRef {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CellRange / SelectionKind
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// A rectangular range of cells within a single table (inclusive bounds).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellRange {
+    pub table_id: usize,
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+}
+
+impl CellRange {
+    /// Expand the range so that every merged cell whose span overlaps the
+    /// rectangle is fully included. `cells` is a slice of
+    /// `(row, col, row_span, col_span)` for every cell in the table.
+    ///
+    /// Uses fixed-point iteration (converges in 1-2 rounds for typical tables).
+    pub fn expand_for_spans(mut self, cells: &[(usize, usize, usize, usize)]) -> Self {
+        loop {
+            let mut expanded = false;
+            for &(row, col, rs, cs) in cells {
+                let cell_bottom = row + rs - 1;
+                let cell_right = col + cs - 1;
+                // Check overlap with current range
+                if row <= self.end_row
+                    && cell_bottom >= self.start_row
+                    && col <= self.end_col
+                    && cell_right >= self.start_col
+                {
+                    if row < self.start_row {
+                        self.start_row = row;
+                        expanded = true;
+                    }
+                    if cell_bottom > self.end_row {
+                        self.end_row = cell_bottom;
+                        expanded = true;
+                    }
+                    if col < self.start_col {
+                        self.start_col = col;
+                        expanded = true;
+                    }
+                    if cell_right > self.end_col {
+                        self.end_col = cell_right;
+                        expanded = true;
+                    }
+                }
+            }
+            if !expanded {
+                break;
+            }
+        }
+        self
+    }
+}
+
+/// Describes what kind of selection the cursor currently has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectionKind {
+    /// No selection (position == anchor).
+    None,
+    /// Normal text selection within a single cell or outside any table.
+    Text,
+    /// Rectangular cell selection within a table.
+    Cells(CellRange),
+    /// Selection crosses a table boundary (starts/ends outside the table).
+    /// The table portion is a rectangular cell range; `text_before` /
+    /// `text_after` indicate whether text outside the table is also selected.
+    Mixed {
+        cell_range: CellRange,
+        text_before: bool,
+        text_after: bool,
+    },
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Table format types
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

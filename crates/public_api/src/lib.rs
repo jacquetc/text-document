@@ -59,9 +59,9 @@ pub use operation::{DocxExportResult, HtmlImportResult, MarkdownImportResult, Op
 
 // ── Layout engine API types ─────────────────────────────────────
 pub use flow::{
-    BlockSnapshot, CellFormat, CellSnapshot, CellVerticalAlignment, FlowElement,
+    BlockSnapshot, CellFormat, CellRange, CellSnapshot, CellVerticalAlignment, FlowElement,
     FlowElementSnapshot, FlowSnapshot, FormatChangeKind, FragmentContent, FrameSnapshot, ListInfo,
-    TableCellContext, TableCellRef, TableFormat, TableSnapshot,
+    SelectionKind, TableCellContext, TableCellRef, TableFormat, TableSnapshot,
 };
 pub use text_block::TextBlock;
 pub use text_frame::TextFrame;
