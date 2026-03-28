@@ -7,7 +7,7 @@ use crate::{
     direct_access::repository_factory,
     entities::TableCell,
     event::{DirectAccessEntity, EntityEvent, Event, EventBuffer, Origin},
-    snapshot::{EntityTreeSnapshot, TableLevelSnapshot},
+    snapshot::EntityTreeSnapshot,
     types::EntityId,
 };
 
@@ -89,8 +89,6 @@ pub trait TableCellTable {
         ids_to_move: &[EntityId],
         new_index: i32,
     ) -> Result<Vec<EntityId>, RepositoryError>;
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError>;
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError>;
 }
 
 pub trait TableCellTableRO {
@@ -573,8 +571,6 @@ impl<'a> TableCellRepository<'a> {
     pub fn snapshot(&self, _ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
         let store_snap = self.transaction.snapshot_store();
         Ok(EntityTreeSnapshot {
-            table_data: TableLevelSnapshot::default(),
-            children: Vec::new(),
             store_snapshot: Some(store_snap),
         })
     }

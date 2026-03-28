@@ -1,6 +1,6 @@
-use crate::impl_leaf_entity_table;
-use crate::entities::*;
 use super::list_repository::{ListTable, ListTableRO};
+use crate::entities::*;
+use crate::impl_leaf_entity_table;
 
 impl_leaf_entity_table! {
     entity: List,

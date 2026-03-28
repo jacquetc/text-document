@@ -1,12 +1,10 @@
-use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use crate::database::hashmap_store::{
-    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_restore,
-    junction_set, junction_snapshot, junction_snapshot_backward,
+    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_set,
 };
 use crate::entities::*;
 use crate::error::RepositoryError;
-use crate::snapshot::{TableLevelSnapshot, TableSnapshot};
 use crate::types::EntityId;
+use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -34,12 +32,10 @@ impl<'a> FrameHashMapTable<'a> {
 
     fn hydrate(&self, entity: &mut Frame) {
         entity.blocks = junction_get(&self.store.jn_block_from_frame_blocks, &entity.id);
-        entity.parent_frame = junction_get(
-            &self.store.jn_frame_from_frame_parent_frame,
-            &entity.id,
-        )
-        .into_iter()
-        .next();
+        entity.parent_frame =
+            junction_get(&self.store.jn_frame_from_frame_parent_frame, &entity.id)
+                .into_iter()
+                .next();
         entity.table = junction_get(&self.store.jn_table_from_frame_table, &entity.id)
             .into_iter()
             .next();
@@ -189,10 +185,7 @@ impl<'a> FrameTable for FrameHashMapTable<'a> {
             junction_remove(&self.store.jn_frame_from_frame_parent_frame, id);
             junction_remove(&self.store.jn_table_from_frame_table, id);
             // backward junctions
-            delete_from_backward_junction(
-                &self.store.jn_frame_from_table_cell_cell_frame,
-                id,
-            );
+            delete_from_backward_junction(&self.store.jn_frame_from_table_cell_cell_frame, id);
             delete_from_backward_junction(&self.store.jn_frame_from_document_frames, id);
             // self-referential backward
             delete_from_backward_junction(&self.store.jn_frame_from_frame_parent_frame, id);
@@ -201,107 +194,6 @@ impl<'a> FrameTable for FrameHashMapTable<'a> {
     }
 
     impl_write_relationship_methods!(FrameHashMapTable<'a>, FrameRelationshipField);
-
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError> {
-        let frames = self.store.frames.read().unwrap();
-        let mut rows = Vec::new();
-        for id in ids {
-            if let Some(entity) = frames.get(id) {
-                let bytes = postcard::to_allocvec(entity)
-                    .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-                rows.push((*id, bytes));
-            }
-        }
-
-        let forward_junctions = vec![
-            junction_snapshot(
-                &self.store.jn_block_from_frame_blocks,
-                ids,
-                "block_from_frame_blocks_junction",
-            ),
-            junction_snapshot(
-                &self.store.jn_frame_from_frame_parent_frame,
-                ids,
-                "frame_from_frame_parent_frame_junction",
-            ),
-            junction_snapshot(
-                &self.store.jn_table_from_frame_table,
-                ids,
-                "table_from_frame_table_junction",
-            ),
-        ];
-
-        let mut backward_junctions = Vec::new();
-        if let Some(snap) = junction_snapshot_backward(
-            &self.store.jn_frame_from_table_cell_cell_frame,
-            ids,
-            "frame_from_table_cell_cell_frame_junction",
-        ) {
-            backward_junctions.push(snap);
-        }
-        if let Some(snap) = junction_snapshot_backward(
-            &self.store.jn_back_document_frames,
-            ids,
-            "frame_from_document_frames_junction",
-        ) {
-            backward_junctions.push(snap);
-        }
-        if let Some(snap) = junction_snapshot_backward(
-            &self.store.jn_back_frame_parent_frame,
-            ids,
-            "frame_from_frame_parent_frame_junction",
-        ) {
-            backward_junctions.push(snap);
-        }
-
-        Ok(TableLevelSnapshot {
-            entity_rows: TableSnapshot {
-                table_name: "frame".to_string(),
-                rows,
-            },
-            forward_junctions,
-            backward_junctions,
-        })
-    }
-
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError> {
-        let mut frames = self.store.frames.write().unwrap();
-        for (id, bytes) in &snap.entity_rows.rows {
-            let entity: Frame = postcard::from_bytes(bytes)
-                .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-            frames.insert(*id, entity);
-        }
-        drop(frames);
-        for js in &snap.forward_junctions {
-            match js.table_name.as_str() {
-                "block_from_frame_blocks_junction" => {
-                    junction_restore(&self.store.jn_block_from_frame_blocks, js);
-                }
-                "frame_from_frame_parent_frame_junction" => {
-                    junction_restore(&self.store.jn_frame_from_frame_parent_frame, js);
-                }
-                "table_from_frame_table_junction" => {
-                    junction_restore(&self.store.jn_table_from_frame_table, js);
-                }
-                _ => {}
-            }
-        }
-        for js in &snap.backward_junctions {
-            match js.table_name.as_str() {
-                "frame_from_table_cell_cell_frame_junction" => {
-                    junction_restore(&self.store.jn_frame_from_table_cell_cell_frame, js);
-                }
-                "frame_from_document_frames_junction" => {
-                    junction_restore(&self.store.jn_back_document_frames, js);
-                }
-                "frame_from_frame_parent_frame_junction" => {
-                    junction_restore(&self.store.jn_back_frame_parent_frame, js);
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
 }
 
 pub struct FrameHashMapTableRO<'a> {
@@ -326,12 +218,10 @@ impl<'a> FrameHashMapTableRO<'a> {
 
     fn hydrate(&self, entity: &mut Frame) {
         entity.blocks = junction_get(&self.store.jn_block_from_frame_blocks, &entity.id);
-        entity.parent_frame = junction_get(
-            &self.store.jn_frame_from_frame_parent_frame,
-            &entity.id,
-        )
-        .into_iter()
-        .next();
+        entity.parent_frame =
+            junction_get(&self.store.jn_frame_from_frame_parent_frame, &entity.id)
+                .into_iter()
+                .next();
         entity.table = junction_get(&self.store.jn_table_from_frame_table, &entity.id)
             .into_iter()
             .next();

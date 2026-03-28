@@ -1,12 +1,10 @@
-use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use crate::database::hashmap_store::{
-    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_restore,
-    junction_set, junction_snapshot, junction_snapshot_backward,
+    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_set,
 };
 use crate::entities::*;
 use crate::error::RepositoryError;
-use crate::snapshot::{TableLevelSnapshot, TableSnapshot};
 use crate::types::EntityId;
+use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -28,22 +26,17 @@ impl<'a> DocumentHashMapTable<'a> {
         match field {
             DocumentRelationshipField::Frames => &self.store.jn_frame_from_document_frames,
             DocumentRelationshipField::Lists => &self.store.jn_list_from_document_lists,
-            DocumentRelationshipField::Resources => {
-                &self.store.jn_resource_from_document_resources
-            }
+            DocumentRelationshipField::Resources => &self.store.jn_resource_from_document_resources,
             DocumentRelationshipField::Tables => &self.store.jn_table_from_document_tables,
         }
     }
 
     fn hydrate(&self, entity: &mut Document) {
-        entity.frames =
-            junction_get(&self.store.jn_frame_from_document_frames, &entity.id);
-        entity.lists =
-            junction_get(&self.store.jn_list_from_document_lists, &entity.id);
+        entity.frames = junction_get(&self.store.jn_frame_from_document_frames, &entity.id);
+        entity.lists = junction_get(&self.store.jn_list_from_document_lists, &entity.id);
         entity.resources =
             junction_get(&self.store.jn_resource_from_document_resources, &entity.id);
-        entity.tables =
-            junction_get(&self.store.jn_table_from_document_tables, &entity.id);
+        entity.tables = junction_get(&self.store.jn_table_from_document_tables, &entity.id);
     }
 }
 
@@ -209,92 +202,6 @@ impl<'a> DocumentTable for DocumentHashMapTable<'a> {
     }
 
     impl_write_relationship_methods!(DocumentHashMapTable<'a>, DocumentRelationshipField);
-
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError> {
-        let docs = self.store.documents.read().unwrap();
-        let mut rows = Vec::new();
-        for id in ids {
-            if let Some(entity) = docs.get(id) {
-                let bytes = postcard::to_allocvec(entity)
-                    .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-                rows.push((*id, bytes));
-            }
-        }
-
-        let forward_junctions = vec![
-            junction_snapshot(
-                &self.store.jn_frame_from_document_frames,
-                ids,
-                "frame_from_document_frames_junction",
-            ),
-            junction_snapshot(
-                &self.store.jn_list_from_document_lists,
-                ids,
-                "list_from_document_lists_junction",
-            ),
-            junction_snapshot(
-                &self.store.jn_resource_from_document_resources,
-                ids,
-                "resource_from_document_resources_junction",
-            ),
-            junction_snapshot(
-                &self.store.jn_table_from_document_tables,
-                ids,
-                "table_from_document_tables_junction",
-            ),
-        ];
-
-        let mut backward_junctions = Vec::new();
-        if let Some(snap) = junction_snapshot_backward(
-            &self.store.jn_document_from_root_document,
-            ids,
-            "document_from_root_document_junction",
-        ) {
-            backward_junctions.push(snap);
-        }
-
-        Ok(TableLevelSnapshot {
-            entity_rows: TableSnapshot {
-                table_name: "document".to_string(),
-                rows,
-            },
-            forward_junctions,
-            backward_junctions,
-        })
-    }
-
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError> {
-        let mut docs = self.store.documents.write().unwrap();
-        for (id, bytes) in &snap.entity_rows.rows {
-            let entity: Document = postcard::from_bytes(bytes)
-                .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-            docs.insert(*id, entity);
-        }
-        drop(docs);
-        for js in &snap.forward_junctions {
-            match js.table_name.as_str() {
-                "frame_from_document_frames_junction" => {
-                    junction_restore(&self.store.jn_frame_from_document_frames, js);
-                }
-                "list_from_document_lists_junction" => {
-                    junction_restore(&self.store.jn_list_from_document_lists, js);
-                }
-                "resource_from_document_resources_junction" => {
-                    junction_restore(&self.store.jn_resource_from_document_resources, js);
-                }
-                "table_from_document_tables_junction" => {
-                    junction_restore(&self.store.jn_table_from_document_tables, js);
-                }
-                _ => {}
-            }
-        }
-        for js in &snap.backward_junctions {
-            if js.table_name == "document_from_root_document_junction" {
-                junction_restore(&self.store.jn_document_from_root_document, js);
-            }
-        }
-        Ok(())
-    }
 }
 
 pub struct DocumentHashMapTableRO<'a> {
@@ -313,22 +220,17 @@ impl<'a> DocumentHashMapTableRO<'a> {
         match field {
             DocumentRelationshipField::Frames => &self.store.jn_frame_from_document_frames,
             DocumentRelationshipField::Lists => &self.store.jn_list_from_document_lists,
-            DocumentRelationshipField::Resources => {
-                &self.store.jn_resource_from_document_resources
-            }
+            DocumentRelationshipField::Resources => &self.store.jn_resource_from_document_resources,
             DocumentRelationshipField::Tables => &self.store.jn_table_from_document_tables,
         }
     }
 
     fn hydrate(&self, entity: &mut Document) {
-        entity.frames =
-            junction_get(&self.store.jn_frame_from_document_frames, &entity.id);
-        entity.lists =
-            junction_get(&self.store.jn_list_from_document_lists, &entity.id);
+        entity.frames = junction_get(&self.store.jn_frame_from_document_frames, &entity.id);
+        entity.lists = junction_get(&self.store.jn_list_from_document_lists, &entity.id);
         entity.resources =
             junction_get(&self.store.jn_resource_from_document_resources, &entity.id);
-        entity.tables =
-            junction_get(&self.store.jn_table_from_document_tables, &entity.id);
+        entity.tables = junction_get(&self.store.jn_table_from_document_tables, &entity.id);
     }
 }
 

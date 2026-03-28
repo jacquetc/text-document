@@ -1,10 +1,9 @@
 use crate::database::hashmap_store::{
     HashMapStore, junction_get, junction_get_relationships_from_right_ids, junction_move_ids,
-    junction_remove, junction_restore, junction_set, junction_snapshot,
+    junction_remove, junction_set,
 };
 use crate::entities::*;
 use crate::error::RepositoryError;
-use crate::snapshot::{TableLevelSnapshot, TableSnapshot};
 use crate::types::EntityId;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -80,9 +79,7 @@ impl<'a> RootTable for RootHashMapTable<'a> {
             {
                 let jn = self.store.jn_document_from_root_document.read().unwrap();
                 for (existing_id, right_ids) in jn.iter() {
-                    if *existing_id != new_entity.id
-                        && right_ids.contains(&new_entity.document)
-                    {
+                    if *existing_id != new_entity.id && right_ids.contains(&new_entity.document) {
                         panic!(
                             "One-to-one constraint violation: Document {} is already referenced by Root {}",
                             new_entity.document, existing_id
@@ -288,51 +285,6 @@ impl<'a> RootTable for RootHashMapTable<'a> {
             ids_to_move,
             new_index,
         ))
-    }
-
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError> {
-        let roots = self.store.roots.read().unwrap();
-        let mut rows = Vec::new();
-        for id in ids {
-            if let Some(entity) = roots.get(id) {
-                let bytes = postcard::to_allocvec(entity)
-                    .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-                rows.push((*id, bytes));
-            }
-        }
-
-        let forward_junctions = vec![junction_snapshot(
-            &self.store.jn_document_from_root_document,
-            ids,
-            "document_from_root_document_junction",
-        )];
-
-        let backward_junctions = Vec::new();
-
-        Ok(TableLevelSnapshot {
-            entity_rows: TableSnapshot {
-                table_name: "root".to_string(),
-                rows,
-            },
-            forward_junctions,
-            backward_junctions,
-        })
-    }
-
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError> {
-        let mut roots = self.store.roots.write().unwrap();
-        for (id, bytes) in &snap.entity_rows.rows {
-            let entity: Root = postcard::from_bytes(bytes)
-                .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-            roots.insert(*id, entity);
-        }
-        drop(roots);
-        for js in &snap.forward_junctions {
-            if js.table_name == "document_from_root_document_junction" {
-                junction_restore(&self.store.jn_document_from_root_document, js);
-            }
-        }
-        Ok(())
     }
 }
 

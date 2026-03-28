@@ -7,7 +7,7 @@ use crate::{
     direct_access::repository_factory,
     entities::Resource,
     event::{DirectAccessEntity, EntityEvent, Event, EventBuffer, Origin},
-    snapshot::{EntityTreeSnapshot, TableLevelSnapshot},
+    snapshot::EntityTreeSnapshot,
     types::EntityId,
 };
 
@@ -40,8 +40,6 @@ pub trait ResourceTable {
     ) -> Result<Vec<Resource>, RepositoryError>;
     fn remove(&mut self, id: &EntityId) -> Result<(), RepositoryError>;
     fn remove_multi(&mut self, ids: &[EntityId]) -> Result<(), RepositoryError>;
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError>;
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError>;
 }
 
 pub trait ResourceTableRO {
@@ -340,8 +338,6 @@ impl<'a> ResourceRepository<'a> {
     pub fn snapshot(&self, _ids: &[EntityId]) -> Result<EntityTreeSnapshot, RepositoryError> {
         let store_snap = self.transaction.snapshot_store();
         Ok(EntityTreeSnapshot {
-            table_data: TableLevelSnapshot::default(),
-            children: Vec::new(),
             store_snapshot: Some(store_snap),
         })
     }

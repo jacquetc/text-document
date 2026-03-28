@@ -13,7 +13,7 @@
 //! allowing `&HashMapStore` to be shared across threads via `Arc`.
 
 use crate::entities::*;
-use crate::snapshot::{JunctionSnapshot, StoreSnapshot, StoreSnapshotTrait};
+use crate::snapshot::{StoreSnapshot, StoreSnapshotTrait};
 use crate::types::EntityId;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -338,53 +338,6 @@ pub(crate) fn junction_remove(junction: &RwLock<HashMap<EntityId, Vec<EntityId>>
     junction.write().unwrap().remove(id);
 }
 
-pub(crate) fn junction_snapshot(
-    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
-    ids: &[EntityId],
-    table_name: &str,
-) -> JunctionSnapshot {
-    let jn = junction.read().unwrap();
-    let entries: Vec<(EntityId, Vec<EntityId>)> = ids
-        .iter()
-        .filter_map(|id| jn.get(id).map(|v| (*id, v.clone())))
-        .collect();
-    JunctionSnapshot {
-        table_name: table_name.to_string(),
-        entries,
-    }
-}
-
-pub(crate) fn junction_restore(
-    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
-    snap: &JunctionSnapshot,
-) {
-    let mut jn = junction.write().unwrap();
-    for (left_id, right_ids) in &snap.entries {
-        jn.insert(*left_id, right_ids.clone());
-    }
-}
-
-pub(crate) fn junction_snapshot_backward(
-    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
-    ids: &[EntityId],
-    table_name: &str,
-) -> Option<JunctionSnapshot> {
-    let jn = junction.read().unwrap();
-    let entries: Vec<(EntityId, Vec<EntityId>)> = jn
-        .iter()
-        .filter(|(_, right_ids)| ids.iter().any(|id| right_ids.contains(id)))
-        .map(|(left_id, right_ids)| (*left_id, right_ids.clone()))
-        .collect();
-    if entries.is_empty() {
-        None
-    } else {
-        Some(JunctionSnapshot {
-            table_name: table_name.to_string(),
-            entries,
-        })
-    }
-}
-
 pub(crate) fn junction_get_relationships_from_right_ids(
     junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
     right_ids: &[EntityId],
@@ -655,57 +608,6 @@ macro_rules! impl_leaf_entity_table {
                         $crate::database::hashmap_store::delete_from_backward_junction(&self.store.$bj_field, id);
                     )*
                 }
-                Ok(())
-            }
-
-            fn snapshot_rows(&self, ids: &[$crate::types::EntityId]) -> Result<$crate::snapshot::TableLevelSnapshot, $crate::error::RepositoryError> {
-                let map = self.store.$store_field.read().unwrap();
-                let mut rows = Vec::new();
-                for id in ids {
-                    if let Some(entity) = map.get(id) {
-                        let bytes = postcard::to_allocvec(entity)
-                            .map_err(|e| $crate::error::RepositoryError::Serialization(e.to_string()))?;
-                        rows.push((*id, bytes));
-                    }
-                }
-
-                let forward_junctions = Vec::new();
-                let mut backward_junctions = Vec::new();
-                $(
-                    if let Some(snap) = $crate::database::hashmap_store::junction_snapshot_backward(
-                        &self.store.$bj_field,
-                        ids,
-                        $bj_name,
-                    ) {
-                        backward_junctions.push(snap);
-                    }
-                )*
-
-                Ok($crate::snapshot::TableLevelSnapshot {
-                    entity_rows: $crate::snapshot::TableSnapshot {
-                        table_name: $entity_name.to_string(),
-                        rows,
-                    },
-                    forward_junctions,
-                    backward_junctions,
-                })
-            }
-
-            fn restore_rows(&mut self, snap: &$crate::snapshot::TableLevelSnapshot) -> Result<(), $crate::error::RepositoryError> {
-                let mut map = self.store.$store_field.write().unwrap();
-                for (id, bytes) in &snap.entity_rows.rows {
-                    let entity: $Entity = postcard::from_bytes(bytes)
-                        .map_err(|e| $crate::error::RepositoryError::Serialization(e.to_string()))?;
-                    map.insert(*id, entity);
-                }
-                drop(map);
-                $(
-                    for js in &snap.backward_junctions {
-                        if js.table_name == $bj_name {
-                            $crate::database::hashmap_store::junction_restore(&self.store.$bj_field, js);
-                        }
-                    }
-                )*
                 Ok(())
             }
         }

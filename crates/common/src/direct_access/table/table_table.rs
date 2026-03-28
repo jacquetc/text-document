@@ -1,12 +1,10 @@
-use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use crate::database::hashmap_store::{
-    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_restore,
-    junction_set, junction_snapshot, junction_snapshot_backward,
+    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_set,
 };
 use crate::entities::*;
 use crate::error::RepositoryError;
-use crate::snapshot::{TableLevelSnapshot, TableSnapshot};
 use crate::types::EntityId;
+use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -163,76 +161,6 @@ impl<'a> TableTable for TableHashMapTable<'a> {
     }
 
     impl_write_relationship_methods!(TableHashMapTable<'a>, TableRelationshipField);
-
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError> {
-        let tables = self.store.tables.read().unwrap();
-        let mut rows = Vec::new();
-        for id in ids {
-            if let Some(entity) = tables.get(id) {
-                let bytes = postcard::to_allocvec(entity)
-                    .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-                rows.push((*id, bytes));
-            }
-        }
-
-        let forward_junctions = vec![junction_snapshot(
-            &self.store.jn_table_cell_from_table_cells,
-            ids,
-            "table_cell_from_table_cells_junction",
-        )];
-
-        let mut backward_junctions = Vec::new();
-        if let Some(snap) = junction_snapshot_backward(
-            &self.store.jn_table_from_document_tables,
-            ids,
-            "table_from_document_tables_junction",
-        ) {
-            backward_junctions.push(snap);
-        }
-        if let Some(snap) = junction_snapshot_backward(
-            &self.store.jn_table_from_frame_table,
-            ids,
-            "table_from_frame_table_junction",
-        ) {
-            backward_junctions.push(snap);
-        }
-
-        Ok(TableLevelSnapshot {
-            entity_rows: TableSnapshot {
-                table_name: "table".to_string(),
-                rows,
-            },
-            forward_junctions,
-            backward_junctions,
-        })
-    }
-
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError> {
-        let mut tables = self.store.tables.write().unwrap();
-        for (id, bytes) in &snap.entity_rows.rows {
-            let entity: Table = postcard::from_bytes(bytes)
-                .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-            tables.insert(*id, entity);
-        }
-        drop(tables);
-        for js in &snap.forward_junctions {
-            if js.table_name == "table_cell_from_table_cells_junction" {
-                junction_restore(&self.store.jn_table_cell_from_table_cells, js);
-            }
-        }
-        for js in &snap.backward_junctions {
-            match js.table_name.as_str() {
-                "table_from_document_tables_junction" => {
-                    junction_restore(&self.store.jn_table_from_document_tables, js);
-                }
-                "table_from_frame_table_junction" => {
-                    junction_restore(&self.store.jn_table_from_frame_table, js);
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
 }
 
 pub struct TableHashMapTableRO<'a> {

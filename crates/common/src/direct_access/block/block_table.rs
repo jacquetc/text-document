@@ -1,12 +1,10 @@
-use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use crate::database::hashmap_store::{
-    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_restore,
-    junction_set, junction_snapshot, junction_snapshot_backward,
+    HashMapStore, delete_from_backward_junction, junction_get, junction_remove, junction_set,
 };
 use crate::entities::*;
 use crate::error::RepositoryError;
-use crate::snapshot::{TableLevelSnapshot, TableSnapshot};
 use crate::types::EntityId;
+use crate::{impl_relationship_methods, impl_write_relationship_methods};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -179,76 +177,6 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
     }
 
     impl_write_relationship_methods!(BlockHashMapTable<'a>, BlockRelationshipField);
-
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError> {
-        let blocks = self.store.blocks.read().unwrap();
-        let mut rows = Vec::new();
-        for id in ids {
-            if let Some(entity) = blocks.get(id) {
-                let bytes = postcard::to_allocvec(entity)
-                    .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-                rows.push((*id, bytes));
-            }
-        }
-
-        let forward_junctions = vec![
-            junction_snapshot(
-                &self.store.jn_inline_element_from_block_elements,
-                ids,
-                "inline_element_from_block_elements_junction",
-            ),
-            junction_snapshot(
-                &self.store.jn_list_from_block_list,
-                ids,
-                "list_from_block_list_junction",
-            ),
-        ];
-
-        let mut backward_junctions = Vec::new();
-        if let Some(snap) = junction_snapshot_backward(
-            &self.store.jn_back_frame_blocks,
-            ids,
-            "block_from_frame_blocks_junction",
-        ) {
-            backward_junctions.push(snap);
-        }
-
-        Ok(TableLevelSnapshot {
-            entity_rows: TableSnapshot {
-                table_name: "block".to_string(),
-                rows,
-            },
-            forward_junctions,
-            backward_junctions,
-        })
-    }
-
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError> {
-        let mut blocks = self.store.blocks.write().unwrap();
-        for (id, bytes) in &snap.entity_rows.rows {
-            let entity: Block = postcard::from_bytes(bytes)
-                .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-            blocks.insert(*id, entity);
-        }
-        drop(blocks);
-        for js in &snap.forward_junctions {
-            match js.table_name.as_str() {
-                "inline_element_from_block_elements_junction" => {
-                    junction_restore(&self.store.jn_inline_element_from_block_elements, js);
-                }
-                "list_from_block_list_junction" => {
-                    junction_restore(&self.store.jn_list_from_block_list, js);
-                }
-                _ => {}
-            }
-        }
-        for js in &snap.backward_junctions {
-            if js.table_name == "block_from_frame_blocks_junction" {
-                junction_restore(&self.store.jn_back_frame_blocks, js);
-            }
-        }
-        Ok(())
-    }
 }
 
 pub struct BlockHashMapTableRO<'a> {

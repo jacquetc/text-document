@@ -7,7 +7,7 @@ use crate::{
     direct_access::repository_factory,
     entities::Document,
     event::{DirectAccessEntity, EntityEvent, Event, EventBuffer, Origin},
-    snapshot::{EntityTreeSnapshot, TableLevelSnapshot},
+    snapshot::EntityTreeSnapshot,
     types::EntityId,
 };
 
@@ -90,8 +90,6 @@ pub trait DocumentTable {
         ids_to_move: &[EntityId],
         new_index: i32,
     ) -> Result<Vec<EntityId>, RepositoryError>;
-    fn snapshot_rows(&self, ids: &[EntityId]) -> Result<TableLevelSnapshot, RepositoryError>;
-    fn restore_rows(&mut self, snap: &TableLevelSnapshot) -> Result<(), RepositoryError>;
 }
 
 pub trait DocumentTableRO {
@@ -736,8 +734,6 @@ impl<'a> DocumentRepository<'a> {
         // Store-level fast path: clone entire store in one shot
         let store_snap = self.transaction.snapshot_store();
         Ok(EntityTreeSnapshot {
-            table_data: TableLevelSnapshot::default(),
-            children: Vec::new(),
             store_snapshot: Some(store_snap),
         })
     }
