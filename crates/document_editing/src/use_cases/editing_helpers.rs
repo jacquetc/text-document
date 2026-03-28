@@ -3,6 +3,121 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::entities::{Block, Frame, InlineContent, InlineElement};
 use common::types::EntityId;
 
+/// Trait for UoW operations needed to create a cell frame.
+/// All table-related UoW traits satisfy this via proc macros.
+pub trait CellFrameCreator {
+    fn cfc_create_frame(&mut self, frame: &Frame, owner_id: EntityId, index: i32) -> Result<Frame>;
+    fn cfc_create_block(&mut self, block: &Block, owner_id: EntityId, index: i32) -> Result<Block>;
+    fn cfc_create_inline_element(
+        &mut self,
+        elem: &InlineElement,
+        owner_id: EntityId,
+        index: i32,
+    ) -> Result<InlineElement>;
+    fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame>;
+}
+
+/// Implement CellFrameCreator for a Box<dyn UowTrait> where the UoW trait has the needed methods.
+macro_rules! impl_cell_frame_creator {
+    ($trait_type:ty) => {
+        impl CellFrameCreator for Box<$trait_type> {
+            fn cfc_create_frame(&mut self, frame: &Frame, owner_id: EntityId, index: i32) -> Result<Frame> {
+                (**self).create_frame(frame, owner_id, index)
+            }
+            fn cfc_create_block(&mut self, block: &Block, owner_id: EntityId, index: i32) -> Result<Block> {
+                (**self).create_block(block, owner_id, index)
+            }
+            fn cfc_create_inline_element(&mut self, elem: &InlineElement, owner_id: EntityId, index: i32) -> Result<InlineElement> {
+                (**self).create_inline_element(elem, owner_id, index)
+            }
+            fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame> {
+                (**self).update_frame(frame)
+            }
+        }
+    };
+}
+
+pub(crate) use impl_cell_frame_creator;
+
+/// Create a single cell Frame with one empty Block containing one empty InlineElement.
+/// Returns the created frame's ID and the created block.
+pub fn create_cell_frame(
+    uow: &mut dyn CellFrameCreator,
+    doc_id: EntityId,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(EntityId, Block)> {
+    let cell_frame = Frame::default();
+    let created_frame = uow.cfc_create_frame(&cell_frame, doc_id, -1)?;
+
+    let block = Block {
+        document_position: 0,
+        ..Block::default()
+    };
+    let created_block = uow.cfc_create_block(&block, created_frame.id, -1)?;
+
+    let empty_elem = InlineElement {
+        content: InlineContent::Empty,
+        ..InlineElement::default()
+    };
+    uow.cfc_create_inline_element(&empty_elem, created_block.id, -1)?;
+
+    let mut updated_frame = created_frame.clone();
+    updated_frame.child_order = vec![created_block.id as i64];
+    updated_frame.updated_at = now;
+    uow.cfc_update_frame(&updated_frame)?;
+
+    Ok((created_frame.id, created_block))
+}
+
+/// Trait for UoW operations needed to compute base position of table cell blocks.
+pub trait CellBlockReader {
+    fn cbr_get_frame_relationship(
+        &self,
+        id: &EntityId,
+        field: &FrameRelationshipField,
+    ) -> Result<Vec<EntityId>>;
+    fn cbr_get_block_multi(&self, ids: &[EntityId]) -> Result<Vec<Option<Block>>>;
+}
+
+/// Implement CellBlockReader for a Box<dyn UowTrait> where the UoW trait has the needed methods.
+macro_rules! impl_cell_block_reader {
+    ($trait_type:ty) => {
+        impl CellBlockReader for Box<$trait_type> {
+            fn cbr_get_frame_relationship(&self, id: &EntityId, field: &FrameRelationshipField) -> Result<Vec<EntityId>> {
+                (**self).get_frame_relationship(id, field)
+            }
+            fn cbr_get_block_multi(&self, ids: &[EntityId]) -> Result<Vec<Option<Block>>> {
+                (**self).get_block_multi(ids)
+            }
+        }
+    };
+}
+
+pub(crate) use impl_cell_block_reader;
+
+/// Compute the minimum document_position across all blocks in the given cell frames.
+pub fn compute_table_base_pos(
+    uow: &dyn CellBlockReader,
+    cell_frame_ids: &[EntityId],
+) -> Result<i64> {
+    let mut base_pos: Option<i64> = None;
+    for cf_id in cell_frame_ids {
+        let block_ids =
+            uow.cbr_get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
+        let blocks_opt = uow.cbr_get_block_multi(&block_ids)?;
+        for block in blocks_opt.into_iter().flatten() {
+            match base_pos {
+                None => base_pos = Some(block.document_position),
+                Some(bp) if block.document_position < bp => {
+                    base_pos = Some(block.document_position)
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(base_pos.unwrap_or(0))
+}
+
 /// Returns true for punctuation characters that should break undo merge groups.
 pub fn is_word_boundary_punct(c: char) -> bool {
     matches!(

@@ -6,14 +6,16 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, Root, Table, TableCell,
+    Block, Document, Frame, InlineElement, Root, Table, TableCell,
 };
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
 
-use super::editing_helpers::find_block_at_position;
+use super::editing_helpers::{
+    CellFrameCreator, create_cell_frame, find_block_at_position, impl_cell_frame_creator,
+};
 
 pub trait InsertTableUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertTableUnitOfWorkTrait>;
@@ -39,69 +41,12 @@ pub trait InsertTableUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "TableCell", action = "Create")]
 pub trait InsertTableUnitOfWorkTrait: CommandUnitOfWork {}
 
+impl_cell_frame_creator!(dyn InsertTableUnitOfWorkTrait);
+
 pub struct InsertTableUseCase {
     uow_factory: Box<dyn InsertTableUnitOfWorkFactoryTrait>,
     undo_snapshot: Option<EntityTreeSnapshot>,
     last_dto: Option<InsertTableDto>,
-}
-
-/// Create a single cell Frame with one empty Block containing one empty InlineElement.
-/// Returns the created frame's ID and the created block.
-fn create_cell_frame(
-    uow: &mut Box<dyn InsertTableUnitOfWorkTrait>,
-    doc_id: EntityId,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<(EntityId, Block)> {
-    let cell_frame = Frame {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        parent_frame: None,
-        blocks: vec![],
-        child_order: vec![],
-        fmt_height: None,
-        fmt_width: None,
-        fmt_top_margin: None,
-        fmt_bottom_margin: None,
-        fmt_left_margin: None,
-        fmt_right_margin: None,
-        fmt_padding: None,
-        fmt_border: None,
-        fmt_position: None,
-        fmt_is_blockquote: None,
-        table: None, // Will not set table on cell frames — only the anchor frame gets it
-    };
-    let created_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
-
-    let block = Block {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        elements: vec![],
-        list: None,
-        text_length: 0,
-        document_position: 0, // Will be set later
-        plain_text: String::new(),
-        ..Default::default()
-    };
-    let created_block = uow.create_block(&block, created_frame.id, -1)?;
-
-    let empty_elem = InlineElement {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        content: InlineContent::Empty,
-        ..Default::default()
-    };
-    uow.create_inline_element(&empty_elem, created_block.id, -1)?;
-
-    // Update frame's child_order
-    let mut updated_frame = created_frame.clone();
-    updated_frame.child_order = vec![created_block.id as i64];
-    updated_frame.updated_at = now;
-    uow.update_frame(&updated_frame)?;
-
-    Ok((created_frame.id, created_block))
 }
 
 fn execute_insert_table(

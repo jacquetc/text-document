@@ -1,3 +1,7 @@
+use super::editing_helpers::{
+    CellBlockReader, CellFrameCreator, compute_table_base_pos, create_cell_frame,
+    impl_cell_block_reader, impl_cell_frame_creator,
+};
 use crate::InsertTableRowDto;
 use crate::InsertTableRowResultDto;
 use anyhow::{Result, anyhow};
@@ -6,9 +10,7 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::table_repository::TableRelationshipField;
-use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, Root, Table, TableCell,
-};
+use common::entities::{Block, Document, Frame, InlineElement, Root, Table, TableCell};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -39,6 +41,9 @@ pub trait InsertTableRowUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "TableCell", action = "Create")]
 #[macros::uow_action(entity = "TableCell", action = "UpdateMulti")]
 pub trait InsertTableRowUnitOfWorkTrait: CommandUnitOfWork {}
+
+impl_cell_frame_creator!(dyn InsertTableRowUnitOfWorkTrait);
+impl_cell_block_reader!(dyn InsertTableRowUnitOfWorkTrait);
 
 pub struct InsertTableRowUseCase {
     uow_factory: Box<dyn InsertTableRowUnitOfWorkFactoryTrait>,
@@ -85,21 +90,7 @@ fn execute_insert_table_row(
     // Find base position from existing cell blocks (must be done before new cells are created)
     let existing_cell_frame_ids: Vec<EntityId> =
         cells.iter().filter_map(|c| c.cell_frame).collect();
-    let mut base_pos: Option<i64> = None;
-    for cf_id in &existing_cell_frame_ids {
-        let block_ids = uow.get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
-        let blocks_opt = uow.get_block_multi(&block_ids)?;
-        for block in blocks_opt.into_iter().flatten() {
-            match base_pos {
-                None => base_pos = Some(block.document_position),
-                Some(bp) if block.document_position < bp => {
-                    base_pos = Some(block.document_position)
-                }
-                _ => {}
-            }
-        }
-    }
-    let base_pos = base_pos.unwrap_or(0);
+    let base_pos = compute_table_base_pos(&*uow, &existing_cell_frame_ids)?;
 
     let mut cells_to_update: Vec<TableCell> = Vec::new();
     for cell in &cells {
@@ -123,53 +114,7 @@ fn execute_insert_table_row(
 
     // Create new cells for the inserted row
     for c in 0..table.columns {
-        let cell_frame = Frame {
-            id: 0,
-            created_at: now,
-            updated_at: now,
-            parent_frame: None,
-            blocks: vec![],
-            child_order: vec![],
-            fmt_height: None,
-            fmt_width: None,
-            fmt_top_margin: None,
-            fmt_bottom_margin: None,
-            fmt_left_margin: None,
-            fmt_right_margin: None,
-            fmt_padding: None,
-            fmt_border: None,
-            fmt_position: None,
-            fmt_is_blockquote: None,
-            table: None,
-        };
-        let created_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
-
-        let block = Block {
-            id: 0,
-            created_at: now,
-            updated_at: now,
-            elements: vec![],
-            list: None,
-            text_length: 0,
-            document_position: 0,
-            plain_text: String::new(),
-            ..Default::default()
-        };
-        let created_block = uow.create_block(&block, created_frame.id, -1)?;
-
-        let empty_elem = InlineElement {
-            id: 0,
-            created_at: now,
-            updated_at: now,
-            content: InlineContent::Empty,
-            ..Default::default()
-        };
-        uow.create_inline_element(&empty_elem, created_block.id, -1)?;
-
-        let mut updated_frame = created_frame.clone();
-        updated_frame.child_order = vec![created_block.id as i64];
-        updated_frame.updated_at = now;
-        uow.update_frame(&updated_frame)?;
+        let (cell_frame_id, _created_block) = create_cell_frame(&mut *uow, doc_id, now)?;
 
         let cell = TableCell {
             id: 0,
@@ -179,7 +124,7 @@ fn execute_insert_table_row(
             column: c,
             row_span: 1,
             column_span: 1,
-            cell_frame: Some(created_frame.id),
+            cell_frame: Some(cell_frame_id),
             fmt_padding: None,
             fmt_border: None,
             fmt_vertical_alignment: None,

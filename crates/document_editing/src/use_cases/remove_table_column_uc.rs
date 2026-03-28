@@ -1,3 +1,4 @@
+use super::editing_helpers::{CellBlockReader, compute_table_base_pos, impl_cell_block_reader};
 use crate::RemoveTableColumnDto;
 use crate::RemoveTableColumnResultDto;
 use anyhow::{Result, anyhow};
@@ -36,6 +37,8 @@ pub trait RemoveTableColumnUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "TableCell", action = "RemoveMulti")]
 #[macros::uow_action(entity = "TableCell", action = "UpdateMulti")]
 pub trait RemoveTableColumnUnitOfWorkTrait: CommandUnitOfWork {}
+
+impl_cell_block_reader!(dyn RemoveTableColumnUnitOfWorkTrait);
 
 pub struct RemoveTableColumnUseCase {
     uow_factory: Box<dyn RemoveTableColumnUnitOfWorkFactoryTrait>,
@@ -158,22 +161,7 @@ fn execute_remove_table_column(
         .filter_map(|c| c.cell_frame)
         .collect();
 
-    // Find base position from existing cell blocks
-    let mut base_pos: Option<i64> = None;
-    for cf_id in &remaining_cell_frame_ids {
-        let block_ids = uow.get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
-        let blocks_opt = uow.get_block_multi(&block_ids)?;
-        for block in blocks_opt.into_iter().flatten() {
-            match base_pos {
-                None => base_pos = Some(block.document_position),
-                Some(bp) if block.document_position < bp => {
-                    base_pos = Some(block.document_position);
-                }
-                _ => {}
-            }
-        }
-    }
-    let base_pos = base_pos.unwrap_or(0);
+    let base_pos = compute_table_base_pos(&*uow, &remaining_cell_frame_ids)?;
 
     // Assign positions in row-major order
     let mut cell_blocks_to_update: Vec<Block> = Vec::new();

@@ -1,3 +1,4 @@
+use super::editing_helpers::{CellBlockReader, compute_table_base_pos, impl_cell_block_reader};
 use crate::MergeTableCellsDto;
 use crate::MergeTableCellsResultDto;
 use anyhow::{Result, anyhow};
@@ -35,6 +36,8 @@ pub trait MergeTableCellsUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "TableCell", action = "Update")]
 #[macros::uow_action(entity = "TableCell", action = "RemoveMulti")]
 pub trait MergeTableCellsUnitOfWorkTrait: CommandUnitOfWork {}
+
+impl_cell_block_reader!(dyn MergeTableCellsUnitOfWorkTrait);
 
 pub struct MergeTableCellsUseCase {
     uow_factory: Box<dyn MergeTableCellsUnitOfWorkFactoryTrait>,
@@ -154,21 +157,7 @@ fn execute_merge_table_cells(
     // Find base_pos from existing cell blocks BEFORE any mutation
     let existing_cell_frame_ids: Vec<EntityId> =
         cells.iter().filter_map(|c| c.cell_frame).collect();
-    let mut base_pos: Option<i64> = None;
-    for cf_id in &existing_cell_frame_ids {
-        let block_ids = uow.get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
-        let blocks_opt = uow.get_block_multi(&block_ids)?;
-        for block in blocks_opt.into_iter().flatten() {
-            match base_pos {
-                None => base_pos = Some(block.document_position),
-                Some(bp) if block.document_position < bp => {
-                    base_pos = Some(block.document_position)
-                }
-                _ => {}
-            }
-        }
-    }
-    let base_pos = base_pos.unwrap_or(0);
+    let base_pos = compute_table_base_pos(&*uow, &existing_cell_frame_ids)?;
 
     // Remove the other cells' frames (cascade removes blocks/elements) and the cell entities
     let remove_frame_ids: Vec<EntityId> = cells_to_remove
