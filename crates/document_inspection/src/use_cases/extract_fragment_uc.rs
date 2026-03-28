@@ -45,7 +45,7 @@ impl ExtractFragmentUseCase {
         // Empty range
         if start == end {
             uow.end_transaction()?;
-            let empty = FragmentData { blocks: vec![] };
+            let empty = FragmentData { blocks: vec![], tables: vec![] };
             return Ok(ExtractFragmentResultDto {
                 fragment_data: serde_json::to_string(&empty)?,
                 plain_text: String::new(),
@@ -215,6 +215,7 @@ impl ExtractFragmentUseCase {
 
         let fragment_data = FragmentData {
             blocks: fragment_blocks,
+            tables: vec![],
         };
 
         let fragment_json = serde_json::to_string(&fragment_data)?;

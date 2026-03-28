@@ -5,6 +5,27 @@ use crate::entities::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FragmentData {
     pub blocks: Vec<FragmentBlock>,
+    /// Table fragments extracted from cell selections. Empty for text-only fragments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tables: Vec<FragmentTable>,
+}
+
+/// A table (or rectangular sub-region) captured from a cell selection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FragmentTable {
+    pub rows: usize,
+    pub columns: usize,
+    pub cells: Vec<FragmentTableCell>,
+}
+
+/// One cell within a [`FragmentTable`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FragmentTableCell {
+    pub row: usize,
+    pub column: usize,
+    pub row_span: usize,
+    pub column_span: usize,
+    pub blocks: Vec<FragmentBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
