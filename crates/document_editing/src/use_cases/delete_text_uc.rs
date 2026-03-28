@@ -1,6 +1,7 @@
 use super::editing_helpers::{
     collect_block_ids_recursive, find_block_at_position, is_word_boundary_punct,
 };
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use crate::DeleteTextDto;
 use crate::DeleteTextResultDto;
 use anyhow::{Result, anyhow};
@@ -40,6 +41,8 @@ pub trait DeleteTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "InlineElement", action = "Remove")]
+#[macros::uow_action(entity = "InlineElement", action = "RemoveMulti")]
 #[macros::uow_action(entity = "Table", action = "GetRelationship")]
 #[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 pub trait DeleteTextUnitOfWorkTrait: CommandUnitOfWork {}
@@ -121,10 +124,142 @@ fn execute_delete(
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    // Find start and end blocks
+    // Find start and end blocks (used for cell detection, then re-used by the normal path)
     let (start_block, start_block_idx, start_offset) = find_block_at_position(&blocks, start)?;
-    let (end_block, end_block_idx, end_offset) = find_block_at_position(&blocks, end)?;
+    let (end_block_tmp, _end_block_idx_tmp, _end_offset_tmp) =
+        find_block_at_position(&blocks, end)?;
 
+    // ── Cell selection safety: detect cross-cell deletion ──────────
+    // Build block_id → cell_frame_id map from all tables in the document.
+    let table_ids =
+        uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
+    let mut block_to_cell_frame: std::collections::HashMap<EntityId, EntityId> =
+        std::collections::HashMap::new();
+    for &tid in &table_ids {
+        let cell_ids = uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
+        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+        for cell in cells_opt.into_iter().flatten() {
+            if let Some(cf_id) = cell.cell_frame {
+                let blk_ids =
+                    uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+                for bid in blk_ids {
+                    block_to_cell_frame.insert(bid, cf_id);
+                }
+            }
+        }
+    }
+
+    let start_cell = block_to_cell_frame.get(&start_block.id).copied();
+    let end_cell = block_to_cell_frame.get(&end_block_tmp.id).copied();
+
+    let is_cross_cell = match (start_cell, end_cell) {
+        (Some(a), Some(b)) => a != b,           // different cells
+        (Some(_), None) | (None, Some(_)) => true, // one in table, one outside
+        (None, None) => false,                      // both outside tables
+    };
+
+    if is_cross_cell {
+        // Cell selection mode: clear the contents of all affected cells instead
+        // of merging blocks across cell boundaries (which corrupts structure).
+        let now = chrono::Utc::now();
+        let mut total_chars_removed: i64 = 0;
+
+        // Collect all unique cell frames whose blocks fall in [start..end]
+        let mut affected_cell_frames: Vec<EntityId> = Vec::new();
+        for block in &blocks {
+            if block.document_position + block.text_length >= start
+                && block.document_position <= end
+            {
+                if let Some(&cf_id) = block_to_cell_frame.get(&block.id) {
+                    if !affected_cell_frames.contains(&cf_id) {
+                        affected_cell_frames.push(cf_id);
+                    }
+                }
+            }
+        }
+
+        // Clear each affected cell frame: keep first block, empty it, remove the rest
+        for cf_id in &affected_cell_frames {
+            let frame = uow
+                .get_frame(cf_id)?
+                .ok_or_else(|| anyhow!("Cell frame not found"))?;
+            let blk_ids =
+                uow.get_frame_relationship(cf_id, &FrameRelationshipField::Blocks)?;
+            let blk_opts = uow.get_block_multi(&blk_ids)?;
+            let mut cell_blocks: Vec<Block> = blk_opts.into_iter().flatten().collect();
+            cell_blocks.sort_by_key(|b| b.document_position);
+
+            if cell_blocks.is_empty() {
+                continue;
+            }
+
+            // Sum text to remove from this cell
+            let cell_chars: i64 = cell_blocks.iter().map(|b| b.text_length).sum();
+            total_chars_removed += cell_chars;
+
+            // Reset first block to empty
+            let first_block = &mut cell_blocks[0];
+            let elem_ids = uow.get_block_relationship(
+                &first_block.id,
+                &BlockRelationshipField::Elements,
+            )?;
+            // Remove all existing elements
+            if !elem_ids.is_empty() {
+                uow.remove_inline_element_multi(&elem_ids)?;
+            }
+            // Create a single empty element
+            let empty_elem = InlineElement {
+                content: InlineContent::Empty,
+                ..InlineElement::default()
+            };
+            uow.create_inline_element(&empty_elem, first_block.id, -1)?;
+
+            // Update block to empty
+            let mut updated = first_block.clone();
+            updated.plain_text = String::new();
+            updated.text_length = 0;
+            updated.updated_at = now;
+            uow.update_block(&updated)?;
+
+            // Remove extra blocks
+            let extra_block_ids: Vec<EntityId> =
+                cell_blocks[1..].iter().map(|b| b.id).collect();
+            for &eid in &extra_block_ids {
+                let elem_ids =
+                    uow.get_block_relationship(&eid, &BlockRelationshipField::Elements)?;
+                if !elem_ids.is_empty() {
+                    uow.remove_inline_element_multi(&elem_ids)?;
+                }
+                uow.remove_block(&eid)?;
+            }
+
+            // Update frame child_order to only contain the first block
+            let mut updated_frame = frame.clone();
+            updated_frame.child_order = vec![cell_blocks[0].id as i64];
+            updated_frame.updated_at = now;
+            uow.update_frame(&updated_frame)?;
+        }
+
+        // Update document character_count
+        let mut updated_doc = document.clone();
+        updated_doc.character_count -= total_chars_removed;
+        if updated_doc.character_count < 0 {
+            updated_doc.character_count = 0;
+        }
+        updated_doc.updated_at = now;
+        uow.update_document(&updated_doc)?;
+
+        return Ok((
+            DeleteTextResultDto {
+                new_position: start,
+                deleted_text: String::new(), // We don't reconstruct the text for cell clear
+            },
+            snapshot,
+        ));
+    }
+    // ── End cell selection safety ──────────────────────────────────
+
+    let (end_block, end_block_idx, end_offset) = find_block_at_position(&blocks, end)?;
     let delete_len = end - start;
 
     if start_block_idx == end_block_idx {

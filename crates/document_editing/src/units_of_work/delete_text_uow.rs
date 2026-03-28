@@ -100,6 +100,8 @@ impl CommandUnitOfWork for DeleteTextUnitOfWork {
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "InlineElement", action = "Remove")]
+#[macros::uow_action(entity = "InlineElement", action = "RemoveMulti")]
 #[macros::uow_action(entity = "Table", action = "GetRelationship")]
 #[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 impl DeleteTextUnitOfWorkTrait for DeleteTextUnitOfWork {}
