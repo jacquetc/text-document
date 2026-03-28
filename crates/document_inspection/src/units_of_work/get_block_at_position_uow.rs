@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, Root};
+use common::entities::{Block, Document, Frame, Root, Table, TableCell};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]
@@ -52,6 +52,8 @@ impl QueryUnitOfWork for GetBlockAtPositionUnitOfWork {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 impl GetBlockAtPositionUnitOfWorkTrait for GetBlockAtPositionUnitOfWork {}
 
 pub struct GetBlockAtPositionUnitOfWorkFactory {

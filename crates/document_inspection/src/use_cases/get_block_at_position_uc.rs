@@ -6,7 +6,8 @@ use common::database::QueryUnitOfWork;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, Root};
+use common::direct_access::table::TableRelationshipField;
+use common::entities::{Block, Document, Frame, Root, TableCell};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait GetBlockAtPositionUnitOfWorkFactoryTrait: Send + Sync {
@@ -22,6 +23,8 @@ pub trait GetBlockAtPositionUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 pub trait GetBlockAtPositionUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct GetBlockAtPositionUseCase {
@@ -121,6 +124,8 @@ impl GetBlockAtPositionUseCase {
 }
 
 /// Collect all block IDs in document order by recursing into sub-frames.
+/// Table anchor frames (where `frame.table` is set) are expanded by traversing
+/// Table -> TableCell -> cell_frame in row-major order.
 fn collect_block_ids(
     uow: &dyn GetBlockAtPositionUnitOfWorkTrait,
     frame_id: &EntityId,
@@ -136,8 +141,25 @@ fn collect_block_ids(
                 block_ids.push(entry as EntityId);
             } else if entry < 0 {
                 let sub_frame_id = (-entry) as EntityId;
-                let sub_ids = collect_block_ids(uow, &sub_frame_id)?;
-                block_ids.extend(sub_ids);
+                let sub_frame = uow
+                    .get_frame(&sub_frame_id)?
+                    .ok_or_else(|| anyhow!("Sub-frame not found"))?;
+                if let Some(table_id) = sub_frame.table {
+                    // Table anchor frame: collect blocks from cell frames in row-major order
+                    let cell_ids = uow.get_table_relationship(&table_id, &TableRelationshipField::Cells)?;
+                    let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+                    let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
+                    cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+                    for cell in cells {
+                        if let Some(cf_id) = cell.cell_frame {
+                            let cf_blocks = collect_block_ids(uow, &cf_id)?;
+                            block_ids.extend(cf_blocks);
+                        }
+                    }
+                } else {
+                    let sub_ids = collect_block_ids(uow, &sub_frame_id)?;
+                    block_ids.extend(sub_ids);
+                }
             }
         }
         Ok(block_ids)

@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, Root};
+use common::entities::{Block, Document, Frame, InlineElement, Root, Table, TableCell};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -97,6 +97,8 @@ impl CommandUnitOfWork for InsertTextUnitOfWork {
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
+#[macros::uow_action(entity = "Table", action = "GetRelationship")]
+#[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 impl InsertTextUnitOfWorkTrait for InsertTextUnitOfWork {}
 
 pub struct InsertTextUnitOfWorkFactory {

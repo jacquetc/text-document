@@ -9,7 +9,7 @@ use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, TableCell};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
