@@ -1,4 +1,7 @@
-use super::editing_helpers::{find_block_at_position, find_element_at_offset};
+use super::editing_helpers::{
+    CellFrameCreator, create_cell_frame, find_block_at_position, find_element_at_offset,
+    impl_cell_frame_creator,
+};
 use crate::InsertFragmentDto;
 use crate::InsertFragmentResultDto;
 use anyhow::{Result, anyhow};
@@ -7,7 +10,9 @@ use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, List, Root};
+use common::entities::{
+    Block, Document, Frame, InlineContent, InlineElement, List, Root, Table, TableCell,
+};
 use common::parser_tools::fragment_schema::FragmentData;
 use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
@@ -40,7 +45,235 @@ pub trait InsertFragmentUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "List", action = "Create")]
+#[macros::uow_action(entity = "Frame", action = "Create")]
+#[macros::uow_action(entity = "Table", action = "Create")]
+#[macros::uow_action(entity = "TableCell", action = "Create")]
 pub trait InsertFragmentUnitOfWorkTrait: CommandUnitOfWork {}
+
+impl_cell_frame_creator!(dyn InsertFragmentUnitOfWorkTrait);
+
+/// Insert a table-only fragment at the cursor position.
+/// Creates one table per `FragmentTable` entry, each with its cells and content.
+fn insert_table_fragment(
+    uow: &mut Box<dyn InsertFragmentUnitOfWorkTrait>,
+    dto: &InsertFragmentDto,
+    fragment_data: &FragmentData,
+) -> Result<(InsertFragmentResultDto, EntityTreeSnapshot)> {
+    let now = chrono::Utc::now();
+
+    let root = uow
+        .get_root(&ROOT_ENTITY_ID)?
+        .ok_or_else(|| anyhow!("Root entity not found"))?;
+    let doc_ids = uow.get_root_relationship(&root.id, &RootRelationshipField::Document)?;
+    let doc_id = *doc_ids
+        .first()
+        .ok_or_else(|| anyhow!("Root has no document"))?;
+
+    let document = uow
+        .get_document(&doc_id)?
+        .ok_or_else(|| anyhow!("Document not found"))?;
+
+    let snapshot = uow.snapshot_document(&[doc_id])?;
+
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_id = *frame_ids
+        .first()
+        .ok_or_else(|| anyhow!("Document has no frames"))?;
+
+    // Collect all blocks to find insertion point
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+    blocks.sort_by_key(|b| b.document_position);
+
+    let insert_pos = dto.position;
+
+    // Find which block the cursor is in, to determine child_order insertion index
+    let child_order_insert_idx = if blocks.is_empty() {
+        0usize
+    } else {
+        let (target_block, _, _) = find_block_at_position(&blocks, insert_pos)?;
+        let blk_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+        blk_ids
+            .iter()
+            .position(|&bid| bid == target_block.id)
+            .map(|i| i + 1)
+            .unwrap_or(0)
+    };
+
+    let mut total_blocks_added: i64 = 0;
+    let mut current_child_idx = child_order_insert_idx;
+    let mut current_pos = insert_pos;
+
+    for frag_table in &fragment_data.tables {
+        // Create the Table entity
+        let table = Table {
+            id: 0,
+            created_at: now,
+            updated_at: now,
+            cells: vec![],
+            rows: frag_table.rows as i64,
+            columns: frag_table.columns as i64,
+            column_widths: vec![0; frag_table.columns],
+            fmt_border: None,
+            fmt_cell_spacing: None,
+            fmt_cell_padding: None,
+            fmt_width: None,
+            fmt_alignment: None,
+        };
+        let created_table = uow.create_table(&table, doc_id, -1)?;
+
+        // Create cells with content
+        let mut cell_blocks_to_update: Vec<Block> = Vec::new();
+
+        for frag_cell in &frag_table.cells {
+            // Create the cell frame
+            let (cell_frame_id, created_block) = create_cell_frame(uow, doc_id, now)?;
+
+            // If the fragment cell has content, populate it
+            if !frag_cell.blocks.is_empty() {
+                let first_frag = &frag_cell.blocks[0];
+                // Update the created block with the first fragment block's content
+                let mut updated_block = created_block.clone();
+                updated_block.plain_text = first_frag.plain_text.clone();
+                updated_block.text_length = first_frag.plain_text.chars().count() as i64;
+                updated_block.document_position = current_pos;
+                updated_block.updated_at = now;
+                cell_blocks_to_update.push(updated_block);
+
+                // Create elements for the first block
+                for frag_elem in &first_frag.elements {
+                    let elem = frag_elem.to_entity();
+                    uow.create_inline_element(&elem, created_block.id, -1)?;
+                }
+
+                current_pos += first_frag.plain_text.chars().count() as i64 + 1;
+                total_blocks_added += 1;
+
+                // Create additional blocks for multi-block cells
+                // (rare in copy/paste, but supported by the schema)
+                for extra_frag in &frag_cell.blocks[1..] {
+                    let extra_block = Block {
+                        id: 0,
+                        created_at: now,
+                        updated_at: now,
+                        elements: vec![],
+                        list: None,
+                        text_length: extra_frag.plain_text.chars().count() as i64,
+                        document_position: current_pos,
+                        plain_text: extra_frag.plain_text.clone(),
+                        ..Default::default()
+                    };
+                    let created_extra =
+                        uow.create_block(&extra_block, cell_frame_id, -1)?;
+                    for frag_elem in &extra_frag.elements {
+                        let elem = frag_elem.to_entity();
+                        uow.create_inline_element(&elem, created_extra.id, -1)?;
+                    }
+                    current_pos += extra_frag.plain_text.chars().count() as i64 + 1;
+                    total_blocks_added += 1;
+                }
+            } else {
+                // Empty cell — just position the empty block
+                let mut updated_block = created_block.clone();
+                updated_block.document_position = current_pos;
+                updated_block.updated_at = now;
+                cell_blocks_to_update.push(updated_block);
+                current_pos += 1;
+                total_blocks_added += 1;
+            }
+
+            // Create the TableCell entity
+            let cell = TableCell {
+                id: 0,
+                created_at: now,
+                updated_at: now,
+                row: frag_cell.row as i64,
+                column: frag_cell.column as i64,
+                row_span: frag_cell.row_span as i64,
+                column_span: frag_cell.column_span as i64,
+                cell_frame: Some(cell_frame_id),
+                fmt_padding: None,
+                fmt_border: None,
+                fmt_vertical_alignment: None,
+                fmt_background_color: None,
+            };
+            uow.create_table_cell(&cell, created_table.id, -1)?;
+        }
+
+        // Update cell block positions
+        if !cell_blocks_to_update.is_empty() {
+            uow.update_block_multi(&cell_blocks_to_update)?;
+        }
+
+        // Create the anchor frame for the table
+        let anchor_frame = Frame {
+            id: 0,
+            created_at: now,
+            updated_at: now,
+            parent_frame: Some(frame_id),
+            blocks: vec![],
+            child_order: vec![],
+            fmt_height: None,
+            fmt_width: None,
+            fmt_top_margin: None,
+            fmt_bottom_margin: None,
+            fmt_left_margin: None,
+            fmt_right_margin: None,
+            fmt_padding: None,
+            fmt_border: None,
+            fmt_position: None,
+            fmt_is_blockquote: None,
+            table: Some(created_table.id),
+        };
+        let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
+
+        // Insert anchor into parent frame's child_order
+        let parent_frame = uow
+            .get_frame(&frame_id)?
+            .ok_or_else(|| anyhow!("Parent frame not found"))?;
+        let mut updated_parent = parent_frame;
+        let idx = current_child_idx.min(updated_parent.child_order.len());
+        updated_parent
+            .child_order
+            .insert(idx, -(created_anchor.id as i64));
+        updated_parent.updated_at = now;
+        uow.update_frame(&updated_parent)?;
+
+        current_child_idx += 1;
+    }
+
+    // Shift positions for existing blocks after the insertion point
+    let pos_shift = current_pos - insert_pos;
+    if pos_shift > 0 {
+        let mut shifted: Vec<Block> = Vec::new();
+        for block in &blocks {
+            if block.document_position >= insert_pos {
+                let mut ub = block.clone();
+                ub.document_position += pos_shift;
+                ub.updated_at = now;
+                shifted.push(ub);
+            }
+        }
+        if !shifted.is_empty() {
+            uow.update_block_multi(&shifted)?;
+        }
+    }
+
+    // Update document stats
+    let mut updated_doc = document.clone();
+    updated_doc.block_count += total_blocks_added;
+    updated_doc.updated_at = now;
+    uow.update_document(&updated_doc)?;
+
+    Ok((
+        InsertFragmentResultDto {
+            new_position: insert_pos,
+            blocks_added: total_blocks_added,
+        },
+        snapshot,
+    ))
+}
 
 fn execute_insert_fragment(
     uow: &mut Box<dyn InsertFragmentUnitOfWorkTrait>,
@@ -58,8 +291,13 @@ fn execute_insert_fragment(
     let fragment_data: FragmentData = serde_json::from_str(&dto.fragment_data)
         .map_err(|e| anyhow!("Invalid fragment_data JSON: {}", e))?;
 
-    if fragment_data.blocks.is_empty() {
-        return Err(anyhow!("Fragment contains no blocks"));
+    if fragment_data.blocks.is_empty() && fragment_data.tables.is_empty() {
+        return Err(anyhow!("Fragment contains no blocks or tables"));
+    }
+
+    // ── Table-only fragment path ──────────────────────────────────
+    if !fragment_data.tables.is_empty() && fragment_data.blocks.is_empty() {
+        return insert_table_fragment(uow, dto, &fragment_data);
     }
 
     let root = uow

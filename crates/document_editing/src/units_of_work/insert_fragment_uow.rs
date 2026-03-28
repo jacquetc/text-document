@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Root};
+use common::entities::{Block, Document, Frame, InlineElement, List, Root, Table, TableCell};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -103,6 +103,9 @@ impl CommandUnitOfWork for InsertFragmentUnitOfWork {
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "List", action = "Create")]
+#[macros::uow_action(entity = "Frame", action = "Create")]
+#[macros::uow_action(entity = "Table", action = "Create")]
+#[macros::uow_action(entity = "TableCell", action = "Create")]
 impl InsertFragmentUnitOfWorkTrait for InsertFragmentUnitOfWork {}
 
 pub struct InsertFragmentUnitOfWorkFactory {
