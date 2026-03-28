@@ -125,7 +125,7 @@ fn execute_insert_table(
         cells: vec![],
         rows: dto.rows,
         columns: dto.columns,
-        column_widths: vec![],
+        column_widths: vec![0; dto.columns as usize],
         fmt_border: None,
         fmt_cell_spacing: None,
         fmt_cell_padding: None,

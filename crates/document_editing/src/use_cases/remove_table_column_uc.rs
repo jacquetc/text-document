@@ -144,9 +144,13 @@ fn execute_remove_table_column(
         uow.update_table_cell_multi(&cells_to_update)?;
     }
 
-    // Update table.columns
+    // Update table.columns and column_widths
     let mut updated_table = table.clone();
     updated_table.columns -= 1;
+    let remove_idx = column_index as usize;
+    if remove_idx < updated_table.column_widths.len() {
+        updated_table.column_widths.remove(remove_idx);
+    }
     updated_table.updated_at = now;
     uow.update_table(&updated_table)?;
 

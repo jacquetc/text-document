@@ -133,9 +133,11 @@ fn execute_insert_table_column(
         uow.create_table_cell(&cell, table_id, -1)?;
     }
 
-    // Update table column count
+    // Update table column count and column_widths
     let mut updated_table = table.clone();
     updated_table.columns += 1;
+    let insert_idx = (dto.column_index as usize).min(updated_table.column_widths.len());
+    updated_table.column_widths.insert(insert_idx, 0);
     updated_table.updated_at = now;
     uow.update_table(&updated_table)?;
 
