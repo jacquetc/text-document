@@ -2,6 +2,7 @@
 
 use crate::types::EntityId;
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 
 /// Snapshot of rows from a single entity table, stored as postcard-serialized bytes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -32,4 +33,41 @@ pub struct TableLevelSnapshot {
 pub struct EntityTreeSnapshot {
     pub table_data: TableLevelSnapshot,
     pub children: Vec<EntityTreeSnapshot>,
+    /// Store-level fast path for undo. When set, table_data/children are empty.
+    #[serde(skip)]
+    pub store_snapshot: Option<StoreSnapshot>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Store-level snapshot (type-erased so snapshot.rs doesn't depend on HashMapStore)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Trait for type-erased store snapshots.
+pub trait StoreSnapshotTrait: std::fmt::Debug + Send + Sync {
+    fn clone_box(&self) -> Box<dyn StoreSnapshotTrait>;
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl Clone for Box<dyn StoreSnapshotTrait> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+/// Type-erased store snapshot for undo fast path.
+#[derive(Debug, Clone)]
+pub struct StoreSnapshot {
+    inner: Box<dyn StoreSnapshotTrait>,
+}
+
+impl StoreSnapshot {
+    pub fn new<T: StoreSnapshotTrait + 'static>(inner: T) -> Self {
+        Self {
+            inner: Box::new(inner),
+        }
+    }
+
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        self.inner.as_any().downcast_ref()
+    }
 }

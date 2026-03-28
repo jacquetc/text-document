@@ -13,10 +13,10 @@
 //! allowing `&HashMapStore` to be shared across threads via `Arc`.
 
 use crate::entities::*;
-use crate::snapshot::JunctionSnapshot;
+use crate::snapshot::{JunctionSnapshot, StoreSnapshot, StoreSnapshotTrait};
 use crate::types::EntityId;
-use std::sync::RwLock;
 use std::collections::HashMap;
+use std::sync::RwLock;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The Store
@@ -83,29 +83,49 @@ impl HashMapStore {
             resources: self.resources.read().unwrap().clone(),
             tables: self.tables.read().unwrap().clone(),
             table_cells: self.table_cells.read().unwrap().clone(),
-            jn_document_from_root_document: self.jn_document_from_root_document.read().unwrap().clone(),
-            jn_frame_from_document_frames: self.jn_frame_from_document_frames.read().unwrap().clone(),
+            jn_document_from_root_document: self
+                .jn_document_from_root_document
+                .read()
+                .unwrap()
+                .clone(),
+            jn_frame_from_document_frames: self
+                .jn_frame_from_document_frames
+                .read()
+                .unwrap()
+                .clone(),
             jn_list_from_document_lists: self.jn_list_from_document_lists.read().unwrap().clone(),
             jn_resource_from_document_resources: self
                 .jn_resource_from_document_resources
-                .read().unwrap()
+                .read()
+                .unwrap()
                 .clone(),
-            jn_table_from_document_tables: self.jn_table_from_document_tables.read().unwrap().clone(),
+            jn_table_from_document_tables: self
+                .jn_table_from_document_tables
+                .read()
+                .unwrap()
+                .clone(),
             jn_block_from_frame_blocks: self.jn_block_from_frame_blocks.read().unwrap().clone(),
             jn_frame_from_frame_parent_frame: self
                 .jn_frame_from_frame_parent_frame
-                .read().unwrap()
+                .read()
+                .unwrap()
                 .clone(),
             jn_table_from_frame_table: self.jn_table_from_frame_table.read().unwrap().clone(),
             jn_inline_element_from_block_elements: self
                 .jn_inline_element_from_block_elements
-                .read().unwrap()
+                .read()
+                .unwrap()
                 .clone(),
             jn_list_from_block_list: self.jn_list_from_block_list.read().unwrap().clone(),
-            jn_table_cell_from_table_cells: self.jn_table_cell_from_table_cells.read().unwrap().clone(),
+            jn_table_cell_from_table_cells: self
+                .jn_table_cell_from_table_cells
+                .read()
+                .unwrap()
+                .clone(),
             jn_frame_from_table_cell_cell_frame: self
                 .jn_frame_from_table_cell_cell_frame
-                .read().unwrap()
+                .read()
+                .unwrap()
                 .clone(),
             jn_back_root_document: self.jn_back_root_document.read().unwrap().clone(),
             jn_back_document_frames: self.jn_back_document_frames.read().unwrap().clone(),
@@ -130,7 +150,8 @@ impl HashMapStore {
             snap.jn_document_from_root_document.clone();
         *self.jn_frame_from_document_frames.write().unwrap() =
             snap.jn_frame_from_document_frames.clone();
-        *self.jn_list_from_document_lists.write().unwrap() = snap.jn_list_from_document_lists.clone();
+        *self.jn_list_from_document_lists.write().unwrap() =
+            snap.jn_list_from_document_lists.clone();
         *self.jn_resource_from_document_resources.write().unwrap() =
             snap.jn_resource_from_document_resources.clone();
         *self.jn_table_from_document_tables.write().unwrap() =
@@ -167,7 +188,8 @@ impl HashMapStore {
     pub fn restore_savepoint(&self, savepoint_id: u64) {
         let snap = self
             .savepoints
-            .read().unwrap()
+            .read()
+            .unwrap()
             .get(&savepoint_id)
             .expect("savepoint not found")
             .clone();
@@ -181,6 +203,59 @@ impl HashMapStore {
         let id = *counter;
         *counter += 1;
         id
+    }
+
+    /// Restore entity and junction data but preserve current counters.
+    /// Used for undo snapshots where IDs must remain monotonically increasing.
+    pub fn restore_without_counters(&self, snap: &HashMapStoreSnapshot) {
+        *self.roots.write().unwrap() = snap.roots.clone();
+        *self.documents.write().unwrap() = snap.documents.clone();
+        *self.frames.write().unwrap() = snap.frames.clone();
+        *self.blocks.write().unwrap() = snap.blocks.clone();
+        *self.inline_elements.write().unwrap() = snap.inline_elements.clone();
+        *self.lists.write().unwrap() = snap.lists.clone();
+        *self.resources.write().unwrap() = snap.resources.clone();
+        *self.tables.write().unwrap() = snap.tables.clone();
+        *self.table_cells.write().unwrap() = snap.table_cells.clone();
+        *self.jn_document_from_root_document.write().unwrap() =
+            snap.jn_document_from_root_document.clone();
+        *self.jn_frame_from_document_frames.write().unwrap() =
+            snap.jn_frame_from_document_frames.clone();
+        *self.jn_list_from_document_lists.write().unwrap() =
+            snap.jn_list_from_document_lists.clone();
+        *self.jn_resource_from_document_resources.write().unwrap() =
+            snap.jn_resource_from_document_resources.clone();
+        *self.jn_table_from_document_tables.write().unwrap() =
+            snap.jn_table_from_document_tables.clone();
+        *self.jn_block_from_frame_blocks.write().unwrap() = snap.jn_block_from_frame_blocks.clone();
+        *self.jn_frame_from_frame_parent_frame.write().unwrap() =
+            snap.jn_frame_from_frame_parent_frame.clone();
+        *self.jn_table_from_frame_table.write().unwrap() = snap.jn_table_from_frame_table.clone();
+        *self.jn_inline_element_from_block_elements.write().unwrap() =
+            snap.jn_inline_element_from_block_elements.clone();
+        *self.jn_list_from_block_list.write().unwrap() = snap.jn_list_from_block_list.clone();
+        *self.jn_table_cell_from_table_cells.write().unwrap() =
+            snap.jn_table_cell_from_table_cells.clone();
+        *self.jn_frame_from_table_cell_cell_frame.write().unwrap() =
+            snap.jn_frame_from_table_cell_cell_frame.clone();
+        *self.jn_back_root_document.write().unwrap() = snap.jn_back_root_document.clone();
+        *self.jn_back_document_frames.write().unwrap() = snap.jn_back_document_frames.clone();
+        *self.jn_back_frame_blocks.write().unwrap() = snap.jn_back_frame_blocks.clone();
+        *self.jn_back_frame_parent_frame.write().unwrap() = snap.jn_back_frame_parent_frame.clone();
+        // counters intentionally NOT restored — IDs must remain monotonically increasing
+    }
+
+    /// Create a type-erased store snapshot for undo.
+    pub fn store_snapshot(&self) -> StoreSnapshot {
+        StoreSnapshot::new(self.snapshot())
+    }
+
+    /// Restore from a type-erased store snapshot (preserves counters).
+    pub fn restore_store_snapshot(&self, snap: &StoreSnapshot) {
+        let s = snap
+            .downcast_ref::<HashMapStoreSnapshot>()
+            .expect("StoreSnapshot must contain HashMapStoreSnapshot");
+        self.restore_without_counters(s);
     }
 }
 
@@ -215,6 +290,16 @@ pub struct HashMapStoreSnapshot {
     counters: HashMap<String, EntityId>,
 }
 
+impl StoreSnapshotTrait for HashMapStoreSnapshot {
+    fn clone_box(&self) -> Box<dyn StoreSnapshotTrait> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,7 +318,12 @@ pub(crate) fn junction_get(
     junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
     id: &EntityId,
 ) -> Vec<EntityId> {
-    junction.read().unwrap().get(id).cloned().unwrap_or_default()
+    junction
+        .read()
+        .unwrap()
+        .get(id)
+        .cloned()
+        .unwrap_or_default()
 }
 
 pub(crate) fn junction_set(
@@ -244,10 +334,7 @@ pub(crate) fn junction_set(
     junction.write().unwrap().insert(id, ids);
 }
 
-pub(crate) fn junction_remove(
-    junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>,
-    id: &EntityId,
-) {
+pub(crate) fn junction_remove(junction: &RwLock<HashMap<EntityId, Vec<EntityId>>>, id: &EntityId) {
     junction.write().unwrap().remove(id);
 }
 
@@ -350,14 +437,20 @@ macro_rules! impl_relationship_methods {
             id: &$crate::types::EntityId,
             field: &$field_enum,
         ) -> Result<Vec<$crate::types::EntityId>, $crate::error::RepositoryError> {
-            Ok($crate::database::hashmap_store::junction_get(self.resolve_junction(field), id))
+            Ok($crate::database::hashmap_store::junction_get(
+                self.resolve_junction(field),
+                id,
+            ))
         }
 
         fn get_relationship_many(
             &self,
             ids: &[$crate::types::EntityId],
             field: &$field_enum,
-        ) -> Result<std::collections::HashMap<$crate::types::EntityId, Vec<$crate::types::EntityId>>, $crate::error::RepositoryError> {
+        ) -> Result<
+            std::collections::HashMap<$crate::types::EntityId, Vec<$crate::types::EntityId>>,
+            $crate::error::RepositoryError,
+        > {
             let jn = self.resolve_junction(field);
             let mut map = std::collections::HashMap::new();
             for id in ids {
@@ -371,7 +464,10 @@ macro_rules! impl_relationship_methods {
             id: &$crate::types::EntityId,
             field: &$field_enum,
         ) -> Result<usize, $crate::error::RepositoryError> {
-            Ok($crate::database::hashmap_store::junction_get(self.resolve_junction(field), id).len())
+            Ok(
+                $crate::database::hashmap_store::junction_get(self.resolve_junction(field), id)
+                    .len(),
+            )
         }
 
         fn get_relationship_in_range(
@@ -381,7 +477,8 @@ macro_rules! impl_relationship_methods {
             offset: usize,
             limit: usize,
         ) -> Result<Vec<$crate::types::EntityId>, $crate::error::RepositoryError> {
-            let all = $crate::database::hashmap_store::junction_get(self.resolve_junction(field), id);
+            let all =
+                $crate::database::hashmap_store::junction_get(self.resolve_junction(field), id);
             Ok(all.into_iter().skip(offset).take(limit).collect())
         }
 
@@ -389,11 +486,16 @@ macro_rules! impl_relationship_methods {
             &self,
             field: &$field_enum,
             right_ids: &[$crate::types::EntityId],
-        ) -> Result<Vec<($crate::types::EntityId, Vec<$crate::types::EntityId>)>, $crate::error::RepositoryError> {
-            Ok($crate::database::hashmap_store::junction_get_relationships_from_right_ids(
-                self.resolve_junction(field),
-                right_ids,
-            ))
+        ) -> Result<
+            Vec<($crate::types::EntityId, Vec<$crate::types::EntityId>)>,
+            $crate::error::RepositoryError,
+        > {
+            Ok(
+                $crate::database::hashmap_store::junction_get_relationships_from_right_ids(
+                    self.resolve_junction(field),
+                    right_ids,
+                ),
+            )
         }
     };
 }
@@ -421,7 +523,11 @@ macro_rules! impl_write_relationship_methods {
             field: &$field_enum,
             right_ids: &[$crate::types::EntityId],
         ) -> Result<(), $crate::error::RepositoryError> {
-            $crate::database::hashmap_store::junction_set(self.resolve_junction(field), *id, right_ids.to_vec());
+            $crate::database::hashmap_store::junction_set(
+                self.resolve_junction(field),
+                *id,
+                right_ids.to_vec(),
+            );
             Ok(())
         }
 

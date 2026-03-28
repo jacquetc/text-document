@@ -619,6 +619,7 @@ impl<'a> TableRepository<'a> {
         Ok(EntityTreeSnapshot {
             table_data,
             children,
+            store_snapshot: None,
         })
     }
 

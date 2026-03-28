@@ -1,5 +1,6 @@
 use crate::database::db_context::DbContext;
 use crate::database::hashmap_store::HashMapStore;
+use crate::snapshot::StoreSnapshot;
 use anyhow::{Ok, Result, bail};
 use std::sync::Arc;
 
@@ -66,5 +67,15 @@ impl Transaction {
         }
         self.store.restore_savepoint(savepoint);
         Ok(())
+    }
+
+    /// Snapshot the entire store for undo. O(n) clone, no serialization.
+    pub fn snapshot_store(&self) -> StoreSnapshot {
+        self.store.store_snapshot()
+    }
+
+    /// Restore the entire store from an undo snapshot (preserves counters).
+    pub fn restore_store(&self, snap: &StoreSnapshot) {
+        self.store.restore_store_snapshot(snap);
     }
 }

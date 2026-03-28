@@ -580,6 +580,7 @@ impl<'a> TableCellRepository<'a> {
         Ok(EntityTreeSnapshot {
             table_data,
             children,
+            store_snapshot: None,
         })
     }
 

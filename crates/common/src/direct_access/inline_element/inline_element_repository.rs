@@ -356,6 +356,7 @@ impl<'a> InlineElementRepository<'a> {
         Ok(EntityTreeSnapshot {
             table_data,
             children,
+            store_snapshot: None,
         })
     }
 

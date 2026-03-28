@@ -57,7 +57,9 @@ fn test_snapshot_serialization_roundtrip() {
                 backward_junctions: vec![],
             },
             children: vec![],
+            store_snapshot: None,
         }],
+        store_snapshot: None,
     };
 
     let serialized = postcard::to_allocvec(&snap).expect("serialize failed");
@@ -106,6 +108,7 @@ fn test_snapshot_deeply_nested() {
             backward_junctions: vec![],
         },
         children: vec![],
+        store_snapshot: None,
     };
 
     let middle = EntityTreeSnapshot {
@@ -121,6 +124,7 @@ fn test_snapshot_deeply_nested() {
             backward_junctions: vec![],
         },
         children: vec![leaf],
+        store_snapshot: None,
     };
 
     let root = EntityTreeSnapshot {
@@ -136,6 +140,7 @@ fn test_snapshot_deeply_nested() {
             backward_junctions: vec![],
         },
         children: vec![middle],
+        store_snapshot: None,
     };
 
     // Verify structure
@@ -174,6 +179,7 @@ fn test_snapshot_multiple_children() {
             backward_junctions: vec![],
         },
         children: vec![],
+        store_snapshot: None,
     };
 
     let child_b = EntityTreeSnapshot {
@@ -186,6 +192,7 @@ fn test_snapshot_multiple_children() {
             backward_junctions: vec![],
         },
         children: vec![],
+        store_snapshot: None,
     };
 
     let parent = EntityTreeSnapshot {
@@ -207,6 +214,7 @@ fn test_snapshot_multiple_children() {
             backward_junctions: vec![],
         },
         children: vec![child_a, child_b],
+        store_snapshot: None,
     };
 
     assert_eq!(parent.children.len(), 2);
@@ -253,7 +261,9 @@ fn test_snapshot_clone() {
                 backward_junctions: vec![],
             },
             children: vec![],
+            store_snapshot: None,
         }],
+        store_snapshot: None,
     };
 
     let cloned = snap.clone();

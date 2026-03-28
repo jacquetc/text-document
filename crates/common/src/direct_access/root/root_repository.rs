@@ -484,6 +484,7 @@ impl<'a> RootRepository<'a> {
         Ok(EntityTreeSnapshot {
             table_data,
             children,
+            store_snapshot: None,
         })
     }
 
