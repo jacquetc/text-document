@@ -678,9 +678,25 @@ impl TextCursor {
         };
         let block_info =
             document_inspection_commands::get_block_at_position(&inner.ctx, &dto).ok()?;
+
+        // When position < block_start, the cursor sits on the separator between
+        // the previous block and this one. Visually the cursor belongs to the
+        // end of the previous block, so look up that block instead.
+        let block_id = if to_i64(pos) < block_info.block_start && pos > 0 {
+            let prev_dto = frontend::document_inspection::GetBlockAtPositionDto {
+                position: to_i64(pos - 1),
+            };
+            let prev_info =
+                document_inspection_commands::get_block_at_position(&inner.ctx, &prev_dto)
+                    .ok()?;
+            prev_info.block_id as usize
+        } else {
+            block_info.block_id as usize
+        };
+
         let block = crate::text_block::TextBlock {
             doc: self.doc.clone(),
-            block_id: block_info.block_id as usize,
+            block_id,
         };
         // Release inner lock before calling table_cell() which also locks
         drop(inner);

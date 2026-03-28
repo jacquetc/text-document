@@ -222,6 +222,51 @@ fn current_table_cell_none_in_regular_text() {
     assert!(cursor.current_table_cell().is_none());
 }
 
+/// Bug 1: Cursor at the end of the block *before* a table must NOT
+/// be treated as inside the table.
+#[test]
+fn current_table_cell_none_at_end_of_block_before_table() {
+    let doc = new_doc_with_table(); // "Before" + 3x2 table
+    // Position 6 = end of "Before" (len 6, positions 0-5, cursor at 6 = after last char)
+    let cursor = doc.cursor_at(6);
+    assert!(
+        cursor.current_table_cell().is_none(),
+        "Cursor at end of block before table should NOT be inside a table cell"
+    );
+}
+
+/// Bug 2: Cursor at end of cell block must report the CURRENT cell, not the next one.
+/// Use markdown to create a table with cell content so positions are realistic.
+#[test]
+fn current_table_cell_at_end_of_cell_block() {
+    let doc = TextDocument::new();
+    doc.set_markdown("Before\n\n| A | B |\n|---|---|\n| c | d |\n\nAfter")
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let table = find_table(&doc).unwrap();
+
+    // Find cell (0,0) block with content "A"
+    let cell_0_0 = table.cell(0, 0).unwrap();
+    let blocks = cell_0_0.snapshot_blocks();
+    let block_0_0 = &blocks[0];
+    assert_eq!(block_0_0.text, "A");
+
+    // Cursor at end of cell (0,0) block (after "A")
+    let end_pos = block_0_0.position + block_0_0.length;
+    let cursor = doc.cursor_at(end_pos);
+    let cell_ref = cursor
+        .current_table_cell()
+        .expect("cursor at end of cell block should be in a cell");
+    assert_eq!(
+        cell_ref.column, 0,
+        "cursor at end of cell(0,0) should report column 0, got column {}",
+        cell_ref.column
+    );
+    assert_eq!(cell_ref.row, 0);
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Clone
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
