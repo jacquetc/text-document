@@ -6,11 +6,13 @@ use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, InlineContent, InlineElement, List, Root};
+use common::direct_access::table::TableRelationshipField;
+use common::entities::{Block, Frame, InlineContent, InlineElement, List, Root, TableCell};
 use common::parser_tools::fragment_schema::{
-    FragmentBlock, FragmentData, FragmentElement, FragmentList,
+    FragmentBlock, FragmentData, FragmentElement, FragmentList, FragmentTable, FragmentTableCell,
 };
 use common::types::{EntityId, ROOT_ENTITY_ID};
+use std::collections::HashMap;
 
 pub trait ExtractFragmentUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExtractFragmentUnitOfWorkTrait>;
@@ -19,11 +21,14 @@ pub trait ExtractFragmentUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Root", action = "GetRO")]
 #[macros::uow_action(entity = "Root", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Document", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "Frame", action = "GetRO")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
+#[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 pub trait ExtractFragmentUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct ExtractFragmentUseCase {
@@ -52,7 +57,7 @@ impl ExtractFragmentUseCase {
             });
         }
 
-        // Get Root -> Document -> Frames -> Blocks
+        // Get Root -> Document
         let root = uow
             .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
@@ -64,18 +69,216 @@ impl ExtractFragmentUseCase {
         let frame_ids =
             uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
-        // Collect blocks from all frames, not just the first one
+        // ── Build block→cell mapping from all tables ──────────────
+        let table_ids =
+            uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
+
+        // block_id → (cell_frame_id, table_id, cell entity)
+        let mut block_to_cell: HashMap<EntityId, (EntityId, EntityId, TableCell)> = HashMap::new();
+
+        for &tid in &table_ids {
+            let cell_ids = uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
+            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+            for cell in cells_opt.into_iter().flatten() {
+                if let Some(cf_id) = cell.cell_frame {
+                    let blk_ids =
+                        uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+                    for bid in blk_ids {
+                        block_to_cell.insert(bid, (cf_id, tid, cell.clone()));
+                    }
+                }
+            }
+        }
+
+        // ── Collect ALL blocks (main frames + cell frames) ────────
         let mut all_block_ids: Vec<EntityId> = Vec::new();
         for frame_id in &frame_ids {
             let block_ids =
                 uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
             all_block_ids.extend(block_ids);
+
+            // Expand table anchor frames into cell blocks
+            let frame = uow.get_frame(frame_id)?;
+            if let Some(f) = frame {
+                for &entry in &f.child_order {
+                    if entry < 0 {
+                        let sub_frame_id = (-entry) as EntityId;
+                        if let Some(sub_frame) = uow.get_frame(&sub_frame_id)? {
+                            if let Some(table_entity_id) = sub_frame.table {
+                                let cell_ids = uow.get_table_relationship(
+                                    &table_entity_id,
+                                    &TableRelationshipField::Cells,
+                                )?;
+                                let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+                                let mut cells: Vec<_> =
+                                    cells_opt.into_iter().flatten().collect();
+                                cells.sort_by(|a, b| {
+                                    a.row.cmp(&b.row).then(a.column.cmp(&b.column))
+                                });
+                                for c in cells {
+                                    if let Some(cf_id) = c.cell_frame {
+                                        let cf_block_ids = uow.get_frame_relationship(
+                                            &cf_id,
+                                            &FrameRelationshipField::Blocks,
+                                        )?;
+                                        all_block_ids.extend(cf_block_ids);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         let blocks_opt = uow.get_block_multi(&all_block_ids)?;
         let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
         blocks.sort_by_key(|b| b.document_position);
 
+        // ── Detect cross-cell selection ───────────────────────────
+        // Find first and last blocks in range
+        let first_in_range = blocks
+            .iter()
+            .find(|b| b.document_position + b.text_length >= start && b.document_position <= end);
+        let last_in_range = blocks
+            .iter()
+            .rev()
+            .find(|b| b.document_position + b.text_length >= start && b.document_position <= end);
+
+        let is_cross_cell = if let (Some(first), Some(last)) = (first_in_range, last_in_range) {
+            let first_cell = block_to_cell.get(&first.id).map(|(cf, _, _)| *cf);
+            let last_cell = block_to_cell.get(&last.id).map(|(cf, _, _)| *cf);
+            match (first_cell, last_cell) {
+                (Some(a), Some(b)) => a != b,
+                (Some(_), None) | (None, Some(_)) => true,
+                (None, None) => false,
+            }
+        } else {
+            false
+        };
+
+        if is_cross_cell {
+            // ── Cell selection: extract as FragmentTable ───────────
+            // Collect all unique (table_id, cell) pairs in range
+            let mut table_cells: HashMap<EntityId, Vec<&TableCell>> = HashMap::new();
+            for block in &blocks {
+                if block.document_position + block.text_length >= start
+                    && block.document_position <= end
+                {
+                    if let Some((_, tid, cell)) = block_to_cell.get(&block.id) {
+                        table_cells.entry(*tid).or_default().push(cell);
+                    }
+                }
+            }
+
+            let mut fragment_tables: Vec<FragmentTable> = Vec::new();
+            let mut plain_texts: Vec<String> = Vec::new();
+
+            for (&tid, cells) in &table_cells {
+                // Deduplicate cells by id
+                let mut seen: Vec<EntityId> = Vec::new();
+                let mut unique_cells: Vec<&TableCell> = Vec::new();
+                for c in cells {
+                    if !seen.contains(&c.id) {
+                        seen.push(c.id);
+                        unique_cells.push(c);
+                    }
+                }
+
+                // Find bounding box
+                let min_row = unique_cells.iter().map(|c| c.row).min().unwrap_or(0);
+                let max_row = unique_cells
+                    .iter()
+                    .map(|c| c.row + c.row_span.max(1) - 1)
+                    .max()
+                    .unwrap_or(0);
+                let min_col = unique_cells.iter().map(|c| c.column).min().unwrap_or(0);
+                let max_col = unique_cells
+                    .iter()
+                    .map(|c| c.column + c.column_span.max(1) - 1)
+                    .max()
+                    .unwrap_or(0);
+
+                // Get ALL cells in that table to include any we might have missed
+                let all_cell_ids =
+                    uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
+                let all_cells_opt = uow.get_table_cell_multi(&all_cell_ids)?;
+                let all_cells: Vec<TableCell> =
+                    all_cells_opt.into_iter().flatten().collect();
+
+                let mut frag_cells: Vec<FragmentTableCell> = Vec::new();
+                for cell in &all_cells {
+                    // Include cells that overlap the bounding box
+                    let cell_end_row = cell.row + cell.row_span.max(1) - 1;
+                    let cell_end_col = cell.column + cell.column_span.max(1) - 1;
+                    if cell_end_row < min_row
+                        || cell.row > max_row
+                        || cell_end_col < min_col
+                        || cell.column > max_col
+                    {
+                        continue;
+                    }
+
+                    // Extract blocks for this cell
+                    let cell_blocks = if let Some(cf_id) = cell.cell_frame {
+                        let blk_ids = uow.get_frame_relationship(
+                            &cf_id,
+                            &FrameRelationshipField::Blocks,
+                        )?;
+                        let blk_opt = uow.get_block_multi(&blk_ids)?;
+                        let mut blks: Vec<Block> =
+                            blk_opt.into_iter().flatten().collect();
+                        blks.sort_by_key(|b| b.document_position);
+                        blks
+                    } else {
+                        Vec::new()
+                    };
+
+                    let mut cell_frag_blocks: Vec<FragmentBlock> = Vec::new();
+                    for block in &cell_blocks {
+                        let (extracted_elements, extracted_text) =
+                            self.extract_full_block(&uow, block)?;
+                        plain_texts.push(extracted_text.clone());
+                        cell_frag_blocks.push(block_to_fragment_block(
+                            block,
+                            extracted_elements,
+                            extracted_text,
+                            true,
+                            None,
+                        ));
+                    }
+
+                    frag_cells.push(FragmentTableCell {
+                        row: (cell.row - min_row) as usize,
+                        column: (cell.column - min_col) as usize,
+                        row_span: cell.row_span.max(1) as usize,
+                        column_span: cell.column_span.max(1) as usize,
+                        blocks: cell_frag_blocks,
+                    });
+                }
+
+                fragment_tables.push(FragmentTable {
+                    rows: (max_row - min_row + 1) as usize,
+                    columns: (max_col - min_col + 1) as usize,
+                    cells: frag_cells,
+                });
+            }
+
+            let fragment_data = FragmentData {
+                blocks: vec![],
+                tables: fragment_tables,
+            };
+            let fragment_json = serde_json::to_string(&fragment_data)?;
+            let plain_text = plain_texts.join("\n");
+
+            uow.end_transaction()?;
+            return Ok(ExtractFragmentResultDto {
+                fragment_data: fragment_json,
+                plain_text,
+            });
+        }
+
+        // ── Normal text extraction (no cross-cell) ────────────────
         let mut fragment_blocks: Vec<FragmentBlock> = Vec::new();
         let mut plain_texts: Vec<String> = Vec::new();
 
@@ -83,12 +286,10 @@ impl ExtractFragmentUseCase {
             let block_start = block.document_position;
             let block_end = block_start + block.text_length;
 
-            // Skip blocks entirely outside range
             if block_end < start || block_start >= end {
                 continue;
             }
 
-            // Calculate offsets within this block
             let local_start = if start > block_start {
                 (start - block_start) as usize
             } else {
@@ -100,117 +301,34 @@ impl ExtractFragmentUseCase {
                 block.text_length as usize
             };
 
-            // Get elements
             let element_ids =
                 uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
             let elements_opt = uow.get_inline_element_multi(&element_ids)?;
             let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
-            // Get list if any
             let list = if let Some(list_id) = block.list {
                 uow.get_list(&list_id)?
             } else {
                 None
             };
 
-            // Extract elements within the local range
             let (extracted_elements, extracted_text) =
                 extract_elements_in_range(&elements, local_start, local_end);
 
             let is_full_block = local_start == 0 && local_end == block.text_length as usize;
 
-            let fragment_block = FragmentBlock {
-                plain_text: extracted_text.clone(),
-                elements: extracted_elements,
-                heading_level: if is_full_block {
-                    block.fmt_heading_level
-                } else {
-                    None
-                },
-                list: if is_full_block {
+            plain_texts.push(extracted_text.clone());
+            fragment_blocks.push(block_to_fragment_block(
+                block,
+                extracted_elements,
+                extracted_text,
+                is_full_block,
+                if is_full_block {
                     list.as_ref().map(FragmentList::from_entity)
                 } else {
                     None
                 },
-                alignment: if is_full_block {
-                    block.fmt_alignment.clone()
-                } else {
-                    None
-                },
-                indent: if is_full_block {
-                    block.fmt_indent
-                } else {
-                    None
-                },
-                text_indent: if is_full_block {
-                    block.fmt_text_indent
-                } else {
-                    None
-                },
-                marker: if is_full_block {
-                    block.fmt_marker.clone()
-                } else {
-                    None
-                },
-                top_margin: if is_full_block {
-                    block.fmt_top_margin
-                } else {
-                    None
-                },
-                bottom_margin: if is_full_block {
-                    block.fmt_bottom_margin
-                } else {
-                    None
-                },
-                left_margin: if is_full_block {
-                    block.fmt_left_margin
-                } else {
-                    None
-                },
-                right_margin: if is_full_block {
-                    block.fmt_right_margin
-                } else {
-                    None
-                },
-                tab_positions: if is_full_block {
-                    block.fmt_tab_positions.clone()
-                } else {
-                    vec![]
-                },
-                line_height: if is_full_block {
-                    block.fmt_line_height
-                } else {
-                    None
-                },
-                non_breakable_lines: if is_full_block {
-                    block.fmt_non_breakable_lines
-                } else {
-                    None
-                },
-                direction: if is_full_block {
-                    block.fmt_direction.clone()
-                } else {
-                    None
-                },
-                background_color: if is_full_block {
-                    block.fmt_background_color.clone()
-                } else {
-                    None
-                },
-                is_code_block: if is_full_block {
-                    block.fmt_is_code_block
-                } else {
-                    None
-                },
-                code_language: if is_full_block {
-                    block.fmt_code_language.clone()
-                } else {
-                    None
-                },
-            };
-
-            plain_texts.push(extracted_text);
-            fragment_blocks.push(fragment_block);
+            ));
         }
 
         let fragment_data = FragmentData {
@@ -227,6 +345,52 @@ impl ExtractFragmentUseCase {
             fragment_data: fragment_json,
             plain_text,
         })
+    }
+}
+
+impl ExtractFragmentUseCase {
+    /// Extract all elements from a full block.
+    fn extract_full_block(
+        &self,
+        uow: &Box<dyn ExtractFragmentUnitOfWorkTrait>,
+        block: &Block,
+    ) -> Result<(Vec<FragmentElement>, String)> {
+        let element_ids =
+            uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        Ok(extract_elements_in_range(&elements, 0, block.text_length as usize))
+    }
+}
+
+/// Build a `FragmentBlock` from a block entity and its extracted elements.
+fn block_to_fragment_block(
+    block: &Block,
+    elements: Vec<FragmentElement>,
+    plain_text: String,
+    is_full_block: bool,
+    list: Option<FragmentList>,
+) -> FragmentBlock {
+    FragmentBlock {
+        plain_text,
+        elements,
+        heading_level: if is_full_block { block.fmt_heading_level } else { None },
+        list,
+        alignment: if is_full_block { block.fmt_alignment.clone() } else { None },
+        indent: if is_full_block { block.fmt_indent } else { None },
+        text_indent: if is_full_block { block.fmt_text_indent } else { None },
+        marker: if is_full_block { block.fmt_marker.clone() } else { None },
+        top_margin: if is_full_block { block.fmt_top_margin } else { None },
+        bottom_margin: if is_full_block { block.fmt_bottom_margin } else { None },
+        left_margin: if is_full_block { block.fmt_left_margin } else { None },
+        right_margin: if is_full_block { block.fmt_right_margin } else { None },
+        tab_positions: if is_full_block { block.fmt_tab_positions.clone() } else { vec![] },
+        line_height: if is_full_block { block.fmt_line_height } else { None },
+        non_breakable_lines: if is_full_block { block.fmt_non_breakable_lines } else { None },
+        direction: if is_full_block { block.fmt_direction.clone() } else { None },
+        background_color: if is_full_block { block.fmt_background_color.clone() } else { None },
+        is_code_block: if is_full_block { block.fmt_is_code_block } else { None },
+        code_language: if is_full_block { block.fmt_code_language.clone() } else { None },
     }
 }
 
