@@ -6,6 +6,7 @@ use crate::types::EntityId;
 ///
 /// Uses a vec indexed by indent level. When indent decreases, deeper
 /// entries are truncated so that outer lists resume correctly.
+#[derive(Default)]
 pub struct ListGrouper {
     /// Index = indent level. Each entry: (entity_id, style).
     active: Vec<Option<(EntityId, ListStyle)>>,
@@ -13,7 +14,7 @@ pub struct ListGrouper {
 
 impl ListGrouper {
     pub fn new() -> Self {
-        Self { active: Vec::new() }
+        Self::default()
     }
 
     /// Returns an existing list entity id if the style and indent match
@@ -23,10 +24,10 @@ impl ListGrouper {
         let idx = indent as usize;
         // Truncate deeper levels - we returned to a shallower depth
         self.active.truncate(idx + 1);
-        if let Some(Some((id, existing_style))) = self.active.get(idx) {
-            if existing_style == style {
-                return Some(*id);
-            }
+        if let Some(Some((id, existing_style))) = self.active.get(idx)
+            && existing_style == style
+        {
+            return Some(*id);
         }
         None
     }
