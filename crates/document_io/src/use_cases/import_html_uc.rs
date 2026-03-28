@@ -5,9 +5,10 @@ use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::entities::{
     Block, Document, Frame, FramePosition, InlineContent, InlineElement, List, Resource, Root,
+    Table, TableCell,
 };
 use common::long_operation::LongOperation;
-use common::parser_tools::content_parser::{ParsedSpan, parse_html};
+use common::parser_tools::content_parser::{ParsedElement, ParsedSpan, parse_html_elements};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::sync::Arc;
@@ -31,6 +32,8 @@ pub trait ImportHtmlUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Resource", action = "Create", thread_safe = true)]
+#[macros::uow_action(entity = "Table", action = "Create", thread_safe = true)]
+#[macros::uow_action(entity = "TableCell", action = "Create", thread_safe = true)]
 pub trait ImportHtmlUnitOfWorkTrait: CommandUnitOfWork + Send + Sync {}
 
 pub struct ImportHtmlUseCase {
@@ -88,7 +91,7 @@ impl LongOperation for ImportHtmlUseCase {
         ));
 
         // Parse HTML
-        let parsed_blocks = parse_html(&self.dto.html_text);
+        let parsed_elements = parse_html_elements(&self.dto.html_text);
 
         progress_callback(common::long_operation::OperationProgress::new(
             10.0,
@@ -136,8 +139,9 @@ impl LongOperation for ImportHtmlUseCase {
 
         // Step 4: Create blocks with inline elements
         // Track blockquote frame stack
-        let total_blocks = parsed_blocks.len();
+        let total_elements = parsed_elements.len();
         let mut total_chars: i64 = 0;
+        let mut total_block_count: i64 = 0;
         let mut document_position: i64 = 0;
 
         struct FrameState {
@@ -152,125 +156,231 @@ impl LongOperation for ImportHtmlUseCase {
         let mut current_bq_depth: u32 = 0;
         let mut list_grouper = ListGrouper::new();
 
-        for (i, parsed_block) in parsed_blocks.iter().enumerate() {
+        for (i, parsed_element) in parsed_elements.iter().enumerate() {
             if cancel_flag.load(Ordering::Relaxed) {
                 uow.rollback()?;
                 return Err(anyhow!("Operation was cancelled"));
             }
 
-            let bq_depth = parsed_block.blockquote_depth;
+            match parsed_element {
+                ParsedElement::Block(parsed_block) => {
+                    let bq_depth = parsed_block.blockquote_depth;
 
-            // Close blockquote frames if depth decreased
-            while current_bq_depth > bq_depth && frame_stack.len() > 1 {
-                let finished = frame_stack.pop().unwrap();
-                let mut frame_entity = uow
-                    .get_frame(&finished.frame_id)?
-                    .ok_or_else(|| anyhow!("Blockquote frame not found"))?;
-                frame_entity.child_order = finished.child_order;
-                uow.update_frame(&frame_entity)?;
-                current_bq_depth -= 1;
-                list_grouper.reset();
-            }
+                    // Close blockquote frames if depth decreased
+                    while current_bq_depth > bq_depth && frame_stack.len() > 1 {
+                        let finished = frame_stack.pop().unwrap();
+                        let mut frame_entity = uow
+                            .get_frame(&finished.frame_id)?
+                            .ok_or_else(|| anyhow!("Blockquote frame not found"))?;
+                        frame_entity.child_order = finished.child_order;
+                        uow.update_frame(&frame_entity)?;
+                        current_bq_depth -= 1;
+                        list_grouper.reset();
+                    }
 
-            // Open blockquote frames if depth increased
-            while current_bq_depth < bq_depth {
-                let parent_frame_id = frame_stack.last().unwrap().frame_id;
-                let bq_frame = Frame {
-                    fmt_is_blockquote: Some(true),
-                    fmt_position: Some(FramePosition::InFlow),
-                    parent_frame: Some(parent_frame_id),
-                    ..Frame::default()
-                };
-                let created_bq = uow.create_frame(&bq_frame, doc_id, -1)?;
-                frame_stack
-                    .last_mut()
-                    .unwrap()
-                    .child_order
-                    .push(-(created_bq.id as i64));
-                frame_stack.push(FrameState {
-                    frame_id: created_bq.id,
-                    child_order: Vec::new(),
-                });
-                current_bq_depth += 1;
-                list_grouper.reset();
-            }
+                    // Open blockquote frames if depth increased
+                    while current_bq_depth < bq_depth {
+                        let parent_frame_id = frame_stack.last().unwrap().frame_id;
+                        let bq_frame = Frame {
+                            fmt_is_blockquote: Some(true),
+                            fmt_position: Some(FramePosition::InFlow),
+                            parent_frame: Some(parent_frame_id),
+                            ..Frame::default()
+                        };
+                        let created_bq = uow.create_frame(&bq_frame, doc_id, -1)?;
+                        frame_stack
+                            .last_mut()
+                            .unwrap()
+                            .child_order
+                            .push(-(created_bq.id as i64));
+                        frame_stack.push(FrameState {
+                            frame_id: created_bq.id,
+                            child_order: Vec::new(),
+                        });
+                        current_bq_depth += 1;
+                        list_grouper.reset();
+                    }
 
-            let plain_text: String = parsed_block.spans.iter().map(|s| s.text.as_str()).collect();
-            let line_len = plain_text.chars().count() as i64;
+                    let plain_text: String =
+                        parsed_block.spans.iter().map(|s| s.text.as_str()).collect();
+                    let line_len = plain_text.chars().count() as i64;
 
-            let current_frame_id = frame_stack.last().unwrap().frame_id;
-            let block = Block {
-                plain_text,
-                text_length: line_len,
-                document_position,
-                fmt_heading_level: parsed_block.heading_level,
-                fmt_line_height: parsed_block.line_height,
-                fmt_non_breakable_lines: parsed_block.non_breakable_lines,
-                fmt_direction: parsed_block.direction.clone(),
-                fmt_background_color: parsed_block.background_color.clone(),
-                fmt_is_code_block: if parsed_block.is_code_block {
-                    Some(true)
-                } else {
-                    None
-                },
-                fmt_code_language: parsed_block.code_language.clone(),
-                ..Block::default()
-            };
-
-            let created_block = uow.create_block(&block, current_frame_id, -1)?;
-
-            for span in &parsed_block.spans {
-                let element = create_inline_element_from_span(span, parsed_block.is_code_block);
-                uow.create_inline_element(&element, created_block.id, -1)?;
-            }
-
-            // Handle list items
-            if let Some(ref list_style) = parsed_block.list_style {
-                let list_id = if let Some(existing_id) =
-                    list_grouper.try_reuse(list_style, parsed_block.list_indent)
-                {
-                    existing_id
-                } else {
-                    let list = List {
-                        style: list_style.clone(),
-                        indent: parsed_block.list_indent as i64,
-                        ..List::default()
+                    let current_frame_id = frame_stack.last().unwrap().frame_id;
+                    let block = Block {
+                        plain_text,
+                        text_length: line_len,
+                        document_position,
+                        fmt_heading_level: parsed_block.heading_level,
+                        fmt_line_height: parsed_block.line_height,
+                        fmt_non_breakable_lines: parsed_block.non_breakable_lines,
+                        fmt_direction: parsed_block.direction.clone(),
+                        fmt_background_color: parsed_block.background_color.clone(),
+                        fmt_is_code_block: if parsed_block.is_code_block {
+                            Some(true)
+                        } else {
+                            None
+                        },
+                        fmt_code_language: parsed_block.code_language.clone(),
+                        ..Block::default()
                     };
-                    let created_list = uow.create_list(&list, doc_id, -1)?;
-                    list_grouper.register(
-                        created_list.id,
-                        list_style.clone(),
-                        parsed_block.list_indent,
-                    );
-                    created_list.id
-                };
 
-                uow.set_block_relationship(
-                    &created_block.id,
-                    &common::direct_access::block::BlockRelationshipField::List,
-                    &[list_id],
-                )?;
-            } else {
-                list_grouper.reset();
-            }
+                    let created_block = uow.create_block(&block, current_frame_id, -1)?;
 
-            frame_stack
-                .last_mut()
-                .unwrap()
-                .child_order
-                .push(created_block.id as i64);
-            total_chars += line_len;
+                    for span in &parsed_block.spans {
+                        let element =
+                            create_inline_element_from_span(span, parsed_block.is_code_block);
+                        uow.create_inline_element(&element, created_block.id, -1)?;
+                    }
 
-            document_position += line_len;
-            if i < total_blocks - 1 {
-                document_position += 1;
+                    // Handle list items
+                    if let Some(ref list_style) = parsed_block.list_style {
+                        let list_id = if let Some(existing_id) =
+                            list_grouper.try_reuse(list_style, parsed_block.list_indent)
+                        {
+                            existing_id
+                        } else {
+                            let list = List {
+                                style: list_style.clone(),
+                                indent: parsed_block.list_indent as i64,
+                                ..List::default()
+                            };
+                            let created_list = uow.create_list(&list, doc_id, -1)?;
+                            list_grouper.register(
+                                created_list.id,
+                                list_style.clone(),
+                                parsed_block.list_indent,
+                            );
+                            created_list.id
+                        };
+
+                        uow.set_block_relationship(
+                            &created_block.id,
+                            &common::direct_access::block::BlockRelationshipField::List,
+                            &[list_id],
+                        )?;
+                    } else {
+                        list_grouper.reset();
+                    }
+
+                    frame_stack
+                        .last_mut()
+                        .unwrap()
+                        .child_order
+                        .push(created_block.id as i64);
+                    total_chars += line_len;
+                    total_block_count += 1;
+
+                    document_position += line_len;
+                    if i < total_elements - 1 {
+                        document_position += 1;
+                    }
+                }
+
+                ParsedElement::Table(parsed_table) => {
+                    list_grouper.reset();
+                    let num_rows = parsed_table.rows.len() as i64;
+                    let num_cols = parsed_table.rows.first().map_or(0, |r| r.len()) as i64;
+                    if num_rows == 0 || num_cols == 0 {
+                        continue;
+                    }
+
+                    // 1. Create Table entity (owned by Document)
+                    let table = Table {
+                        rows: num_rows,
+                        columns: num_cols,
+                        column_widths: vec![],
+                        ..Table::default()
+                    };
+                    let created_table = uow.create_table(&table, doc_id, -1)?;
+
+                    // 2. Create cell frames with content + TableCell entities
+                    let current_frame_id = frame_stack.last().unwrap().frame_id;
+                    let total_cells = num_rows * num_cols;
+                    let mut cell_count: i64 = 0;
+
+                    for (r, row) in parsed_table.rows.iter().enumerate() {
+                        for (c, cell) in row.iter().enumerate() {
+                            let cell_frame = Frame::default();
+                            let created_cell_frame =
+                                uow.create_frame(&cell_frame, doc_id, -1)?;
+
+                            let plain_text: String =
+                                cell.spans.iter().map(|s| s.text.as_str()).collect();
+                            let text_length = plain_text.chars().count() as i64;
+
+                            let block = Block {
+                                plain_text,
+                                text_length,
+                                document_position,
+                                ..Block::default()
+                            };
+                            let created_block =
+                                uow.create_block(&block, created_cell_frame.id, -1)?;
+
+                            if cell.spans.is_empty()
+                                || cell.spans.iter().all(|s| s.text.is_empty())
+                            {
+                                let elem = InlineElement {
+                                    content: InlineContent::Empty,
+                                    ..InlineElement::default()
+                                };
+                                uow.create_inline_element(&elem, created_block.id, -1)?;
+                            } else {
+                                for span in &cell.spans {
+                                    let element = create_inline_element_from_span(span, false);
+                                    uow.create_inline_element(&element, created_block.id, -1)?;
+                                }
+                            }
+
+                            let mut updated_cell_frame = created_cell_frame.clone();
+                            updated_cell_frame.child_order = vec![created_block.id as i64];
+                            uow.update_frame(&updated_cell_frame)?;
+
+                            let table_cell = TableCell {
+                                row: r as i64,
+                                column: c as i64,
+                                row_span: 1,
+                                column_span: 1,
+                                cell_frame: Some(created_cell_frame.id),
+                                ..TableCell::default()
+                            };
+                            uow.create_table_cell(&table_cell, created_table.id, -1)?;
+
+                            total_chars += text_length;
+                            total_block_count += 1;
+                            cell_count += 1;
+                            document_position += text_length;
+                            if cell_count < total_cells {
+                                document_position += 1;
+                            }
+                        }
+                    }
+
+                    // 3. Create anchor frame (links table to the flow)
+                    let anchor_frame = Frame {
+                        parent_frame: Some(current_frame_id),
+                        table: Some(created_table.id),
+                        ..Frame::default()
+                    };
+                    let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
+
+                    frame_stack
+                        .last_mut()
+                        .unwrap()
+                        .child_order
+                        .push(-(created_anchor.id as i64));
+
+                    if i < total_elements - 1 {
+                        document_position += 1;
+                    }
+                }
             }
 
             if i % 10 == 0 {
-                let pct = 20.0 + (i as f32 / total_blocks as f32) * 70.0;
+                let pct = 20.0 + (i as f32 / total_elements as f32) * 70.0;
                 progress_callback(common::long_operation::OperationProgress::new(
                     pct,
-                    Some(format!("Processing block {}/{}", i + 1, total_blocks)),
+                    Some(format!("Processing element {}/{}", i + 1, total_elements)),
                 ));
             }
         }
@@ -298,7 +408,7 @@ impl LongOperation for ImportHtmlUseCase {
             .get_document(&doc_id)?
             .ok_or_else(|| anyhow!("Document not found after import"))?;
         updated_doc.character_count = total_chars;
-        updated_doc.block_count = total_blocks as i64;
+        updated_doc.block_count = total_block_count;
         uow.update_document(&updated_doc)?;
 
         if cancel_flag.load(Ordering::Relaxed) {
@@ -314,7 +424,7 @@ impl LongOperation for ImportHtmlUseCase {
         ));
 
         Ok(ImportHtmlResultDto {
-            block_count: total_blocks as i64,
+            block_count: total_block_count,
         })
     }
 }

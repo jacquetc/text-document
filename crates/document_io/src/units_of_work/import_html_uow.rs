@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Resource, Root};
+use common::entities::{Block, Document, Frame, InlineElement, List, Resource, Root, Table, TableCell};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -100,6 +100,8 @@ impl CommandUnitOfWork for ImportHtmlUnitOfWork {
 #[macros::uow_action(entity = "InlineElement", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Resource", action = "Create", thread_safe = true)]
+#[macros::uow_action(entity = "Table", action = "Create", thread_safe = true)]
+#[macros::uow_action(entity = "TableCell", action = "Create", thread_safe = true)]
 impl ImportHtmlUnitOfWorkTrait for ImportHtmlUnitOfWork {}
 
 pub struct ImportHtmlUnitOfWorkFactory {

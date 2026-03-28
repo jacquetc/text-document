@@ -544,10 +544,14 @@ fn parse_block_styles(style: &str) -> BlockStyles {
 }
 
 pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
+    ParsedElement::flatten_to_blocks(parse_html_elements(html))
+}
+
+pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
     use scraper::Html;
 
     let fragment = Html::parse_fragment(html);
-    let mut blocks: Vec<ParsedBlock> = Vec::new();
+    let mut elements: Vec<ParsedElement> = Vec::new();
 
     // Walk the DOM tree starting from the root
     let root = fragment.root_element();
@@ -564,10 +568,113 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
 
     const MAX_RECURSION_DEPTH: usize = 256;
 
+    /// Collect inline spans from a `<td>` or `<th>` cell element.
+    fn collect_cell_spans(
+        node: ego_tree::NodeRef<Node>,
+        state: &FmtState,
+        spans: &mut Vec<ParsedSpan>,
+        depth: usize,
+    ) {
+        if depth > MAX_RECURSION_DEPTH {
+            return;
+        }
+        for child in node.children() {
+            match child.value() {
+                Node::Text(text) => {
+                    let t = text.text.to_string();
+                    if !t.is_empty() {
+                        spans.push(ParsedSpan {
+                            text: t,
+                            bold: state.bold,
+                            italic: state.italic,
+                            underline: state.underline,
+                            strikeout: state.strikeout,
+                            code: state.code,
+                            link_href: state.link_href.clone(),
+                        });
+                    }
+                }
+                Node::Element(el) => {
+                    let tag = el.name();
+                    let mut new_state = state.clone();
+                    match tag {
+                        "b" | "strong" => new_state.bold = true,
+                        "i" | "em" => new_state.italic = true,
+                        "u" | "ins" => new_state.underline = true,
+                        "s" | "del" | "strike" => new_state.strikeout = true,
+                        "code" => new_state.code = true,
+                        "a" => {
+                            if let Some(href) = el.attr("href") {
+                                new_state.link_href = Some(href.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                    collect_cell_spans(child, &new_state, spans, depth + 1);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Parse a `<table>` element into a ParsedTable.
+    fn parse_table_element(table_node: ego_tree::NodeRef<Node>) -> ParsedTable {
+        let mut rows: Vec<Vec<ParsedTableCell>> = Vec::new();
+        let mut header_rows: usize = 0;
+
+        fn collect_rows(
+            node: ego_tree::NodeRef<Node>,
+            rows: &mut Vec<Vec<ParsedTableCell>>,
+            header_rows: &mut usize,
+            in_thead: bool,
+        ) {
+            for child in node.children() {
+                if let Node::Element(el) = child.value() {
+                    match el.name() {
+                        "thead" => collect_rows(child, rows, header_rows, true),
+                        "tbody" | "tfoot" => collect_rows(child, rows, header_rows, false),
+                        "tr" => {
+                            let mut cells: Vec<ParsedTableCell> = Vec::new();
+                            for td in child.children() {
+                                if let Node::Element(td_el) = td.value() {
+                                    if matches!(td_el.name(), "td" | "th") {
+                                        let mut spans = Vec::new();
+                                        let state = FmtState::default();
+                                        collect_cell_spans(td, &state, &mut spans, 0);
+                                        if spans.is_empty() {
+                                            spans.push(ParsedSpan::default());
+                                        }
+                                        cells.push(ParsedTableCell { spans });
+                                    }
+                                }
+                            }
+                            if !cells.is_empty() {
+                                rows.push(cells);
+                                if in_thead {
+                                    *header_rows += 1;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        collect_rows(table_node, &mut rows, &mut header_rows, false);
+
+        // Tables without explicit <thead> but with <th> cells: treat first row as header
+        if header_rows == 0 && !rows.is_empty() {
+            header_rows = 1;
+        }
+
+        ParsedTable { header_rows, rows }
+    }
+
     fn walk_node(
         node: ego_tree::NodeRef<Node>,
         state: &FmtState,
-        blocks: &mut Vec<ParsedBlock>,
+        elements: &mut Vec<ParsedElement>,
         current_list_style: &Option<ListStyle>,
         blockquote_depth: u32,
         list_depth: u32,
@@ -664,9 +771,18 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                     BlockStyles::default()
                 };
 
+                if tag == "table" {
+                    // Parse table structure into a ParsedTable
+                    let parsed_table = parse_table_element(node);
+                    if !parsed_table.rows.is_empty() {
+                        elements.push(ParsedElement::Table(parsed_table));
+                    }
+                    return;
+                }
+
                 if tag == "br" {
                     // <br> creates a new block
-                    blocks.push(ParsedBlock {
+                    elements.push(ParsedElement::Block(ParsedBlock {
                         spans: vec![ParsedSpan {
                             text: String::new(),
                             ..Default::default()
@@ -681,7 +797,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         non_breakable_lines: None,
                         direction: None,
                         background_color: None,
-                    });
+                    }));
                     return;
                 }
 
@@ -691,7 +807,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         walk_node(
                             child,
                             &new_state,
-                            blocks,
+                            elements,
                             &new_list_style,
                             bq_depth,
                             new_list_depth,
@@ -706,7 +822,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         &new_state,
                         &mut spans,
                         &new_list_style,
-                        blocks,
+                        elements,
                         bq_depth,
                         new_list_depth,
                         depth + 1,
@@ -725,7 +841,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                     };
 
                     if !spans.is_empty() || heading_level.is_some() {
-                        blocks.push(ParsedBlock {
+                        elements.push(ParsedElement::Block(ParsedBlock {
                             spans,
                             heading_level,
                             list_style: list_style_for_block,
@@ -737,15 +853,15 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             non_breakable_lines: css.non_breakable_lines,
                             direction: css.direction,
                             background_color: css.background_color,
-                        });
+                        }));
                     }
-                } else if matches!(tag, "ul" | "ol" | "table" | "thead" | "tbody" | "tr") {
+                } else if matches!(tag, "ul" | "ol" | "thead" | "tbody" | "tr") {
                     // Container elements: recurse into children
                     for child in node.children() {
                         walk_node(
                             child,
                             &new_state,
-                            blocks,
+                            elements,
                             &new_list_style,
                             bq_depth,
                             new_list_depth,
@@ -758,7 +874,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         walk_node(
                             child,
                             &new_state,
-                            blocks,
+                            elements,
                             current_list_style,
                             bq_depth,
                             list_depth,
@@ -772,7 +888,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                 let trimmed = t.trim();
                 if !trimmed.is_empty() {
                     // Bare text not in a block — create a paragraph
-                    blocks.push(ParsedBlock {
+                    elements.push(ParsedElement::Block(ParsedBlock {
                         spans: vec![ParsedSpan {
                             text: trimmed.to_string(),
                             bold: state.bold,
@@ -792,7 +908,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                         non_breakable_lines: None,
                         direction: None,
                         background_color: None,
-                    });
+                    }));
                 }
             }
             _ => {
@@ -801,7 +917,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                     walk_node(
                         child,
                         state,
-                        blocks,
+                        elements,
                         current_list_style,
                         blockquote_depth,
                         list_depth,
@@ -821,7 +937,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
         state: &FmtState,
         spans: &mut Vec<ParsedSpan>,
         current_list_style: &Option<ListStyle>,
-        blocks: &mut Vec<ParsedBlock>,
+        elements: &mut Vec<ParsedElement>,
         blockquote_depth: u32,
         list_depth: u32,
         depth: usize,
@@ -887,12 +1003,12 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             text: String::new(),
                             ..Default::default()
                         });
-                    } else if nested_block {
-                        // Flush as separate block
+                    } else if nested_block || tag == "table" {
+                        // Flush as separate element
                         walk_node(
                             child,
                             &new_state,
-                            blocks,
+                            elements,
                             current_list_style,
                             blockquote_depth,
                             list_depth,
@@ -905,7 +1021,7 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
                             &new_state,
                             spans,
                             current_list_style,
-                            blocks,
+                            elements,
                             blockquote_depth,
                             list_depth,
                             depth + 1,
@@ -919,12 +1035,12 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
 
     let initial_state = FmtState::default();
     for child in root.children() {
-        walk_node(child, &initial_state, &mut blocks, &None, 0, 0, 0);
+        walk_node(child, &initial_state, &mut elements, &None, 0, 0, 0);
     }
 
-    // If no blocks were parsed, create a single empty paragraph
-    if blocks.is_empty() {
-        blocks.push(ParsedBlock {
+    // If no elements were parsed, create a single empty paragraph
+    if elements.is_empty() {
+        elements.push(ParsedElement::Block(ParsedBlock {
             spans: vec![ParsedSpan {
                 text: String::new(),
                 ..Default::default()
@@ -939,10 +1055,10 @@ pub fn parse_html(html: &str) -> Vec<ParsedBlock> {
             non_breakable_lines: None,
             direction: None,
             background_color: None,
-        });
+        }));
     }
 
-    blocks
+    elements
 }
 
 #[cfg(test)]
