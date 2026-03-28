@@ -28,6 +28,15 @@ frontend = { workspace = true }
 
 [dev-dependencies]
 proptest = "1"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[[bench]]
+name = "io_benchmarks"
+harness = false
 
 [lints]
 workspace = true
