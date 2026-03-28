@@ -70,15 +70,21 @@ pub fn find_element_at_offset(
 /// Negative entries in child_order are nested frame IDs (convention: -frame_id);
 /// this function recurses into them to include their blocks in the linear sequence.
 ///
+/// Table anchor frames (where `frame.table` is set) are expanded by calling
+/// `get_table_cell_frames` to obtain cell frame IDs in row-major order, then
+/// recursing into each cell frame.
+///
 /// Accepts closures so it can work with any UoW trait that provides frame access.
-pub fn collect_block_ids_recursive<F, G>(
+pub fn collect_block_ids_recursive<F, G, T>(
     get_frame: &F,
     get_relationship: &G,
+    get_table_cell_frames: &T,
     frame_id: &EntityId,
 ) -> Result<Vec<EntityId>>
 where
     F: Fn(&EntityId) -> Result<Option<Frame>>,
     G: Fn(&EntityId, &FrameRelationshipField) -> Result<Vec<EntityId>>,
+    T: Fn(&EntityId) -> Result<Vec<EntityId>>,
 {
     let frame = get_frame(frame_id)?.ok_or_else(|| anyhow!("Frame not found"))?;
 
@@ -89,9 +95,29 @@ where
                 block_ids.push(entry as EntityId);
             } else if entry < 0 {
                 let sub_frame_id = (-entry) as EntityId;
-                let sub_ids =
-                    collect_block_ids_recursive(get_frame, get_relationship, &sub_frame_id)?;
-                block_ids.extend(sub_ids);
+                let sub_frame = get_frame(&sub_frame_id)?
+                    .ok_or_else(|| anyhow!("Sub-frame not found"))?;
+                if let Some(table_id) = sub_frame.table {
+                    // Table anchor frame: collect blocks from cell frames
+                    let cell_frame_ids = get_table_cell_frames(&table_id)?;
+                    for cf_id in cell_frame_ids {
+                        let cf_blocks = collect_block_ids_recursive(
+                            get_frame,
+                            get_relationship,
+                            get_table_cell_frames,
+                            &cf_id,
+                        )?;
+                        block_ids.extend(cf_blocks);
+                    }
+                } else {
+                    let sub_ids = collect_block_ids_recursive(
+                        get_frame,
+                        get_relationship,
+                        get_table_cell_frames,
+                        &sub_frame_id,
+                    )?;
+                    block_ids.extend(sub_ids);
+                }
             }
         }
         Ok(block_ids)

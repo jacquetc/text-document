@@ -6,6 +6,7 @@ use common::database::CommandUnitOfWork;
 use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
+use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -33,6 +34,8 @@ pub trait InsertFormattedTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "InlineElement", action = "Remove")]
+#[macros::uow_action(entity = "Table", action = "GetRelationship")]
+#[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 pub trait InsertFormattedTextUnitOfWorkTrait: CommandUnitOfWork {}
 
 /// Lightweight undo data — stores only the few entities that actually changed.

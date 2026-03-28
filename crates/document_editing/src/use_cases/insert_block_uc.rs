@@ -7,6 +7,7 @@ use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
+use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
@@ -37,6 +38,8 @@ pub trait InsertBlockUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "Table", action = "GetRelationship")]
+#[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 pub trait InsertBlockUnitOfWorkTrait: CommandUnitOfWork {}
 
 pub struct InsertBlockUseCase {
@@ -73,9 +76,18 @@ fn execute_insert_block(
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
+    let get_table_cell_frames = |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
+        let cell_ids =
+            uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+        let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
+        cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+        Ok(cells.into_iter().filter_map(|c| c.cell_frame).collect())
+    };
     let all_block_ids = collect_block_ids_recursive(
         &|id| uow.get_frame(id),
         &|id, field| uow.get_frame_relationship(id, field),
+        &get_table_cell_frames,
         &frame_id,
     )?;
 
