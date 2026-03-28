@@ -135,25 +135,28 @@ impl ExtractFragmentUseCase {
         blocks.sort_by_key(|b| b.document_position);
 
         // ── Detect cross-cell selection ───────────────────────────
-        // Find first and last blocks in range
-        let first_in_range = blocks
-            .iter()
-            .find(|b| b.document_position + b.text_length >= start && b.document_position <= end);
-        let last_in_range = blocks
-            .iter()
-            .rev()
-            .find(|b| b.document_position + b.text_length >= start && b.document_position <= end);
-
-        let is_cross_cell = if let (Some(first), Some(last)) = (first_in_range, last_in_range) {
-            let first_cell = block_to_cell.get(&first.id).map(|(cf, _, _)| *cf);
-            let last_cell = block_to_cell.get(&last.id).map(|(cf, _, _)| *cf);
-            match (first_cell, last_cell) {
-                (Some(a), Some(b)) => a != b,
-                (Some(_), None) | (None, Some(_)) => true,
-                (None, None) => false,
+        // Check ALL blocks in range (not just endpoints) — an intermediate
+        // block could be in a different cell.
+        let is_cross_cell = {
+            let mut first_cell: Option<Option<EntityId>> = None;
+            let mut cross = false;
+            for block in &blocks {
+                if block.document_position + block.text_length < start
+                    || block.document_position > end
+                {
+                    continue;
+                }
+                let cell = block_to_cell.get(&block.id).map(|(cf, _, _)| *cf);
+                match first_cell {
+                    None => first_cell = Some(cell),
+                    Some(fc) if fc != cell => {
+                        cross = true;
+                        break;
+                    }
+                    _ => {}
+                }
             }
-        } else {
-            false
+            cross
         };
 
         if is_cross_cell {

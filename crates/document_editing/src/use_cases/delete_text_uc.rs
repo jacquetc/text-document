@@ -126,9 +126,6 @@ fn execute_delete(
 
     // Find start and end blocks (used for cell detection, then re-used by the normal path)
     let (start_block, start_block_idx, start_offset) = find_block_at_position(&blocks, start)?;
-    let (end_block_tmp, _end_block_idx_tmp, _end_offset_tmp) =
-        find_block_at_position(&blocks, end)?;
-
     // ── Cell selection safety: detect cross-cell deletion ──────────
     // Build block_id → cell_frame_id map from all tables in the document.
     let table_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
@@ -148,13 +145,28 @@ fn execute_delete(
         }
     }
 
-    let start_cell = block_to_cell_frame.get(&start_block.id).copied();
-    let end_cell = block_to_cell_frame.get(&end_block_tmp.id).copied();
-
-    let is_cross_cell = match (start_cell, end_cell) {
-        (Some(a), Some(b)) => a != b,              // different cells
-        (Some(_), None) | (None, Some(_)) => true, // one in table, one outside
-        (None, None) => false,                     // both outside tables
+    // Check ALL blocks in the selection range for cross-cell spanning, not just
+    // endpoints — an intermediate block could be in a different cell even when
+    // the first and last blocks are in the same cell.
+    let is_cross_cell = {
+        let mut first_cell: Option<Option<EntityId>> = None;
+        let mut cross = false;
+        for block in &blocks {
+            if block.document_position + block.text_length < start || block.document_position > end
+            {
+                continue;
+            }
+            let cell = block_to_cell_frame.get(&block.id).copied();
+            match first_cell {
+                None => first_cell = Some(cell),
+                Some(fc) if fc != cell => {
+                    cross = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        cross
     };
 
     if is_cross_cell {
@@ -164,12 +176,14 @@ fn execute_delete(
         let mut total_chars_removed: i64 = 0;
 
         // Collect all unique cell frames whose blocks fall in [start..end]
+        let mut affected_set: std::collections::HashSet<EntityId> =
+            std::collections::HashSet::new();
         let mut affected_cell_frames: Vec<EntityId> = Vec::new();
         for block in &blocks {
             if block.document_position + block.text_length >= start
                 && block.document_position <= end
                 && let Some(&cf_id) = block_to_cell_frame.get(&block.id)
-                && !affected_cell_frames.contains(&cf_id)
+                && affected_set.insert(cf_id)
             {
                 affected_cell_frames.push(cf_id);
             }

@@ -114,6 +114,9 @@ impl TextDocumentInner {
                 let mut data = cursor.lock();
                 data.position = adjust_offset(data.position, edit_pos, removed, added);
                 data.anchor = adjust_offset(data.anchor, edit_pos, removed, added);
+                // Cell selection override references table coordinates that may be
+                // invalidated by the edit, so always clear it.
+                data.cell_selection_override = None;
             }
         }
     }

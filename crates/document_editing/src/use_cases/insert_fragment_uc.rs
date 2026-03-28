@@ -106,6 +106,10 @@ fn insert_table_fragment(
     let mut current_pos = insert_pos;
 
     for frag_table in &fragment_data.tables {
+        if frag_table.rows == 0 || frag_table.columns == 0 || frag_table.cells.is_empty() {
+            continue; // skip degenerate table fragments
+        }
+
         // Create the Table entity
         let table = Table {
             id: 0,
