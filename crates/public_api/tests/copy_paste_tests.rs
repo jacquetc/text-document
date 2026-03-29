@@ -1096,3 +1096,209 @@ fn comprehensive_roundtrip_with_table() {
         );
     }
 }
+
+#[test]
+fn roundtrip_nested_list_three_levels() {
+    // Build a document with a 3-level nested unordered list.
+    let doc = TextDocument::new();
+    doc.set_html(concat!(
+        "<ul>",
+        "<li>Level 1 first",
+        "<ul>",
+        "<li>Level 2 first",
+        "<ul>",
+        "<li>Level 3 first</li>",
+        "<li>Level 3 second</li>",
+        "</ul>",
+        "</li>",
+        "<li>Level 2 second</li>",
+        "</ul>",
+        "</li>",
+        "<li>Level 1 second</li>",
+        "<li>Level 1 third",
+        "<ul>",
+        "<li>Level 2 third</li>",
+        "</ul>",
+        "</li>",
+        "</ul>",
+    ))
+    .unwrap()
+    .wait()
+    .unwrap();
+
+    // Take snapshot BEFORE
+    let snap_before = doc.snapshot_flow();
+    let fp_before = fingerprint_flow(&snap_before);
+
+    eprintln!("BEFORE ({} elements):", fp_before.len());
+    for (i, e) in fp_before.iter().enumerate() {
+        eprintln!("  {}: {:?}", i, e);
+    }
+
+    // Extract (text, list_indent) pairs for structural verification
+    let items: Vec<_> = fp_before
+        .iter()
+        .filter_map(|e| match e {
+            ElementFingerprint::Block {
+                text, list_indent, ..
+            } => Some((text.as_str(), *list_indent)),
+            _ => None,
+        })
+        .collect();
+    eprintln!("Items: {:?}", items);
+
+    // Expected correct document-order list structure (no spurious empty blocks):
+    //   "Level 1 first"   indent 0
+    //   "Level 2 first"   indent 1
+    //   "Level 3 first"   indent 2
+    //   "Level 3 second"  indent 2
+    //   "Level 2 second"  indent 1
+    //   "Level 1 second"  indent 0
+    //   "Level 1 third"   indent 0
+    //   "Level 2 third"   indent 1
+    let expected: Vec<(&str, Option<u8>)> = vec![
+        ("Level 1 first", Some(0)),
+        ("Level 2 first", Some(1)),
+        ("Level 3 first", Some(2)),
+        ("Level 3 second", Some(2)),
+        ("Level 2 second", Some(1)),
+        ("Level 1 second", Some(0)),
+        ("Level 1 third", Some(0)),
+        ("Level 2 third", Some(1)),
+    ];
+
+    assert_eq!(
+        items, expected,
+        "HTML import should produce correct list order and indents"
+    );
+
+    // Select all → copy
+    let c2 = doc.cursor_at(0);
+    c2.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
+    let frag = c2.selection();
+    assert!(!frag.is_empty(), "selection should not be empty");
+
+    // Select all → paste (replace entire content)
+    let c3 = doc.cursor_at(0);
+    c3.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
+    c3.insert_fragment(&frag).unwrap();
+
+    // Take snapshot AFTER
+    let snap_after = doc.snapshot_flow();
+    let fp_after = fingerprint_flow(&snap_after);
+
+    eprintln!("AFTER ({} elements):", fp_after.len());
+    for (i, e) in fp_after.iter().enumerate() {
+        eprintln!("  {}: {:?}", i, e);
+    }
+
+    let items_after: Vec<_> = fp_after
+        .iter()
+        .filter_map(|e| match e {
+            ElementFingerprint::Block {
+                text, list_indent, ..
+            } => Some((text.as_str(), *list_indent)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        items_after, expected,
+        "copy/paste roundtrip should preserve correct list order and indents (HTML)"
+    );
+}
+
+#[test]
+fn roundtrip_nested_list_three_levels_markdown() {
+    // Same as roundtrip_nested_list_three_levels but using markdown import.
+    // Known bugs visible in this test:
+    //   1. The last list item loses its indent after copy/paste roundtrip.
+    //   2. An empty list block is added before the list.
+    let doc = TextDocument::new();
+    doc.set_markdown(concat!(
+        "- Level 1 first\n",
+        "  - Level 2 first\n",
+        "    - Level 3 first\n",
+        "    - Level 3 second\n",
+        "  - Level 2 second\n",
+        "- Level 1 second\n",
+        "- Level 1 third\n",
+        "  - Level 2 third\n",
+    ))
+    .unwrap()
+    .wait()
+    .unwrap();
+
+    // Take snapshot BEFORE
+    let snap_before = doc.snapshot_flow();
+    let fp_before = fingerprint_flow(&snap_before);
+
+    eprintln!("BEFORE ({} elements):", fp_before.len());
+    for (i, e) in fp_before.iter().enumerate() {
+        eprintln!("  {}: {:?}", i, e);
+    }
+
+    // Extract (text, list_indent) pairs for structural verification
+    let items: Vec<_> = fp_before
+        .iter()
+        .filter_map(|e| match e {
+            ElementFingerprint::Block {
+                text, list_indent, ..
+            } => Some((text.as_str(), *list_indent)),
+            _ => None,
+        })
+        .collect();
+    eprintln!("Items: {:?}", items);
+
+    // Expected correct document-order list structure (no spurious empty blocks):
+    let expected: Vec<(&str, Option<u8>)> = vec![
+        ("Level 1 first", Some(0)),
+        ("Level 2 first", Some(1)),
+        ("Level 3 first", Some(2)),
+        ("Level 3 second", Some(2)),
+        ("Level 2 second", Some(1)),
+        ("Level 1 second", Some(0)),
+        ("Level 1 third", Some(0)),
+        ("Level 2 third", Some(1)),
+    ];
+
+    assert_eq!(
+        items, expected,
+        "Markdown import should produce correct list order and indents"
+    );
+
+    // Select all → copy
+    let c2 = doc.cursor_at(0);
+    c2.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
+    let frag = c2.selection();
+    assert!(!frag.is_empty(), "selection should not be empty");
+
+    // Select all → paste (replace entire content)
+    let c3 = doc.cursor_at(0);
+    c3.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
+    c3.insert_fragment(&frag).unwrap();
+
+    // Take snapshot AFTER
+    let snap_after = doc.snapshot_flow();
+    let fp_after = fingerprint_flow(&snap_after);
+
+    eprintln!("AFTER ({} elements):", fp_after.len());
+    for (i, e) in fp_after.iter().enumerate() {
+        eprintln!("  {}: {:?}", i, e);
+    }
+
+    let items_after: Vec<_> = fp_after
+        .iter()
+        .filter_map(|e| match e {
+            ElementFingerprint::Block {
+                text, list_indent, ..
+            } => Some((text.as_str(), *list_indent)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        items_after, expected,
+        "copy/paste roundtrip should preserve correct list order and indents (Markdown)"
+    );
+}

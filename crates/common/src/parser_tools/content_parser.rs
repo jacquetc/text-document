@@ -817,14 +817,18 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
                         );
                     }
                 } else if is_block_tag && tag != "br" {
-                    // Start collecting spans for a new block
+                    // Start collecting spans for a new block.
+                    // Use a temporary buffer so that nested block-level
+                    // elements (e.g. sub-lists inside <li>) are collected
+                    // separately and appended *after* the parent block.
                     let mut spans: Vec<ParsedSpan> = Vec::new();
+                    let mut nested_elements: Vec<ParsedElement> = Vec::new();
                     collect_inline_spans(
                         node,
                         &new_state,
                         &mut spans,
                         &new_list_style,
-                        elements,
+                        &mut nested_elements,
                         bq_depth,
                         new_list_depth,
                         depth + 1,
@@ -857,6 +861,8 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
                             background_color: css.background_color,
                         }));
                     }
+                    // Append nested block elements after the parent block
+                    elements.append(&mut nested_elements);
                 } else if matches!(tag, "ul" | "ol" | "thead" | "tbody" | "tr") {
                     // Container elements: recurse into children
                     for child in node.children() {
