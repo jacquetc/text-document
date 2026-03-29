@@ -33,6 +33,7 @@ pub use direct_access::inline_element::dtos::CreateInlineElementDto;
 pub use direct_access::inline_element::inline_element_controller;
 pub use direct_access::root::dtos::CreateRootDto;
 pub use direct_access::root::root_controller;
+pub use direct_access::list::list_controller;
 pub use direct_access::table::dtos::TableDto;
 pub use direct_access::table::table_controller;
 pub use direct_access::table_cell::dtos::TableCellDto;
