@@ -7,12 +7,12 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Frame, InlineContent, InlineElement, List, Root, TableCell};
+use common::entities::{Block, Frame, InlineContent, InlineElement, List, Root, Table, TableCell};
 use common::parser_tools::fragment_schema::{
     FragmentBlock, FragmentData, FragmentElement, FragmentList, FragmentTable, FragmentTableCell,
 };
 use common::types::{EntityId, ROOT_ENTITY_ID};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub trait ExtractFragmentUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn ExtractFragmentUnitOfWorkTrait>;
@@ -27,6 +27,7 @@ pub trait ExtractFragmentUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
+#[macros::uow_action(entity = "Table", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 pub trait ExtractFragmentUnitOfWorkTrait: QueryUnitOfWork {}
@@ -160,109 +161,128 @@ impl ExtractFragmentUseCase {
         };
 
         if is_cross_cell {
-            // ── Cell selection: extract as FragmentTable ───────────
-            // Collect all unique (table_id, cell) pairs in range
-            let mut table_cells: HashMap<EntityId, Vec<&TableCell>> = HashMap::new();
-            for block in &blocks {
-                if block.document_position + block.text_length >= start
-                    && block.document_position <= end
-                    && let Some((_, tid, cell)) = block_to_cell.get(&block.id)
-                {
-                    table_cells.entry(*tid).or_default().push(cell);
-                }
-            }
-
+            // ── Mixed / cross-cell: extract non-table blocks + full tables ──
+            // Single pass in document order so plain_texts stays ordered.
+            let mut fragment_blocks: Vec<FragmentBlock> = Vec::new();
             let mut fragment_tables: Vec<FragmentTable> = Vec::new();
             let mut plain_texts: Vec<String> = Vec::new();
+            let mut processed_tables: HashSet<EntityId> = HashSet::new();
 
-            for (&tid, cells) in &table_cells {
-                // Deduplicate cells by id
-                let mut seen: Vec<EntityId> = Vec::new();
-                let mut unique_cells: Vec<&TableCell> = Vec::new();
-                for c in cells {
-                    if !seen.contains(&c.id) {
-                        seen.push(c.id);
-                        unique_cells.push(c);
-                    }
+            for block in &blocks {
+                let block_start = block.document_position;
+                let block_end = block_start + block.text_length;
+
+                if block_end < start || block_start > end {
+                    continue;
                 }
 
-                // Find bounding box
-                let min_row = unique_cells.iter().map(|c| c.row).min().unwrap_or(0);
-                let max_row = unique_cells
-                    .iter()
-                    .map(|c| c.row + c.row_span.max(1) - 1)
-                    .max()
-                    .unwrap_or(0);
-                let min_col = unique_cells.iter().map(|c| c.column).min().unwrap_or(0);
-                let max_col = unique_cells
-                    .iter()
-                    .map(|c| c.column + c.column_span.max(1) - 1)
-                    .max()
-                    .unwrap_or(0);
-
-                // Get ALL cells in that table to include any we might have missed
-                let all_cell_ids =
-                    uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
-                let all_cells_opt = uow.get_table_cell_multi(&all_cell_ids)?;
-                let all_cells: Vec<TableCell> = all_cells_opt.into_iter().flatten().collect();
-
-                let mut frag_cells: Vec<FragmentTableCell> = Vec::new();
-                for cell in &all_cells {
-                    // Include cells that overlap the bounding box
-                    let cell_end_row = cell.row + cell.row_span.max(1) - 1;
-                    let cell_end_col = cell.column + cell.column_span.max(1) - 1;
-                    if cell_end_row < min_row
-                        || cell.row > max_row
-                        || cell_end_col < min_col
-                        || cell.column > max_col
-                    {
-                        continue;
+                if let Some((_, tid, _)) = block_to_cell.get(&block.id) {
+                    // Block is inside a table cell — extract the FULL table
+                    // on first encounter (all cells, not just touched ones).
+                    if !processed_tables.insert(*tid) {
+                        continue; // already extracted
                     }
 
-                    // Extract blocks for this cell
-                    let cell_blocks = if let Some(cf_id) = cell.cell_frame {
-                        let blk_ids =
-                            uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
-                        let blk_opt = uow.get_block_multi(&blk_ids)?;
-                        let mut blks: Vec<Block> = blk_opt.into_iter().flatten().collect();
-                        blks.sort_by_key(|b| b.document_position);
-                        blks
+                    let block_insert_index = fragment_blocks.len();
+                    let table = uow
+                        .get_table(tid)?
+                        .ok_or_else(|| anyhow!("Table {} not found", tid))?;
+
+                    let all_cell_ids =
+                        uow.get_table_relationship(tid, &TableRelationshipField::Cells)?;
+                    let all_cells_opt = uow.get_table_cell_multi(&all_cell_ids)?;
+                    let mut all_cells: Vec<TableCell> =
+                        all_cells_opt.into_iter().flatten().collect();
+                    all_cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+
+                    let mut frag_cells: Vec<FragmentTableCell> = Vec::new();
+                    for cell in &all_cells {
+                        let cell_blocks = if let Some(cf_id) = cell.cell_frame {
+                            let blk_ids = uow
+                                .get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+                            let blk_opt = uow.get_block_multi(&blk_ids)?;
+                            let mut blks: Vec<Block> = blk_opt.into_iter().flatten().collect();
+                            blks.sort_by_key(|b| b.document_position);
+                            blks
+                        } else {
+                            Vec::new()
+                        };
+
+                        let mut cell_frag_blocks: Vec<FragmentBlock> = Vec::new();
+                        for cb in &cell_blocks {
+                            let (extracted_elements, extracted_text) =
+                                self.extract_full_block(&*uow, cb)?;
+                            plain_texts.push(extracted_text.clone());
+                            cell_frag_blocks.push(block_to_fragment_block(
+                                cb,
+                                extracted_elements,
+                                extracted_text,
+                                true,
+                                None,
+                            ));
+                        }
+
+                        frag_cells.push(FragmentTableCell {
+                            row: cell.row as usize,
+                            column: cell.column as usize,
+                            row_span: cell.row_span.max(1) as usize,
+                            column_span: cell.column_span.max(1) as usize,
+                            blocks: cell_frag_blocks,
+                        });
+                    }
+
+                    fragment_tables.push(FragmentTable {
+                        rows: table.rows as usize,
+                        columns: table.columns as usize,
+                        cells: frag_cells,
+                        block_insert_index,
+                    });
+                } else {
+                    // Non-table block — extract with partial-block handling
+                    let local_start = if start > block_start {
+                        (start - block_start) as usize
                     } else {
-                        Vec::new()
+                        0
+                    };
+                    let local_end = if end < block_end {
+                        (end - block_start) as usize
+                    } else {
+                        block.text_length as usize
                     };
 
-                    let mut cell_frag_blocks: Vec<FragmentBlock> = Vec::new();
-                    for block in &cell_blocks {
-                        let (extracted_elements, extracted_text) =
-                            self.extract_full_block(&*uow, block)?;
-                        plain_texts.push(extracted_text.clone());
-                        cell_frag_blocks.push(block_to_fragment_block(
-                            block,
-                            extracted_elements,
-                            extracted_text,
-                            true,
-                            None,
-                        ));
-                    }
+                    let element_ids =
+                        uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+                    let elements_opt = uow.get_inline_element_multi(&element_ids)?;
+                    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
 
-                    frag_cells.push(FragmentTableCell {
-                        row: (cell.row - min_row) as usize,
-                        column: (cell.column - min_col) as usize,
-                        row_span: cell.row_span.max(1) as usize,
-                        column_span: cell.column_span.max(1) as usize,
-                        blocks: cell_frag_blocks,
-                    });
+                    let list = if let Some(list_id) = block.list {
+                        uow.get_list(&list_id)?
+                    } else {
+                        None
+                    };
+
+                    let (extracted_elements, extracted_text) =
+                        extract_elements_in_range(&elements, local_start, local_end);
+
+                    let is_full_block = local_start == 0 && local_end == block.text_length as usize;
+
+                    plain_texts.push(extracted_text.clone());
+                    fragment_blocks.push(block_to_fragment_block(
+                        block,
+                        extracted_elements,
+                        extracted_text,
+                        is_full_block,
+                        if is_full_block {
+                            list.as_ref().map(FragmentList::from_entity)
+                        } else {
+                            None
+                        },
+                    ));
                 }
-
-                fragment_tables.push(FragmentTable {
-                    rows: (max_row - min_row + 1) as usize,
-                    columns: (max_col - min_col + 1) as usize,
-                    cells: frag_cells,
-                });
             }
 
             let fragment_data = FragmentData {
-                blocks: vec![],
+                blocks: fragment_blocks,
                 tables: fragment_tables,
             };
             let fragment_json = serde_json::to_string(&fragment_data)?;

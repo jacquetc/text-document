@@ -1143,7 +1143,7 @@ fn collect_frame_block_ids(
     }
 }
 
-fn get_main_frame_id(inner: &TextDocumentInner) -> frontend::common::types::EntityId {
+pub(crate) fn get_main_frame_id(inner: &TextDocumentInner) -> frontend::common::types::EntityId {
     // The document's first frame is the main frame.
     let frames = frontend::commands::document_commands::get_document_relationship(
         &inner.ctx,

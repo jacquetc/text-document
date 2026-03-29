@@ -16,6 +16,11 @@ pub struct FragmentTable {
     pub rows: usize,
     pub columns: usize,
     pub cells: Vec<FragmentTableCell>,
+    /// Index into the parent `FragmentData::blocks` at which this table
+    /// should be inserted.  Blocks `[0..index)` come before the table,
+    /// blocks `[index..]` come after.  Default `0` for backward compat.
+    #[serde(default)]
+    pub block_insert_index: usize,
 }
 
 /// One cell within a [`FragmentTable`].

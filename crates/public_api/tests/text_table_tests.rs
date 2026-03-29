@@ -1,4 +1,4 @@
-use text_document::{FlowElement, TextDocument};
+use text_document::{FlowElement, MoveMode, SelectionKind, TextDocument};
 
 fn new_doc_with_table() -> TextDocument {
     let doc = TextDocument::new();
@@ -407,4 +407,231 @@ fn convenience_not_in_table_errors() {
             .is_err()
     );
     assert!(cursor.set_current_cell_format(&Default::default()).is_err());
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Mixed selection (text + table) — Word-style behaviour
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Helper: create "Before" + 3×2 table with "CellText" in cell(0,0).
+/// Returns (doc, position inside cell(0,0) text).
+fn new_doc_with_text_and_table() -> (TextDocument, usize) {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Before").unwrap();
+    // Insert table at end of "Before"
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(3, 2).unwrap();
+
+    // Use the snapshot to find cell(0,0) block position
+    let snap = doc.snapshot_flow();
+    let cell_pos = snap
+        .elements
+        .iter()
+        .find_map(|e| {
+            if let text_document::FlowElementSnapshot::Table(ts) = e {
+                ts.cells
+                    .iter()
+                    .find(|c| c.row == 0 && c.column == 0)
+                    .map(|c| c.blocks[0].position)
+            } else {
+                None
+            }
+        })
+        .expect("cell(0,0) block should exist");
+
+    // Type text into cell(0,0)
+    let c2 = doc.cursor_at(cell_pos);
+    c2.insert_text("CellText").unwrap();
+
+    // Re-read actual position after text insertion
+    let snap2 = doc.snapshot_flow();
+    let actual_cell_pos = snap2
+        .elements
+        .iter()
+        .find_map(|e| {
+            if let text_document::FlowElementSnapshot::Table(ts) = e {
+                ts.cells
+                    .iter()
+                    .find(|c| c.row == 0 && c.column == 0)
+                    .map(|c| c.blocks[0].position)
+            } else {
+                None
+            }
+        })
+        .expect("cell(0,0) block should exist after text insertion");
+
+    (doc, actual_cell_pos)
+}
+
+#[test]
+fn mixed_selection_text_before_table_selects_full_table() {
+    let (doc, cell_pos) = new_doc_with_text_and_table();
+    let table = find_table(&doc).unwrap();
+    let rows = table.rows();
+    let cols = table.columns();
+
+    // Anchor at start of "Before", position inside the first cell
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(cell_pos + 1, MoveMode::KeepAnchor);
+
+    let kind = cursor.selection_kind();
+    match kind {
+        SelectionKind::Mixed {
+            cell_range,
+            text_before,
+            text_after,
+        } => {
+            assert!(text_before, "text is before the table");
+            assert!(!text_after);
+            assert_eq!(cell_range.start_row, 0);
+            assert_eq!(cell_range.start_col, 0);
+            assert_eq!(cell_range.end_row, rows - 1);
+            assert_eq!(cell_range.end_col, cols - 1);
+        }
+        other => panic!("expected Mixed, got {:?}", other),
+    }
+}
+
+#[test]
+fn mixed_selection_text_after_table_selects_full_table() {
+    // "Before" + table, then select from inside cell to "Before" text
+    // (which is "after" the cell from the selection's perspective — anchor
+    // in cell, position in the text block before the table)
+    let (doc, cell_pos) = new_doc_with_text_and_table();
+    let table = find_table(&doc).unwrap();
+    let rows = table.rows();
+    let cols = table.columns();
+
+    // Anchor at start of "Before" (outside table), position inside cell
+    // → text_before=true.  Now flip: anchor inside cell, position at 0.
+    let cursor = doc.cursor_at(cell_pos + 1);
+    cursor.set_position(0, MoveMode::KeepAnchor);
+
+    let kind = cursor.selection_kind();
+    match kind {
+        SelectionKind::Mixed {
+            cell_range,
+            text_before,
+            text_after,
+        } => {
+            // The outside position (0) is BEFORE the inside position (cell)
+            assert!(
+                text_before || text_after,
+                "one of text_before/text_after should be true"
+            );
+            assert_eq!(cell_range.start_row, 0);
+            assert_eq!(cell_range.start_col, 0);
+            assert_eq!(cell_range.end_row, rows - 1);
+            assert_eq!(cell_range.end_col, cols - 1);
+        }
+        other => panic!("expected Mixed, got {:?}", other),
+    }
+}
+
+#[test]
+fn mixed_extract_fragment_includes_blocks_and_table() {
+    let (doc, cell_pos) = new_doc_with_text_and_table();
+
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(cell_pos + 1, MoveMode::KeepAnchor);
+
+    let frag = cursor.selection();
+    assert!(!frag.is_empty(), "fragment should not be empty");
+
+    let html = frag.to_html();
+    assert!(
+        html.contains("<table>"),
+        "should contain table in HTML: {}",
+        html
+    );
+    assert!(
+        html.contains("Before"),
+        "should contain 'Before' text: {}",
+        html
+    );
+    // 3×2 table = 3 rows
+    assert!(
+        html.matches("<tr>").count() >= 3,
+        "table should have 3 rows: {}",
+        html
+    );
+}
+
+#[test]
+fn mixed_extract_fragment_plain_text_includes_all_content() {
+    let (doc, cell_pos) = new_doc_with_text_and_table();
+
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(cell_pos + 1, MoveMode::KeepAnchor);
+
+    let frag = cursor.selection();
+    let plain = frag.to_plain_text();
+    assert!(
+        plain.contains("Before"),
+        "plain text should contain 'Before', got: {}",
+        plain
+    );
+    // Table cells are also extracted in full
+    assert!(
+        plain.contains("CellText"),
+        "plain text should contain 'CellText' from cell(0,0), got: {}",
+        plain
+    );
+}
+
+#[test]
+fn mixed_fragment_to_html_contains_table() {
+    let (doc, cell_pos) = new_doc_with_text_and_table();
+
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(cell_pos + 1, MoveMode::KeepAnchor);
+
+    let frag = cursor.selection();
+    let html = frag.to_html();
+
+    assert!(
+        html.contains("<table>"),
+        "HTML should contain <table>, got: {}",
+        html
+    );
+    assert!(
+        html.contains("<p>"),
+        "HTML should contain <p> for the text block, got: {}",
+        html
+    );
+}
+
+#[test]
+fn mixed_fragment_to_markdown_contains_table() {
+    let (doc, cell_pos) = new_doc_with_text_and_table();
+
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(cell_pos + 1, MoveMode::KeepAnchor);
+
+    let frag = cursor.selection();
+    let md = frag.to_markdown();
+
+    assert!(
+        md.contains("|"),
+        "Markdown should contain pipe for table, got: {}",
+        md
+    );
+}
+
+#[test]
+fn mixed_fragment_html_has_text_before_table() {
+    let (doc, cell_pos) = new_doc_with_text_and_table();
+
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(cell_pos + 1, MoveMode::KeepAnchor);
+
+    let frag = cursor.selection();
+    let html = frag.to_html();
+
+    let before_pos = html.find("Before").expect("should contain 'Before'");
+    let table_pos = html.find("<table>").expect("should contain '<table>'");
+    assert!(
+        before_pos < table_pos,
+        "'Before' text should appear before <table> in HTML"
+    );
 }

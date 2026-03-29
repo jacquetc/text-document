@@ -16,11 +16,13 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::convert::{to_i64, to_usize};
 use crate::events::DocumentEvent;
-use crate::flow::TableCellRef;
+use crate::flow::{FlowElement, TableCellRef};
 use crate::fragment::DocumentFragment;
 use crate::inner::{CursorData, QueuedEvents, TextDocumentInner};
 use crate::text_table::TextTable;
 use crate::{BlockFormat, FrameFormat, MoveMode, MoveOperation, SelectionType, TextFormat};
+
+use crate::document::get_main_frame_id;
 
 /// Compute the maximum valid cursor position from document stats.
 ///
@@ -1086,7 +1088,32 @@ impl TextCursor {
         let anchor_cell = self.table_cell_at(anchor);
 
         match (&pos_cell, &anchor_cell) {
-            (None, None) => SelectionKind::Text,
+            (None, None) => {
+                // Both endpoints are outside tables. Check whether a table
+                // sits between them — if so, all its cells must be selected
+                // (Word behaviour).
+                let (start, end) = (pos.min(anchor), pos.max(anchor));
+                if let Some(t) = self.find_table_between(start, end) {
+                    let table_id = t.id();
+                    let rows = t.rows();
+                    let cols = t.columns();
+                    let range = CellRange {
+                        table_id,
+                        start_row: 0,
+                        start_col: 0,
+                        end_row: if rows > 0 { rows - 1 } else { 0 },
+                        end_col: if cols > 0 { cols - 1 } else { 0 },
+                    };
+                    let spans = self.collect_cell_spans(table_id);
+                    SelectionKind::Mixed {
+                        cell_range: range.expand_for_spans(&spans),
+                        text_before: true,
+                        text_after: true,
+                    }
+                } else {
+                    SelectionKind::Text
+                }
+            }
             (Some(pc), Some(ac)) => {
                 if pc.table.id() != ac.table.id() {
                     // Different tables — treat as text (whole tables selected between them)
@@ -1108,41 +1135,26 @@ impl TextCursor {
                 SelectionKind::Cells(range.expand_for_spans(&spans))
             }
             (Some(tc), None) | (None, Some(tc)) => {
-                // One endpoint inside a table, the other outside — mixed selection
+                // One endpoint inside a table, the other outside — mixed
+                // selection.  Following Word behaviour, select ALL cells in
+                // the table (not just from the entry edge to the cursor row).
                 let table_id = tc.table.id();
                 let rows = tc.table.rows();
                 let cols = tc.table.columns();
-                let text_before;
-                let text_after;
-                let range;
 
-                // Determine which endpoint is inside the table
                 let inside_pos = if pos_cell.is_some() { pos } else { anchor };
                 let outside_pos = if pos_cell.is_some() { anchor } else { pos };
 
-                if outside_pos < inside_pos {
-                    // Text before table, selection enters from above/left
-                    text_before = true;
-                    text_after = false;
-                    range = CellRange {
-                        table_id,
-                        start_row: 0,
-                        start_col: 0,
-                        end_row: tc.row,
-                        end_col: if cols > 0 { cols - 1 } else { 0 },
-                    };
-                } else {
-                    // Text after table, selection enters from below/right
-                    text_before = false;
-                    text_after = true;
-                    range = CellRange {
-                        table_id,
-                        start_row: tc.row,
-                        start_col: 0,
-                        end_row: if rows > 0 { rows - 1 } else { 0 },
-                        end_col: if cols > 0 { cols - 1 } else { 0 },
-                    };
-                }
+                let text_before = outside_pos < inside_pos;
+                let text_after = !text_before;
+
+                let range = CellRange {
+                    table_id,
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: if rows > 0 { rows - 1 } else { 0 },
+                    end_col: if cols > 0 { cols - 1 } else { 0 },
+                };
                 let spans = self.collect_cell_spans(table_id);
                 SelectionKind::Mixed {
                     cell_range: range.expand_for_spans(&spans),
@@ -1264,6 +1276,31 @@ impl TextCursor {
         };
         drop(inner);
         block.table_cell()
+    }
+
+    /// Find the first table whose cell blocks fall within the range `(start, end)`.
+    fn find_table_between(&self, start: usize, end: usize) -> Option<TextTable> {
+        let inner = self.doc.lock();
+        let main_frame_id = get_main_frame_id(&inner);
+        let flow = crate::text_frame::build_flow_elements(&inner, &self.doc, main_frame_id);
+        drop(inner);
+
+        for elem in flow {
+            if let FlowElement::Table(t) = elem {
+                // Check whether the first cell's block position is between
+                // the two endpoints (i.e. the table is inside the range).
+                if let Some(first_cell) = t.cell(0, 0) {
+                    let blocks = first_cell.blocks();
+                    if let Some(fb) = blocks.first() {
+                        let p = fb.position();
+                        if p > start && p < end {
+                            return Some(t);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Collect `(row, col, row_span, col_span)` tuples for all cells in a table.

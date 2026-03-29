@@ -2,7 +2,7 @@
 
 use crate::{InlineContent, ListStyle};
 use frontend::common::parser_tools::fragment_schema::{
-    FragmentBlock, FragmentData, FragmentElement,
+    FragmentBlock, FragmentData, FragmentElement, FragmentTable,
 };
 
 /// A piece of rich text that can be inserted into a [`TextDocument`](crate::TextDocument).
@@ -146,8 +146,8 @@ impl DocumentFragment {
         let mut body = String::new();
         let blocks = &fragment_data.blocks;
 
-        // Single inline-only block: emit inline HTML without block wrapper
-        if blocks.len() == 1 && blocks[0].is_inline_only() {
+        // Single inline-only block with no tables: emit inline HTML without block wrapper
+        if blocks.len() == 1 && blocks[0].is_inline_only() && fragment_data.tables.is_empty() {
             push_inline_html(&mut body, &blocks[0].elements);
             return format!(
                 "<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>",
@@ -155,9 +155,22 @@ impl DocumentFragment {
             );
         }
 
+        // Sort tables by block_insert_index so we can interleave them
+        let mut sorted_tables: Vec<&FragmentTable> = fragment_data.tables.iter().collect();
+        sorted_tables.sort_by_key(|t| t.block_insert_index);
+        let mut table_cursor = 0;
+
         let mut i = 0;
 
         while i < blocks.len() {
+            // Insert any tables whose block_insert_index == i
+            while table_cursor < sorted_tables.len()
+                && sorted_tables[table_cursor].block_insert_index <= i
+            {
+                push_table_html(&mut body, sorted_tables[table_cursor]);
+                table_cursor += 1;
+            }
+
             let block = &blocks[i];
 
             if let Some(ref list) = block.list {
@@ -203,6 +216,12 @@ impl DocumentFragment {
             }
         }
 
+        // Emit any remaining tables after all blocks
+        while table_cursor < sorted_tables.len() {
+            push_table_html(&mut body, sorted_tables[table_cursor]);
+            table_cursor += 1;
+        }
+
         format!(
             "<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>",
             body
@@ -220,15 +239,30 @@ impl DocumentFragment {
             Err(_) => return String::new(),
         };
 
-        let mut parts: Vec<String> = Vec::new();
+        // (rendered_text, is_list_item) — used for join logic
+        let mut parts: Vec<(String, bool)> = Vec::new();
         let mut prev_was_list = false;
         let mut list_counter: u32 = 0;
 
-        for block in &fragment_data.blocks {
+        // Sort tables by block_insert_index for interleaving
+        let mut sorted_tables: Vec<&FragmentTable> = fragment_data.tables.iter().collect();
+        sorted_tables.sort_by_key(|t| t.block_insert_index);
+        let mut table_cursor = 0;
+
+        for (blk_idx, block) in fragment_data.blocks.iter().enumerate() {
+            // Insert tables before this block index
+            while table_cursor < sorted_tables.len()
+                && sorted_tables[table_cursor].block_insert_index <= blk_idx
+            {
+                parts.push((render_table_markdown(sorted_tables[table_cursor]), false));
+                prev_was_list = false;
+                list_counter = 0;
+                table_cursor += 1;
+            }
+
             let inline_text = render_inline_markdown(&block.elements);
             let is_list = block.list.is_some();
 
-            // Markdown indent prefix from block indent level (ISSUE-19)
             let indent_prefix = match block.indent {
                 Some(n) if n > 0 => "  ".repeat(n as usize),
                 _ => String::new(),
@@ -237,7 +271,7 @@ impl DocumentFragment {
             if let Some(level) = block.heading_level {
                 let n = level.clamp(1, 6) as usize;
                 let prefix = "#".repeat(n);
-                parts.push(format!("{} {}", prefix, inline_text));
+                parts.push((format!("{} {}", prefix, inline_text), false));
                 prev_was_list = false;
                 list_counter = 0;
             } else if let Some(ref list) = block.list {
@@ -247,20 +281,19 @@ impl DocumentFragment {
                 }
                 if is_ordered {
                     list_counter += 1;
-                    parts.push(format!(
-                        "{}{}. {}",
-                        indent_prefix, list_counter, inline_text
+                    parts.push((
+                        format!("{}{}. {}", indent_prefix, list_counter, inline_text),
+                        true,
                     ));
                 } else {
-                    parts.push(format!("{}- {}", indent_prefix, inline_text));
+                    parts.push((format!("{}- {}", indent_prefix, inline_text), true));
                 }
                 prev_was_list = true;
             } else {
-                // Prepend blockquote-style indent for indented paragraphs
                 if indent_prefix.is_empty() {
-                    parts.push(inline_text);
+                    parts.push((inline_text, false));
                 } else {
-                    parts.push(format!("{}{}", indent_prefix, inline_text));
+                    parts.push((format!("{}{}", indent_prefix, inline_text), false));
                 }
                 prev_was_list = false;
                 list_counter = 0;
@@ -271,20 +304,24 @@ impl DocumentFragment {
             }
         }
 
+        // Emit remaining tables after all blocks
+        while table_cursor < sorted_tables.len() {
+            parts.push((render_table_markdown(sorted_tables[table_cursor]), false));
+            table_cursor += 1;
+        }
+
         // Join: list items with \n, others with \n\n
         let mut result = String::new();
-        let blocks = &fragment_data.blocks;
-        for (idx, part) in parts.iter().enumerate() {
+        for (idx, (text, is_list)) in parts.iter().enumerate() {
             if idx > 0 {
-                let prev_is_list = blocks[idx - 1].list.is_some();
-                let curr_is_list = blocks[idx].list.is_some();
-                if prev_is_list && curr_is_list {
+                let (_, prev_is_list) = &parts[idx - 1];
+                if *prev_is_list && *is_list {
                     result.push('\n');
                 } else {
                     result.push_str("\n\n");
                 }
             }
-            result.push_str(part);
+            result.push_str(text);
         }
 
         result
@@ -433,6 +470,36 @@ fn push_inline_html(out: &mut String, elements: &[FragmentElement]) {
     }
 }
 
+/// Emit an HTML `<table>` for a `FragmentTable`.
+fn push_table_html(out: &mut String, table: &FragmentTable) {
+    out.push_str("<table>");
+    for row in 0..table.rows {
+        out.push_str("<tr>");
+        for col in 0..table.columns {
+            if let Some(cell) = table.cells.iter().find(|c| c.row == row && c.column == col) {
+                out.push_str("<td");
+                if cell.row_span > 1 {
+                    out.push_str(&format!(" rowspan=\"{}\"", cell.row_span));
+                }
+                if cell.column_span > 1 {
+                    out.push_str(&format!(" colspan=\"{}\"", cell.column_span));
+                }
+                out.push('>');
+                for (i, block) in cell.blocks.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str("<br>");
+                    }
+                    push_inline_html(out, &block.elements);
+                }
+                out.push_str("</td>");
+            }
+            // Skip positions covered by spans — the HTML renderer handles them.
+        }
+        out.push_str("</tr>");
+    }
+    out.push_str("</table>");
+}
+
 // ── Markdown helpers ────────────────────────────────────────────
 
 fn escape_markdown(s: &str) -> String {
@@ -506,6 +573,42 @@ fn render_inline_markdown(elements: &[FragmentElement]) -> String {
             } else {
                 out.push_str(&text);
             }
+        }
+    }
+    out
+}
+
+/// Render a `FragmentTable` as a pipe-delimited Markdown table.
+fn render_table_markdown(table: &FragmentTable) -> String {
+    let mut rows: Vec<Vec<String>> = vec![vec![String::new(); table.columns]; table.rows];
+
+    for cell in &table.cells {
+        let text: String = cell
+            .blocks
+            .iter()
+            .map(|b| render_inline_markdown(&b.elements))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if cell.row < table.rows && cell.column < table.columns {
+            rows[cell.row][cell.column] = text;
+        }
+    }
+
+    let mut out = String::new();
+    for (i, row) in rows.iter().enumerate() {
+        out.push_str("| ");
+        out.push_str(&row.join(" | "));
+        out.push_str(" |");
+        if i == 0 {
+            // Header separator
+            out.push('\n');
+            out.push('|');
+            for _ in 0..table.columns {
+                out.push_str(" --- |");
+            }
+        }
+        if i + 1 < rows.len() {
+            out.push('\n');
         }
     }
     out
