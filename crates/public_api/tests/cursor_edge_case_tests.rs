@@ -215,17 +215,31 @@ fn insert_block_at_document_start() {
 }
 
 #[test]
-fn insert_block_with_selection_splits_at_position() {
+fn insert_block_with_selection_deletes_then_splits() {
     let doc = new_doc("Hello World");
     let cursor = doc.cursor();
     // Select "Hello" (anchor=0, position=5)
     cursor.set_position(0, MoveMode::MoveAnchor);
     cursor.set_position(5, MoveMode::KeepAnchor);
     cursor.insert_block().unwrap();
-    // insert_block splits at the cursor position (5), producing "Hello" + " World"
+    // Word convention: selection is deleted first, then paragraph break inserted
+    // "Hello" deleted → " World" remains → split at 0 → "" + " World"
     assert_eq!(doc.block_count(), 2);
     let text = doc.to_plain_text().unwrap();
-    assert_eq!(text, "Hello\n World");
+    assert_eq!(text, "\n World");
+}
+
+#[test]
+fn insert_block_with_selection_undo_restores_original() {
+    let doc = new_doc("Hello World");
+    let cursor = doc.cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor.set_position(5, MoveMode::KeepAnchor);
+    cursor.insert_block().unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "\n World");
+    doc.undo().unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "Hello World");
+    assert_eq!(doc.block_count(), 1);
 }
 
 #[test]
