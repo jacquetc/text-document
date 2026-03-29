@@ -101,6 +101,11 @@ fn execute_remove_table_column(
     let mut cells_to_remove: Vec<&TableCell> = Vec::new();
     let mut cells_to_update: Vec<TableCell> = Vec::new();
 
+    // Compute base_pos from ALL cells BEFORE any removal, so the table starting
+    // position is correct even when the first column is being removed.
+    let all_cell_frame_ids: Vec<EntityId> = cells.iter().filter_map(|c| c.cell_frame).collect();
+    let base_pos = compute_table_base_pos(&*uow, &all_cell_frame_ids)?;
+
     for cell in &cells {
         if cell.column == column_index && cell.column_span == 1 {
             // Single-column cell at the target column — remove it
@@ -168,8 +173,6 @@ fn execute_remove_table_column(
         .iter()
         .filter_map(|c| c.cell_frame)
         .collect();
-
-    let base_pos = compute_table_base_pos(&*uow, &remaining_cell_frame_ids)?;
 
     // Assign positions in row-major order (handles multi-block cells)
     let (cell_blocks_to_update, _) =
