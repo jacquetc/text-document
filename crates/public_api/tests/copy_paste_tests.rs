@@ -848,6 +848,10 @@ fn fingerprint_block(snap: &BlockSnapshot) -> ElementFingerprint {
     for f in &snap.fragments {
         match f {
             text_document::FragmentContent::Text { text, format, .. } => {
+                // Skip empty text fragments — semantically equivalent to no fragment
+                if text.is_empty() {
+                    continue;
+                }
                 frag_texts.push(text.clone());
                 frag_bolds.push(format.font_bold);
                 frag_italics.push(format.font_italic);
@@ -1010,7 +1014,6 @@ fn comprehensive_roundtrip_select_all_copy_paste() {
 }
 
 #[test]
-#[ignore = "Document.character_count doesn't include table cell text, so cursor can't reach end of document — pre-existing bug"]
 fn comprehensive_roundtrip_with_table() {
     // Same as above but with a table — tests the full pipeline
     let doc = TextDocument::new();
