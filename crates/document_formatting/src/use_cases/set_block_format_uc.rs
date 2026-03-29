@@ -123,6 +123,18 @@ fn execute_set_block_format(
             if let Some(ref l) = dto.code_language {
                 updated.fmt_code_language = Some(l.clone());
             }
+            if let Some(v) = dto.top_margin {
+                updated.fmt_top_margin = Some(v);
+            }
+            if let Some(v) = dto.bottom_margin {
+                updated.fmt_bottom_margin = Some(v);
+            }
+            if let Some(v) = dto.left_margin {
+                updated.fmt_left_margin = Some(v);
+            }
+            if let Some(v) = dto.right_margin {
+                updated.fmt_right_margin = Some(v);
+            }
             updated.updated_at = chrono::Utc::now();
             blocks_to_update.push(updated);
         }
