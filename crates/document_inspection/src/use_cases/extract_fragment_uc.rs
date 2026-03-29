@@ -94,41 +94,10 @@ impl ExtractFragmentUseCase {
             }
         }
 
-        // ── Collect ALL blocks (main frames + cell frames) ────────
+        // ── Collect ALL blocks recursively (root frames, blockquotes, cell frames) ──
         let mut all_block_ids: Vec<EntityId> = Vec::new();
         for frame_id in &frame_ids {
-            let block_ids =
-                uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
-            all_block_ids.extend(block_ids);
-
-            // Expand table anchor frames into cell blocks
-            if let Some(f) = uow.get_frame(frame_id)? {
-                for &entry in &f.child_order {
-                    if entry < 0 {
-                        let sub_frame_id = (-entry) as EntityId;
-                        if let Some(sub_frame) = uow.get_frame(&sub_frame_id)?
-                            && let Some(table_entity_id) = sub_frame.table
-                        {
-                            let cell_ids = uow.get_table_relationship(
-                                &table_entity_id,
-                                &TableRelationshipField::Cells,
-                            )?;
-                            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
-                            let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
-                            cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
-                            for c in cells {
-                                if let Some(cf_id) = c.cell_frame {
-                                    let cf_block_ids = uow.get_frame_relationship(
-                                        &cf_id,
-                                        &FrameRelationshipField::Blocks,
-                                    )?;
-                                    all_block_ids.extend(cf_block_ids);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            collect_block_ids_recursive_ro(&*uow, frame_id, &mut all_block_ids)?;
         }
 
         let blocks_opt = uow.get_block_multi(&all_block_ids)?;
@@ -563,4 +532,52 @@ fn extract_elements_in_range(
     }
 
     (result_elements, result_text)
+}
+
+/// Recursively collect block IDs from a frame, traversing sub-frames
+/// (blockquotes) and table cell frames.
+fn collect_block_ids_recursive_ro(
+    uow: &dyn ExtractFragmentUnitOfWorkTrait,
+    frame_id: &EntityId,
+    out: &mut Vec<EntityId>,
+) -> Result<()> {
+    let frame = match uow.get_frame(frame_id)? {
+        Some(f) => f,
+        None => return Ok(()),
+    };
+
+    if !frame.child_order.is_empty() {
+        for &entry in &frame.child_order {
+            if entry > 0 {
+                out.push(entry as EntityId);
+            } else if entry < 0 {
+                let sub_frame_id = (-entry) as EntityId;
+                if let Some(sub_frame) = uow.get_frame(&sub_frame_id)? {
+                    if let Some(table_entity_id) = sub_frame.table {
+                        // Table anchor frame: expand cell frames
+                        let cell_ids = uow.get_table_relationship(
+                            &table_entity_id,
+                            &TableRelationshipField::Cells,
+                        )?;
+                        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+                        let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
+                        cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+                        for c in cells {
+                            if let Some(cf_id) = c.cell_frame {
+                                collect_block_ids_recursive_ro(uow, &cf_id, out)?;
+                            }
+                        }
+                    } else {
+                        // Non-table sub-frame (blockquote): recurse
+                        collect_block_ids_recursive_ro(uow, &sub_frame_id, out)?;
+                    }
+                }
+            }
+        }
+    } else {
+        let block_ids = uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        out.extend(block_ids);
+    }
+
+    Ok(())
 }

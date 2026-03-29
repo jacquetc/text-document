@@ -1,6 +1,6 @@
 use super::editing_helpers::{
-    CellFrameCreator, create_cell_frame, find_block_at_position, find_element_at_offset,
-    impl_cell_frame_creator,
+    CellFrameCreator, collect_block_ids_recursive, create_cell_frame, find_block_at_position,
+    find_element_at_offset, impl_cell_frame_creator,
 };
 use crate::InsertFragmentDto;
 use crate::InsertFragmentResultDto;
@@ -60,6 +60,49 @@ pub trait InsertFragmentUnitOfWorkFactoryTrait: Send + Sync {
 pub trait InsertFragmentUnitOfWorkTrait: CommandUnitOfWork {}
 
 impl_cell_frame_creator!(dyn InsertFragmentUnitOfWorkTrait);
+
+/// Collect all blocks from a frame tree and map each block to its owning frame.
+/// Traverses blockquote sub-frames and table cell frames recursively.
+fn collect_all_blocks_with_frame(
+    uow: &dyn InsertFragmentUnitOfWorkTrait,
+    frame_id: &EntityId,
+    block_to_frame: &mut HashMap<EntityId, EntityId>,
+) -> Result<()> {
+    let frame = match uow.get_frame(frame_id)? {
+        Some(f) => f,
+        None => return Ok(()),
+    };
+
+    if !frame.child_order.is_empty() {
+        for &entry in &frame.child_order {
+            if entry > 0 {
+                block_to_frame.insert(entry as EntityId, *frame_id);
+            } else if entry < 0 {
+                let sub_id = (-entry) as EntityId;
+                if let Some(sub) = uow.get_frame(&sub_id)? {
+                    if let Some(tid) = sub.table {
+                        let cell_ids =
+                            uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
+                        let cells = uow.get_table_cell_multi(&cell_ids)?;
+                        for c in cells.into_iter().flatten() {
+                            if let Some(cf) = c.cell_frame {
+                                collect_all_blocks_with_frame(uow, &cf, block_to_frame)?;
+                            }
+                        }
+                    } else {
+                        collect_all_blocks_with_frame(uow, &sub_id, block_to_frame)?;
+                    }
+                }
+            }
+        }
+    } else {
+        let blk_ids = uow.get_frame_relationship(frame_id, &FrameRelationshipField::Blocks)?;
+        for bid in blk_ids {
+            block_to_frame.insert(bid, *frame_id);
+        }
+    }
+    Ok(())
+}
 
 /// Build a mapping from block_id → (cell_frame_id, table_id) for all tables in the document.
 fn build_block_to_cell_map(
@@ -529,19 +572,44 @@ fn insert_mixed_fragment(
     }
 
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
-    let frame_id = *frame_ids
+    let root_frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
-    let frame = uow
-        .get_frame(&frame_id)?
-        .ok_or_else(|| anyhow!("Frame not found"))?;
 
-    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
-    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    // Collect all blocks across all frames and map to owning frame
+    let mut block_to_frame: HashMap<EntityId, EntityId> = HashMap::new();
+    collect_all_blocks_with_frame(&**uow, &root_frame_id, &mut block_to_frame)?;
+
+    let all_block_ids: Vec<EntityId> = {
+        let get_table_cell_frames = |table_id: &EntityId| -> Result<Vec<EntityId>> {
+            let cell_ids =
+                uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+            let cells = uow.get_table_cell_multi(&cell_ids)?;
+            let mut sorted: Vec<_> = cells.into_iter().flatten().collect();
+            sorted.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+            Ok(sorted.into_iter().filter_map(|c| c.cell_frame).collect())
+        };
+        collect_block_ids_recursive(
+            &|id| uow.get_frame(id),
+            &|id, field| uow.get_frame_relationship(id, field),
+            &get_table_cell_frames,
+            &root_frame_id,
+        )?
+    };
+
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     let (current_block, block_idx, offset) = find_block_at_position(&blocks, dto.position)?;
+
+    let frame_id = block_to_frame
+        .get(&current_block.id)
+        .copied()
+        .unwrap_or(root_frame_id);
+    let frame = uow
+        .get_frame(&frame_id)?
+        .ok_or_else(|| anyhow!("Frame not found"))?;
 
     // ── Split current block elements ─────────────────────────────
     let element_ids =
@@ -1082,20 +1150,46 @@ fn execute_insert_fragment(
     }
 
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
-    let frame_id = *frame_ids
+    let root_frame_id = *frame_ids
         .first()
         .ok_or_else(|| anyhow!("Document has no frames"))?;
 
-    let frame = uow
-        .get_frame(&frame_id)?
-        .ok_or_else(|| anyhow!("Frame not found"))?;
+    // Collect all blocks across all frames (root, blockquotes, cells)
+    // and map each block to its owning frame.
+    let mut block_to_frame: HashMap<EntityId, EntityId> = HashMap::new();
+    collect_all_blocks_with_frame(&**uow, &root_frame_id, &mut block_to_frame)?;
 
-    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
-    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    let all_block_ids: Vec<EntityId> = {
+        let get_table_cell_frames = |table_id: &EntityId| -> Result<Vec<EntityId>> {
+            let cell_ids =
+                uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+            let cells = uow.get_table_cell_multi(&cell_ids)?;
+            let mut sorted: Vec<_> = cells.into_iter().flatten().collect();
+            sorted.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+            Ok(sorted.into_iter().filter_map(|c| c.cell_frame).collect())
+        };
+        collect_block_ids_recursive(
+            &|id| uow.get_frame(id),
+            &|id, field| uow.get_frame_relationship(id, field),
+            &get_table_cell_frames,
+            &root_frame_id,
+        )?
+    };
+
+    let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
     let (current_block, block_idx, offset) = find_block_at_position(&blocks, dto.position)?;
+
+    // Determine which frame owns the current block (may be blockquote, not root)
+    let frame_id = block_to_frame
+        .get(&current_block.id)
+        .copied()
+        .unwrap_or(root_frame_id);
+    let frame = uow
+        .get_frame(&frame_id)?
+        .ok_or_else(|| anyhow!("Frame not found"))?;
 
     // Get current block's elements for splitting
     let element_ids =

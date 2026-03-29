@@ -695,6 +695,99 @@ fn undo_paste_html_over_selection_is_atomic() {
 }
 
 #[test]
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Frame (blockquote) tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn extract_inside_blockquote_includes_text() {
+    // Text inside a blockquote frame should be extractable
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor
+        .insert_markdown("> Quoted text inside a frame")
+        .unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    let start = plain.find("Quoted").unwrap_or(0);
+    let end = start + "Quoted".len();
+
+    let c2 = doc.cursor_at(start);
+    c2.set_position(end, MoveMode::KeepAnchor);
+    let frag = c2.selection();
+    let frag_text = frag.to_plain_text();
+    assert!(
+        frag_text.contains("Quoted"),
+        "should extract text from blockquote: plain='{}', frag='{}'",
+        plain,
+        frag_text
+    );
+}
+
+#[test]
+fn insert_into_blockquote_stays_in_blockquote() {
+    // Pasting text inside a blockquote should keep it within the blockquote
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor
+        .insert_markdown("> Quoted text")
+        .unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    let mid = plain.find("text").unwrap_or(plain.len().saturating_sub(2));
+
+    // Insert plain text inside the blockquote
+    let c2 = doc.cursor_at(mid);
+    c2.insert_text("INSERTED ").unwrap();
+
+    let plain2 = doc.to_plain_text().unwrap();
+    assert!(
+        plain2.contains("INSERTED"),
+        "inserted text should appear: {}",
+        plain2
+    );
+}
+
+#[test]
+fn copy_paste_inside_blockquote_roundtrip() {
+    // Copy text from inside a blockquote, paste into same blockquote
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor
+        .insert_markdown("> First line\n> Second line")
+        .unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+
+    // Select some text
+    let start = plain.find("First").unwrap_or(0);
+    let end = start + "First".len();
+
+    let c2 = doc.cursor_at(start);
+    c2.set_position(end, MoveMode::KeepAnchor);
+    let frag = c2.selection();
+
+    assert!(
+        !frag.is_empty(),
+        "should extract non-empty fragment from blockquote"
+    );
+
+    // Paste at the end
+    let c3 = doc.cursor_at(plain.len());
+    c3.insert_fragment(&frag).unwrap();
+
+    let plain2 = doc.to_plain_text().unwrap();
+    // "First" should appear at least twice (original + pasted)
+    let count = plain2.matches("First").count();
+    assert!(
+        count >= 2,
+        "pasted text should appear twice, got {}: {}",
+        count,
+        plain2
+    );
+}
+
+#[test]
 fn undo_paste_fragment_over_selection_is_atomic() {
     let doc = TextDocument::new();
     doc.set_plain_text("ABCDEF").unwrap();
