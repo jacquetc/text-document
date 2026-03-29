@@ -364,6 +364,7 @@ fn insert_table_fragment(
     };
 
     let mut total_blocks_added: i64 = 0;
+    let mut total_chars_added: i64 = 0;
     let mut current_child_idx = child_order_insert_idx;
     let mut current_pos = insert_pos;
 
@@ -417,19 +418,22 @@ fn insert_table_fragment(
                     uow.create_inline_element(&elem, created_block.id, -1)?;
                 }
 
-                current_pos += first_frag.plain_text.chars().count() as i64 + 1;
+                let first_len = first_frag.plain_text.chars().count() as i64;
+                current_pos += first_len + 1;
                 total_blocks_added += 1;
+                total_chars_added += first_len;
 
                 // Create additional blocks for multi-block cells
                 // (rare in copy/paste, but supported by the schema)
                 for extra_frag in &frag_cell.blocks[1..] {
+                    let extra_len = extra_frag.plain_text.chars().count() as i64;
                     let extra_block = Block {
                         id: 0,
                         created_at: now,
                         updated_at: now,
                         elements: vec![],
                         list: None,
-                        text_length: extra_frag.plain_text.chars().count() as i64,
+                        text_length: extra_len,
                         document_position: current_pos,
                         plain_text: extra_frag.plain_text.clone(),
                         ..Default::default()
@@ -439,8 +443,9 @@ fn insert_table_fragment(
                         let elem = frag_elem.to_entity();
                         uow.create_inline_element(&elem, created_extra.id, -1)?;
                     }
-                    current_pos += extra_frag.plain_text.chars().count() as i64 + 1;
+                    current_pos += extra_len + 1;
                     total_blocks_added += 1;
+                    total_chars_added += extra_len;
                 }
             } else {
                 // Empty cell — just position the empty block
@@ -532,6 +537,7 @@ fn insert_table_fragment(
     // Update document stats
     let mut updated_doc = document.clone();
     updated_doc.block_count += total_blocks_added;
+    updated_doc.character_count += total_chars_added;
     updated_doc.updated_at = now;
     uow.update_document(&updated_doc)?;
 
@@ -901,9 +907,10 @@ fn insert_mixed_fragment(
 
                     if !frag_cell.blocks.is_empty() {
                         let first_cb = &frag_cell.blocks[0];
+                        let cb_len = first_cb.plain_text.chars().count() as i64;
                         let mut updated_block = created_block.clone();
                         updated_block.plain_text = first_cb.plain_text.clone();
-                        updated_block.text_length = first_cb.plain_text.chars().count() as i64;
+                        updated_block.text_length = cb_len;
                         updated_block.document_position = running_position;
                         updated_block.updated_at = now;
                         cell_blocks_to_update.push(updated_block);
@@ -913,17 +920,19 @@ fn insert_mixed_fragment(
                             uow.create_inline_element(&elem, created_block.id, -1)?;
                         }
 
-                        running_position += first_cb.plain_text.chars().count() as i64 + 1;
+                        running_position += cb_len + 1;
                         total_blocks_added += 1;
+                        total_new_chars += cb_len;
 
                         for extra_frag in &frag_cell.blocks[1..] {
+                            let extra_len = extra_frag.plain_text.chars().count() as i64;
                             let extra_block = Block {
                                 id: 0,
                                 created_at: now,
                                 updated_at: now,
                                 elements: vec![],
                                 list: None,
-                                text_length: extra_frag.plain_text.chars().count() as i64,
+                                text_length: extra_len,
                                 document_position: running_position,
                                 plain_text: extra_frag.plain_text.clone(),
                                 ..Default::default()
@@ -934,8 +943,9 @@ fn insert_mixed_fragment(
                                 let elem = frag_elem.to_entity();
                                 uow.create_inline_element(&elem, created_extra.id, -1)?;
                             }
-                            running_position += extra_frag.plain_text.chars().count() as i64 + 1;
+                            running_position += extra_len + 1;
                             total_blocks_added += 1;
+                            total_new_chars += extra_len;
                         }
                     } else {
                         let mut updated_block = created_block.clone();
