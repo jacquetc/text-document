@@ -405,24 +405,54 @@ impl TextCursor {
     /// Insert text with a specific character format. Replaces selection if any.
     pub fn insert_formatted_text(&self, text: &str, format: &TextFormat) -> Result<()> {
         let (pos, anchor) = self.read_cursor();
+
+        let make_dto = |p: usize, a: usize| frontend::document_editing::InsertFormattedTextDto {
+            position: to_i64(p),
+            anchor: to_i64(a),
+            text: text.into(),
+            font_family: format.font_family.clone().unwrap_or_default(),
+            font_point_size: format.font_point_size.map(|v| v as i64).unwrap_or(0),
+            font_bold: format.font_bold.unwrap_or(false),
+            font_italic: format.font_italic.unwrap_or(false),
+            font_underline: format.font_underline.unwrap_or(false),
+            font_strikeout: format.font_strikeout.unwrap_or(false),
+        };
+
         let queued = {
             let mut inner = self.doc.lock();
-            let dto = frontend::document_editing::InsertFormattedTextDto {
-                position: to_i64(pos),
-                anchor: to_i64(anchor),
-                text: text.into(),
-                font_family: format.font_family.clone().unwrap_or_default(),
-                font_point_size: format.font_point_size.map(|v| v as i64).unwrap_or(0),
-                font_bold: format.font_bold.unwrap_or(false),
-                font_italic: format.font_italic.unwrap_or(false),
-                font_underline: format.font_underline.unwrap_or(false),
-                font_strikeout: format.font_strikeout.unwrap_or(false),
-            };
-            let result = document_editing_commands::insert_formatted_text(
+            let result = match document_editing_commands::insert_formatted_text(
                 &inner.ctx,
                 Some(inner.stack_id),
-                &dto,
-            )?;
+                &make_dto(pos, anchor),
+            ) {
+                Ok(r) => r,
+                Err(_) if pos != anchor => {
+                    // Cross-block selection: compose delete + insert as a single undo unit
+                    undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
+
+                    let del_dto = frontend::document_editing::DeleteTextDto {
+                        position: to_i64(pos),
+                        anchor: to_i64(anchor),
+                    };
+                    let del_result = document_editing_commands::delete_text(
+                        &inner.ctx,
+                        Some(inner.stack_id),
+                        &del_dto,
+                    )?;
+                    let del_pos = to_usize(del_result.new_position);
+
+                    let ins_result = document_editing_commands::insert_formatted_text(
+                        &inner.ctx,
+                        Some(inner.stack_id),
+                        &make_dto(del_pos, del_pos),
+                    )?;
+
+                    undo_redo_commands::end_composite(&inner.ctx);
+                    ins_result
+                }
+                Err(e) => return Err(e),
+            };
+
             let edit_pos = pos.min(anchor);
             let removed = pos.max(anchor) - edit_pos;
             self.finish_edit_ext(

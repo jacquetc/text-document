@@ -1,4 +1,4 @@
-use text_document::{MoveMode, MoveOperation, SelectionType, TextDocument};
+use text_document::{MoveMode, MoveOperation, SelectionType, TextDocument, TextFormat};
 
 fn new_doc(text: &str) -> TextDocument {
     let doc = TextDocument::new();
@@ -432,4 +432,43 @@ fn insert_image_with_selection_undo_restores() {
     assert_eq!(doc.character_count(), 7);
     doc.undo().unwrap();
     assert_eq!(doc.to_plain_text().unwrap(), "Hello World");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// insert_formatted_text cross-block selection (Word convention)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn insert_formatted_text_cross_block_selection_replaces() {
+    let doc = new_doc("Hello\nWorld");
+    let cursor = doc.cursor();
+    // Select "lo\nWor" (3..9)
+    cursor.set_position(3, MoveMode::MoveAnchor);
+    cursor.set_position(9, MoveMode::KeepAnchor);
+    let fmt = TextFormat {
+        font_bold: Some(true),
+        ..Default::default()
+    };
+    cursor.insert_formatted_text("XY", &fmt).unwrap();
+    // Cross-block selection deleted (blocks merged), "XY" inserted
+    // "Hel" + "XY" + "ld" = "HelXYld"
+    assert_eq!(doc.to_plain_text().unwrap(), "HelXYld");
+    assert_eq!(doc.block_count(), 1);
+}
+
+#[test]
+fn insert_formatted_text_cross_block_selection_undo() {
+    let doc = new_doc("Hello\nWorld");
+    let cursor = doc.cursor();
+    cursor.set_position(3, MoveMode::MoveAnchor);
+    cursor.set_position(9, MoveMode::KeepAnchor);
+    let fmt = TextFormat {
+        font_bold: Some(true),
+        ..Default::default()
+    };
+    cursor.insert_formatted_text("XY", &fmt).unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "HelXYld");
+    doc.undo().unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "Hello\nWorld");
+    assert_eq!(doc.block_count(), 2);
 }
