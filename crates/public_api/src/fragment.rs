@@ -102,14 +102,12 @@ impl DocumentFragment {
     /// Create a fragment from an entire document.
     pub fn from_document(doc: &crate::TextDocument) -> crate::Result<Self> {
         let inner = doc.inner.lock();
-        let char_count = {
-            let stats =
-                frontend::commands::document_inspection_commands::get_document_stats(&inner.ctx)?;
-            crate::convert::to_usize(stats.character_count)
-        };
+        // Use i64::MAX as anchor to ensure the full document is captured.
+        // Document positions include inter-block gaps, so character_count
+        // alone would truncate the last block.
         let dto = frontend::document_inspection::ExtractFragmentDto {
             position: 0,
-            anchor: crate::convert::to_i64(char_count),
+            anchor: i64::MAX,
         };
         let result =
             frontend::commands::document_inspection_commands::extract_fragment(&inner.ctx, &dto)?;
