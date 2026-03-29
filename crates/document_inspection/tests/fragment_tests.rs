@@ -338,10 +338,13 @@ fn test_extract_insert_with_list() -> Result<()> {
         "Should have at least 2 list blocks"
     );
 
-    // Extract the range covering the list items
+    // Extract the range covering the list items.
+    // End position must extend past the last block's text to cross the
+    // paragraph break (Word paragraph-mark rule: block formatting is only
+    // captured when the selection crosses the gap).
     let first_pos = list_block_positions[0].0;
     let last = list_block_positions.last().unwrap();
-    let end_pos = last.0 + last.1;
+    let end_pos = last.0 + last.1 + 1; // +1 to cross the paragraph break
 
     let extract_result = document_inspection_controller::extract_fragment(
         &db_context,

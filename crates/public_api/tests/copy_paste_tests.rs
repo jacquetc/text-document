@@ -1,0 +1,437 @@
+use text_document::{
+    BlockFormat, DocumentFragment, FlowElement, MoveMode, TextDocument,
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Helpers
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Create a document with heading "Title" (H1) followed by normal "Body".
+/// Uses set_plain_text + set_block_format for predictable positions.
+/// Positions: "Title" at 0..5, gap at 5, "Body" at 6..10.
+fn heading_and_body_doc() -> TextDocument {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Title\nBody").unwrap();
+    // Make the first block a heading
+    let cursor = doc.cursor_at(0);
+    cursor
+        .set_block_format(&BlockFormat {
+            heading_level: Some(1),
+            ..Default::default()
+        })
+        .unwrap();
+    doc
+}
+
+fn find_table(doc: &TextDocument) -> Option<text_document::TextTable> {
+    doc.flow().into_iter().find_map(|e| match e {
+        FlowElement::Table(t) => Some(t),
+        _ => None,
+    })
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// E1: Full-block detection (paragraph mark rule)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn extract_partial_block_no_gap() {
+    // Select all text in "Title" (0..5) but NOT the paragraph break.
+    // Block formatting should NOT be preserved.
+    let doc = heading_and_body_doc();
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(5, MoveMode::KeepAnchor); // "Title" only, no gap
+    let frag = cursor.selection();
+    let html = frag.to_html();
+    // Should NOT contain <h1> because we didn't cross the paragraph break
+    assert!(
+        !html.contains("<h1>"),
+        "partial block should not have heading: {}",
+        html
+    );
+    assert!(
+        html.contains("Title"),
+        "should contain the text: {}",
+        html
+    );
+}
+
+#[test]
+fn extract_full_block_crosses_gap() {
+    // Select "Title" + gap (0..6) — crosses into next block.
+    // Block formatting SHOULD be preserved.
+    let doc = heading_and_body_doc();
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(6, MoveMode::KeepAnchor); // crosses paragraph break
+    let frag = cursor.selection();
+    let html = frag.to_html();
+    assert!(
+        html.contains("<h1>") || html.contains("<h2>") || html.contains("<h3>"),
+        "full block should have heading: {}",
+        html
+    );
+}
+
+#[test]
+fn extract_middle_blocks_always_full() {
+    // Create 3 blocks with different formatting
+    let doc = TextDocument::new();
+    doc.set_plain_text("First\nMiddle\nLast").unwrap();
+    // "First" at 0..5, "Middle" at 6..12, "Last" at 13..17
+    let c1 = doc.cursor_at(0);
+    c1.set_block_format(&BlockFormat {
+        heading_level: Some(1),
+        ..Default::default()
+    })
+    .unwrap();
+    let c3 = doc.cursor_at(13);
+    c3.set_block_format(&BlockFormat {
+        heading_level: Some(2),
+        ..Default::default()
+    })
+    .unwrap();
+
+    // Select from middle of "First" through middle of "Last"
+    let c4 = doc.cursor_at(2);
+    c4.set_position(15, MoveMode::KeepAnchor);
+    let frag = c4.selection();
+    let html = frag.to_html();
+
+    // "Middle" is an intermediate block — should have block formatting (wrapped in <p>)
+    assert!(
+        html.contains("<p>") || html.contains("Middle"),
+        "middle block should be included: {}",
+        html
+    );
+    // First block is partial (starts at 2) — should NOT have heading
+    // Last block is partial (ends at 15) — should NOT have heading
+    // But middle is full (intermediate)
+}
+
+#[test]
+fn extract_list_items_from_html() {
+    // Create doc from HTML with list items, then extract full items
+    let doc = TextDocument::new();
+    doc.set_plain_text("Item one\nItem two").unwrap();
+
+    // Get the full text for position reference
+    let plain = doc.to_plain_text().unwrap();
+    assert_eq!(plain, "Item one\nItem two");
+
+    // Select the full first item including gap: 0..9
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(9, MoveMode::KeepAnchor);
+    let frag = cursor.selection();
+    let plain_frag = frag.to_plain_text();
+
+    // The plain text should contain "Item one"
+    assert!(
+        plain_frag.contains("Item one"),
+        "should contain first item: {}",
+        plain_frag
+    );
+}
+
+#[test]
+fn extract_inline_formatting_on_partial() {
+    // Bold text in partial selection should preserve bold formatting
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor
+        .insert_html("<p>Normal <b>bold text</b> normal</p>")
+        .unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    // Find "bold" in the text
+    let bold_start = plain.find("bold").expect("should contain 'bold'");
+
+    let c2 = doc.cursor_at(bold_start);
+    c2.set_position(bold_start + 4, MoveMode::KeepAnchor);
+    let frag = c2.selection();
+    let html = frag.to_html();
+    assert!(
+        html.contains("<b>") || html.contains("<strong>") || html.contains("font-weight"),
+        "partial selection should preserve inline bold: {}",
+        html
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Insert tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn insert_inline_preserves_target_format() {
+    // Paste inline text into a heading — heading format should be preserved
+    let doc = heading_and_body_doc();
+    let cursor = doc.cursor_at(2);
+    let frag = DocumentFragment::from_plain_text("INSERTED");
+    cursor.insert_fragment(&frag).unwrap();
+
+    // Check the block at position 0 still has heading formatting
+    let c2 = doc.cursor_at(0);
+    let fmt = c2.block_format().unwrap();
+    assert!(
+        fmt.heading_level.is_some(),
+        "heading should be preserved after inline paste"
+    );
+}
+
+#[test]
+fn insert_full_block_splits_and_inherits() {
+    // Paste a heading block into a normal paragraph
+    let doc = TextDocument::new();
+    doc.set_plain_text("Some text here").unwrap();
+
+    let frag = DocumentFragment::from_html("<h1>Heading</h1>");
+
+    let cursor = doc.cursor_at(5);
+    cursor.insert_fragment(&frag).unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    assert!(
+        plain.contains("Heading"),
+        "pasted heading text should appear: {}",
+        plain
+    );
+}
+
+#[test]
+fn insert_with_selection_replaces_atomically() {
+    // Select some text, then paste — should replace the selection
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello World").unwrap();
+
+    let cursor = doc.cursor_at(6);
+    cursor.set_position(11, MoveMode::KeepAnchor);
+    cursor.insert_text("Universe").unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    assert_eq!(plain, "Hello Universe");
+
+    // Undo should restore both the delete and insert
+    doc.undo().unwrap();
+    let plain2 = doc.to_plain_text().unwrap();
+    assert_eq!(plain2, "Hello World");
+}
+
+#[test]
+fn insert_html_with_selection_replaces() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello World").unwrap();
+
+    let cursor = doc.cursor_at(6);
+    cursor.set_position(11, MoveMode::KeepAnchor);
+    cursor.insert_html("<b>Bold</b>").unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    assert!(
+        plain.contains("Bold"),
+        "should contain pasted text: {}",
+        plain
+    );
+    assert!(
+        !plain.contains("World"),
+        "should not contain replaced text: {}",
+        plain
+    );
+}
+
+#[test]
+fn insert_fragment_with_selection_replaces() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello World").unwrap();
+
+    let cursor = doc.cursor_at(6);
+    cursor.set_position(11, MoveMode::KeepAnchor);
+    let frag = DocumentFragment::from_plain_text("Rust");
+    cursor.insert_fragment(&frag).unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    assert_eq!(plain, "Hello Rust");
+}
+
+#[test]
+fn insert_table_outside_table_creates_new() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Before").unwrap();
+
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(2, 3).unwrap();
+
+    let table = find_table(&doc);
+    assert!(table.is_some(), "should create a table");
+    let t = table.unwrap();
+    assert_eq!(t.rows(), 2);
+    assert_eq!(t.columns(), 3);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Delete tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn delete_cross_block_preserves_first_format() {
+    // Delete across two blocks — the merged block should keep the first block's format
+    let doc = heading_and_body_doc();
+    // "Title" (H1, 0..4), gap at 5, "Body" (normal, 6..9)
+    let cursor = doc.cursor_at(3);
+    cursor.set_position(7, MoveMode::KeepAnchor);
+    cursor.remove_selected_text().unwrap();
+
+    let c2 = doc.cursor_at(0);
+    let fmt = c2.block_format().unwrap();
+    assert!(
+        fmt.heading_level.is_some(),
+        "merged block should keep first block's heading format"
+    );
+}
+
+#[test]
+fn delete_cross_cell_clears_cells() {
+    // Select across cells and delete — cells should be cleared, table preserved
+    let doc = TextDocument::new();
+    doc.set_plain_text("Before").unwrap();
+    let cursor = doc.cursor_at(6);
+    let table = cursor.insert_table(2, 2).unwrap();
+
+    // Type text into cells
+    let cell00 = table.cell(0, 0).unwrap();
+    let pos00 = cell00.blocks()[0].position();
+    let c1 = doc.cursor_at(pos00);
+    c1.insert_text("CellA").unwrap();
+
+    // Re-get table after insert
+    let table2 = find_table(&doc).unwrap();
+    let cell01 = table2.cell(0, 1).unwrap();
+    let pos01 = cell01.blocks()[0].position();
+    let c2 = doc.cursor_at(pos01);
+    c2.insert_text("CellB").unwrap();
+
+    // Select across cells (cross-cell selection)
+    let table3 = find_table(&doc).unwrap();
+    let new_pos00 = table3.cell(0, 0).unwrap().blocks()[0].position();
+    let new_pos01 = table3.cell(0, 1).unwrap().blocks()[0].position();
+
+    let c3 = doc.cursor_at(new_pos00 + 1);
+    c3.set_position(new_pos01 + 2, MoveMode::KeepAnchor);
+    c3.remove_selected_text().unwrap();
+
+    // Table should still exist
+    assert!(
+        find_table(&doc).is_some(),
+        "table should survive cross-cell delete"
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Roundtrip tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn roundtrip_heading_paragraph() {
+    // Copy a heading (fully), paste into a normal paragraph
+    let doc = heading_and_body_doc();
+
+    // Select "Title" fully (0..6 crosses the gap)
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(6, MoveMode::KeepAnchor);
+    let frag = cursor.selection();
+
+    // Create a new doc with normal text, paste into it
+    let doc2 = TextDocument::new();
+    doc2.set_plain_text("Normal paragraph").unwrap();
+    let c2 = doc2.cursor_at(7);
+    c2.insert_fragment(&frag).unwrap();
+
+    let plain = doc2.to_plain_text().unwrap();
+    assert!(plain.contains("Title"), "pasted heading text: {}", plain);
+}
+
+#[test]
+fn roundtrip_plain_text() {
+    // Copy plain text and paste elsewhere
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello World").unwrap();
+
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(5, MoveMode::KeepAnchor);
+    let frag = cursor.selection();
+
+    let doc2 = TextDocument::new();
+    doc2.set_plain_text("Goodbye").unwrap();
+    let c2 = doc2.cursor_at(7);
+    c2.insert_fragment(&frag).unwrap();
+
+    let plain = doc2.to_plain_text().unwrap();
+    assert_eq!(plain, "GoodbyeHello");
+}
+
+#[test]
+fn roundtrip_mixed_text_table() {
+    // Copy text + table, paste elsewhere
+    let doc = TextDocument::new();
+    doc.set_plain_text("Before").unwrap();
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(2, 2).unwrap();
+
+    // Type into cell(0,0)
+    let table = find_table(&doc).unwrap();
+    let cell = table.cell(0, 0).unwrap();
+    let cell_pos = cell.blocks()[0].position();
+    let c2 = doc.cursor_at(cell_pos);
+    c2.insert_text("Hello").unwrap();
+
+    // Select from start of "Before" into the table
+    let table2 = find_table(&doc).unwrap();
+    let new_cell_pos = table2.cell(0, 0).unwrap().blocks()[0].position();
+    let c3 = doc.cursor_at(0);
+    c3.set_position(new_cell_pos + 2, MoveMode::KeepAnchor);
+    let frag = c3.selection();
+
+    let html = frag.to_html();
+    assert!(
+        html.contains("Before"),
+        "should contain 'Before' text: {}",
+        html
+    );
+    assert!(
+        html.contains("<table>"),
+        "should contain table: {}",
+        html
+    );
+}
+
+#[test]
+fn copy_paste_preserves_inline_bold() {
+    // Copy bold text, paste it — bold should be preserved
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor.insert_html("<p><b>Bold Text</b></p>").unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    let bold_start = plain.find("Bold Text").expect("should contain bold text");
+    let bold_end = bold_start + "Bold Text".len();
+
+    let c2 = doc.cursor_at(bold_start);
+    c2.set_position(bold_end, MoveMode::KeepAnchor);
+    let frag = c2.selection();
+
+    // Paste into new doc
+    let doc2 = TextDocument::new();
+    let c3 = doc2.cursor_at(0);
+    c3.insert_fragment(&frag).unwrap();
+
+    // Re-extract and check bold is preserved
+    let plain2 = doc2.to_plain_text().unwrap();
+    let bs = plain2.find("Bold").expect("should have bold text");
+    let c4 = doc2.cursor_at(bs);
+    c4.set_position(bs + 4, MoveMode::KeepAnchor);
+    let frag2 = c4.selection();
+    let html2 = frag2.to_html();
+    assert!(
+        html2.contains("<b>") || html2.contains("<strong>") || html2.contains("font-weight"),
+        "bold should survive roundtrip: {}",
+        html2
+    );
+}
