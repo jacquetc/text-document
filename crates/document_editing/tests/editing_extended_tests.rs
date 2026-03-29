@@ -4,7 +4,7 @@ use anyhow::Result;
 use common::types::EntityId;
 use test_harness::{
     DocumentRelationshipField, RootRelationshipField, block_controller, document_controller,
-    export_text, frame_controller, get_block_ids, get_first_block_element_ids,
+    export_text, frame_controller, get_block_ids, get_document_stats, get_first_block_element_ids,
     inline_element_controller, root_controller, setup_with_text,
 };
 
@@ -334,6 +334,395 @@ fn test_insert_frame_undo() -> Result<()> {
     // Text should still be intact
     let text = export_text(&db_context, &event_hub)?;
     assert_eq!(text, "Hello");
+
+    Ok(())
+}
+
+// --- InsertFormattedText selection-replacement tests ---
+
+#[test]
+fn test_insert_formatted_text_replaces_selection() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Hello World")?;
+
+    // Replace "World" (positions 6..11) with bold "Earth"
+    let result = document_editing_controller::insert_formatted_text(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertFormattedTextDto {
+            position: 6,
+            anchor: 11,
+            text: "Earth".to_string(),
+            font_family: "Arial".to_string(),
+            font_point_size: 12,
+            font_bold: true,
+            font_italic: false,
+            font_underline: false,
+            font_strikeout: false,
+        },
+    )?;
+
+    assert_eq!(result.new_position, 11); // 6 + len("Earth")
+    let text = export_text(&db, &hub)?;
+    assert_eq!(text, "Hello Earth");
+
+    // Verify bold formatting on the new element
+    let elem_ids = get_first_block_element_ids(&db)?;
+    let mut found_bold_earth = false;
+    for elem_id in &elem_ids {
+        let elem = inline_element_controller::get(&db, elem_id)?.unwrap();
+        if let common::entities::InlineContent::Text(ref t) = elem.content {
+            if t.contains("Earth") && elem.fmt_font_bold == Some(true) {
+                found_bold_earth = true;
+            }
+        }
+    }
+    assert!(found_bold_earth, "Should find bold 'Earth' element");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_formatted_text_replaces_selection_undo() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Hello World")?;
+
+    document_editing_controller::insert_formatted_text(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertFormattedTextDto {
+            position: 6,
+            anchor: 11,
+            text: "Earth".to_string(),
+            font_family: "".to_string(),
+            font_point_size: 0,
+            font_bold: false,
+            font_italic: false,
+            font_underline: false,
+            font_strikeout: false,
+        },
+    )?;
+
+    assert_eq!(export_text(&db, &hub)?, "Hello Earth");
+
+    urm.undo(None)?;
+    assert_eq!(export_text(&db, &hub)?, "Hello World");
+
+    urm.redo(None)?;
+    assert_eq!(export_text(&db, &hub)?, "Hello Earth");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_formatted_text_cross_block_selection_errors() -> Result<()> {
+    // Cross-block selection replacement is not supported (same as insert_text)
+    let (db, hub, mut urm) = setup_with_text("Hello\nWorld")?;
+
+    let result = document_editing_controller::insert_formatted_text(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertFormattedTextDto {
+            position: 3,
+            anchor: 9,
+            text: "XY".to_string(),
+            font_family: "".to_string(),
+            font_point_size: 0,
+            font_bold: true,
+            font_italic: false,
+            font_underline: false,
+            font_strikeout: false,
+        },
+    );
+
+    assert!(result.is_err(), "Cross-block selection should fail");
+    // Document should be unchanged
+    assert_eq!(export_text(&db, &hub)?, "Hello\nWorld");
+
+    Ok(())
+}
+
+// --- InsertImage edge cases ---
+
+#[test]
+fn test_insert_image_at_position_zero() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Hello")?;
+
+    let result = document_editing_controller::insert_image(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertImageDto {
+            position: 0,
+            anchor: 0,
+            image_name: "start.png".to_string(),
+            width: 50,
+            height: 50,
+        },
+    )?;
+
+    assert_eq!(result.new_position, 1);
+    let stats = get_document_stats(&db)?;
+    assert_eq!(stats.character_count, 6); // 1 image + 5 chars
+
+    // Verify the image exists somewhere in the block's elements
+    let elem_ids = get_first_block_element_ids(&db)?;
+    let has_image = elem_ids.iter().any(|id| {
+        let elem = inline_element_controller::get(&db, id).unwrap().unwrap();
+        matches!(elem.content, common::entities::InlineContent::Image { .. })
+    });
+    assert!(has_image, "Block should contain an image element");
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_image_with_selection_errors() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Hello World")?;
+
+    // Image insertion does not support selection replacement
+    let result = document_editing_controller::insert_image(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertImageDto {
+            position: 6,
+            anchor: 11,
+            image_name: "replaced.png".to_string(),
+            width: 100,
+            height: 100,
+        },
+    );
+
+    assert!(result.is_err(), "Image insert with selection should fail");
+    // Document should be unchanged
+    assert_eq!(export_text(&db, &hub)?, "Hello World");
+
+    Ok(())
+}
+
+// --- InsertFrame edge cases ---
+
+#[test]
+fn test_insert_frame_at_end_of_document() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Hello")?;
+
+    let result = document_editing_controller::insert_frame(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertFrameDto {
+            position: 5,
+            anchor: 5,
+        },
+    )?;
+
+    assert!(result.frame_id > 0);
+
+    // Verify 2 frames exist
+    let root = root_controller::get(&db, &1)?.unwrap();
+    let doc_ids =
+        root_controller::get_relationship(&db, &root.id, &RootRelationshipField::Document)?;
+    let frame_ids = document_controller::get_relationship(
+        &db,
+        &doc_ids[0],
+        &DocumentRelationshipField::Frames,
+    )?;
+    assert_eq!(frame_ids.len(), 2);
+
+    // Undo, redo
+    urm.undo(None)?;
+    let frame_ids = document_controller::get_relationship(
+        &db,
+        &doc_ids[0],
+        &DocumentRelationshipField::Frames,
+    )?;
+    assert_eq!(frame_ids.len(), 1);
+
+    urm.redo(None)?;
+    let frame_ids = document_controller::get_relationship(
+        &db,
+        &doc_ids[0],
+        &DocumentRelationshipField::Frames,
+    )?;
+    assert_eq!(frame_ids.len(), 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_frame_in_middle_of_text() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Hello World")?;
+
+    let result = document_editing_controller::insert_frame(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertFrameDto {
+            position: 5,
+            anchor: 5,
+        },
+    )?;
+
+    assert!(result.frame_id > 0);
+
+    // Text should still contain both parts
+    let text = export_text(&db, &hub)?;
+    assert!(
+        text.contains("Hello"),
+        "Should still contain 'Hello', got: {}",
+        text
+    );
+    assert!(
+        text.contains("World"),
+        "Should still contain 'World', got: {}",
+        text
+    );
+
+    Ok(())
+}
+
+// --- InsertList edge cases ---
+
+#[test]
+fn test_insert_list_at_end_of_multiblock_document() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Line one\nLine two")?;
+
+    // Insert list at end of document (after "Line two", pos = 8 + 1 + 8 = 17)
+    let result = document_editing_controller::insert_list(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertListDto {
+            position: 17,
+            anchor: 17,
+            style: ListStyle::Decimal,
+        },
+    )?;
+
+    assert!(result.list_id > 0);
+    let stats = get_document_stats(&db)?;
+    assert_eq!(stats.block_count, 3); // 2 original + 1 list block
+
+    // Undo
+    urm.undo(None)?;
+    let stats = get_document_stats(&db)?;
+    assert_eq!(stats.block_count, 2);
+    assert_eq!(export_text(&db, &hub)?, "Line one\nLine two");
+
+    Ok(())
+}
+
+#[test]
+fn test_create_list_spanning_multiple_blocks() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("First\nSecond\nThird")?;
+
+    // Select all text: "First" (0..5), sep, "Second" (6..12), sep, "Third" (13..18)
+    let result = document_editing_controller::create_list(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &CreateListDto {
+            position: 0,
+            anchor: 18,
+            style: ListStyle::Disc,
+        },
+    )?;
+
+    assert!(result.list_id > 0);
+
+    // All 3 blocks should be in the list
+    let block_ids = get_block_ids(&db)?;
+    assert_eq!(block_ids.len(), 3);
+    for block_id in &block_ids {
+        let block = block_controller::get(&db, block_id)?.unwrap();
+        assert!(
+            block.list.is_some(),
+            "Block {} should have a list reference",
+            block_id
+        );
+        assert_eq!(block.list.unwrap() as i64, result.list_id);
+    }
+
+    // Undo — all blocks should lose list reference
+    urm.undo(None)?;
+    for block_id in &block_ids {
+        let block = block_controller::get(&db, block_id)?.unwrap();
+        assert!(
+            block.list.is_none(),
+            "Block {} should have no list after undo",
+            block_id
+        );
+    }
+
+    Ok(())
+}
+
+// --- Combined operation tests ---
+
+#[test]
+fn test_insert_formatted_text_into_empty_document() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("")?;
+
+    let result = document_editing_controller::insert_formatted_text(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertFormattedTextDto {
+            position: 0,
+            anchor: 0,
+            text: "Bold start".to_string(),
+            font_family: "Courier".to_string(),
+            font_point_size: 10,
+            font_bold: true,
+            font_italic: false,
+            font_underline: false,
+            font_strikeout: false,
+        },
+    )?;
+
+    assert_eq!(result.new_position, 10);
+    assert_eq!(export_text(&db, &hub)?, "Bold start");
+
+    let stats = get_document_stats(&db)?;
+    assert_eq!(stats.character_count, 10);
+    assert_eq!(stats.block_count, 1);
+
+    Ok(())
+}
+
+#[test]
+fn test_insert_image_cross_block_selection_errors() -> Result<()> {
+    let (db, hub, mut urm) = setup_with_text("Hello\nWorld")?;
+
+    // Image insertion does not support selection replacement
+    let result = document_editing_controller::insert_image(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertImageDto {
+            position: 3,
+            anchor: 9,
+            image_name: "bridge.png".to_string(),
+            width: 200,
+            height: 100,
+        },
+    );
+
+    assert!(result.is_err(), "Image insert with selection should fail");
+    assert_eq!(export_text(&db, &hub)?, "Hello\nWorld");
 
     Ok(())
 }
