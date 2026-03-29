@@ -50,8 +50,8 @@ fn stats_returns_correct_values() {
     let doc = new_doc_with_text("Hello world");
     let stats = doc.stats();
     assert_eq!(stats.character_count, 11);
-    assert!(stats.word_count >= 2);
-    assert!(stats.block_count >= 1);
+    assert_eq!(stats.word_count, 2);
+    assert_eq!(stats.block_count, 1);
 }
 
 #[test]
