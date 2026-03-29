@@ -10,7 +10,7 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, TableCell};
+use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, Table, TableCell};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -43,8 +43,12 @@ pub trait DeleteTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "InlineElement", action = "Remove")]
 #[macros::uow_action(entity = "InlineElement", action = "RemoveMulti")]
+#[macros::uow_action(entity = "Table", action = "Get")]
 #[macros::uow_action(entity = "Table", action = "GetRelationship")]
+#[macros::uow_action(entity = "Table", action = "Remove")]
 #[macros::uow_action(entity = "TableCell", action = "GetMulti")]
+#[macros::uow_action(entity = "TableCell", action = "Remove")]
+#[macros::uow_action(entity = "Frame", action = "Remove")]
 pub trait DeleteTextUnitOfWorkTrait: CommandUnitOfWork {}
 
 pub struct DeleteTextUseCase {
@@ -247,19 +251,228 @@ fn execute_delete(
             uow.update_frame(&updated_frame)?;
         }
 
-        // Update document character_count
+        // ─��� D4: Check for full table removal ─────────────────────────
+        // If ALL cells of a table were cleared AND the selection extends
+        // beyond the table, remove the table entity entirely.
+        let mut tables_to_remove: Vec<EntityId> = Vec::new();
+        for &tid in &table_ids {
+            let cell_ids = uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
+            let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+            let cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
+
+            // Check if ALL cells were affected
+            let all_affected = cells.iter().all(|c| {
+                c.cell_frame
+                    .is_some_and(|cf| affected_set.contains(&cf))
+            });
+            if !all_affected || cells.is_empty() {
+                continue;
+            }
+
+            // Check if selection extends beyond the table's block range
+            let mut table_min_pos = i64::MAX;
+            let mut table_max_pos = i64::MIN;
+            for c in &cells {
+                if let Some(cf_id) = c.cell_frame {
+                    let blk_ids =
+                        uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+                    let blk_opts = uow.get_block_multi(&blk_ids)?;
+                    for b in blk_opts.into_iter().flatten() {
+                        table_min_pos = table_min_pos.min(b.document_position);
+                        table_max_pos =
+                            table_max_pos.max(b.document_position + b.text_length);
+                    }
+                }
+            }
+
+            if start < table_min_pos || end > table_max_pos {
+                // Selection extends beyond the table — remove it
+                // Remove cell frames and cells (blocks already cleared above)
+                for c in &cells {
+                    if let Some(cf_id) = c.cell_frame {
+                        uow.remove_frame(&cf_id)?;
+                    }
+                    uow.remove_table_cell(&c.id)?;
+                }
+
+                // Remove the anchor frame (negative entry in root child_order)
+                let root_frame = uow.get_frame(&frame_id)?
+                    .ok_or_else(|| anyhow!("Root frame not found"))?;
+                // Find the anchor frame for this table
+                for &entry in &root_frame.child_order {
+                    if entry < 0 {
+                        let anchor_id = (-entry) as EntityId;
+                        if let Some(anchor) = uow.get_frame(&anchor_id)?
+                            && anchor.table == Some(tid)
+                        {
+                            uow.remove_frame(&anchor_id)?;
+                            break;
+                        }
+                    }
+                }
+
+                uow.remove_table(&tid)?;
+                tables_to_remove.push(tid);
+            }
+        }
+
+        // Update root frame child_order if tables were removed
+        if !tables_to_remove.is_empty() {
+            let root_frame = uow.get_frame(&frame_id)?
+                .ok_or_else(|| anyhow!("Root frame not found"))?;
+            let mut updated_root = root_frame.clone();
+            updated_root.child_order.retain(|entry| {
+                if *entry < 0 {
+                    let anchor_id = (-entry) as EntityId;
+                    // Keep if the anchor frame still exists (wasn't removed)
+                    // We can check by seeing if the table was removed
+                    !tables_to_remove.iter().any(|_| {
+                        // The anchor was already removed, so just check if this
+                        // negative entry's frame was for a removed table
+                        // Since we removed the frame above, just check if it exists
+                        uow.get_frame(&anchor_id).ok().flatten().is_none()
+                    })
+                } else {
+                    true
+                }
+            });
+            updated_root.updated_at = now;
+            uow.update_frame(&updated_root)?;
+        }
+
+        // ── Handle non-cell blocks in the selection range (D5 fix) ──
+        let mut non_cell_blocks_removed: i64 = 0;
+        let mut non_cell_blocks_to_remove: Vec<EntityId> = Vec::new();
+
+        for block in &blocks {
+            let block_start = block.document_position;
+            let block_end = block_start + block.text_length;
+            if block_end < start || block_start > end {
+                continue;
+            }
+            // Skip cell blocks — already handled above
+            if block_to_cell_frame.contains_key(&block.id) {
+                continue;
+            }
+
+            let local_start = if start > block_start {
+                (start - block_start) as usize
+            } else {
+                0
+            };
+            let local_end = if end < block_end {
+                (end - block_start) as usize
+            } else {
+                block.text_length as usize
+            };
+
+            if local_start == 0 && local_end == block.text_length as usize {
+                // Fully in range — remove entirely
+                total_chars_removed += block.text_length;
+                let elem_ids =
+                    uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+                if !elem_ids.is_empty() {
+                    uow.remove_inline_element_multi(&elem_ids)?;
+                }
+                uow.remove_block(&block.id)?;
+                non_cell_blocks_to_remove.push(block.id);
+                non_cell_blocks_removed += 1;
+            } else {
+                // Partially in range — truncate the block
+                let elem_ids =
+                    uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+                let elems_opt = uow.get_inline_element_multi(&elem_ids)?;
+                let elements: Vec<InlineElement> = elems_opt.into_iter().flatten().collect();
+
+                let mut new_plain = String::new();
+                let mut new_len: i64 = 0;
+                let mut running: usize = 0;
+                for elem in &elements {
+                    let elen = match &elem.content {
+                        InlineContent::Text(s) => s.chars().count(),
+                        InlineContent::Image { .. } => 1,
+                        InlineContent::Empty => 0,
+                    };
+                    let es = running;
+                    let ee = running + elen;
+                    let os = local_start.max(es);
+                    let oe = local_end.min(ee);
+
+                    if os < oe {
+                        // Overlaps delete range
+                        let ls = os - es;
+                        let le = oe - es;
+                        match &elem.content {
+                            InlineContent::Text(s) => {
+                                let chars: Vec<char> = s.chars().collect();
+                                let kept: String = chars[..ls]
+                                    .iter()
+                                    .chain(chars[le..].iter())
+                                    .collect();
+                                total_chars_removed += (le - ls) as i64;
+                                new_plain.push_str(&kept);
+                                new_len += kept.chars().count() as i64;
+                                let mut upd = elem.clone();
+                                upd.content = InlineContent::Text(kept);
+                                upd.updated_at = now;
+                                uow.update_inline_element(&upd)?;
+                            }
+                            InlineContent::Image { .. } => {
+                                let mut upd = elem.clone();
+                                upd.content = InlineContent::Empty;
+                                upd.updated_at = now;
+                                uow.update_inline_element(&upd)?;
+                            }
+                            InlineContent::Empty => {}
+                        }
+                    } else {
+                        match &elem.content {
+                            InlineContent::Text(s) => {
+                                new_plain.push_str(s);
+                                new_len += s.chars().count() as i64;
+                            }
+                            InlineContent::Image { .. } => new_len += 1,
+                            InlineContent::Empty => {}
+                        }
+                    }
+                    running += elen;
+                }
+
+                let mut upd_block = block.clone();
+                upd_block.plain_text = new_plain;
+                upd_block.text_length = new_len;
+                upd_block.updated_at = now;
+                uow.update_block(&upd_block)?;
+            }
+        }
+
+        // Update root frame child_order if any non-cell blocks were removed
+        if !non_cell_blocks_to_remove.is_empty() {
+            let root_frame = uow
+                .get_frame(&frame_id)?
+                .ok_or_else(|| anyhow!("Root frame not found"))?;
+            let mut updated_root_frame = root_frame.clone();
+            updated_root_frame
+                .child_order
+                .retain(|id| !non_cell_blocks_to_remove.contains(&(*id as EntityId)));
+            updated_root_frame.updated_at = now;
+            uow.update_frame(&updated_root_frame)?;
+        }
+
+        // Update document stats
         let mut updated_doc = document.clone();
         updated_doc.character_count -= total_chars_removed;
         if updated_doc.character_count < 0 {
             updated_doc.character_count = 0;
         }
+        updated_doc.block_count -= non_cell_blocks_removed;
         updated_doc.updated_at = now;
         uow.update_document(&updated_doc)?;
 
         return Ok((
             DeleteTextResultDto {
                 new_position: start,
-                deleted_text: String::new(), // We don't reconstruct the text for cell clear
+                deleted_text: String::new(), // We don't reconstruct the text for mixed delete
             },
             snapshot,
         ));
@@ -563,9 +776,15 @@ fn execute_delete(
             uow.remove_block(block_id)?;
         }
 
-        // Fetch the root frame to update its child_order
+        // Fetch the owning frame to update its child_order.
+        // If the start block is inside a table cell, use the cell frame;
+        // otherwise use the root document frame.
+        let owning_frame_id = block_to_cell_frame
+            .get(&start_block.id)
+            .copied()
+            .unwrap_or(frame_id);
         let frame = uow
-            .get_frame(&frame_id)?
+            .get_frame(&owning_frame_id)?
             .ok_or_else(|| anyhow!("Frame not found"))?;
         let mut updated_frame = frame.clone();
         updated_frame

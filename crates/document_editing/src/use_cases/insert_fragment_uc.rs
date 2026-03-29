@@ -63,7 +63,7 @@ impl_cell_frame_creator!(dyn InsertFragmentUnitOfWorkTrait);
 
 /// Build a mapping from block_id → (cell_frame_id, table_id) for all tables in the document.
 fn build_block_to_cell_map(
-    uow: &Box<dyn InsertFragmentUnitOfWorkTrait>,
+    uow: &dyn InsertFragmentUnitOfWorkTrait,
     doc_id: EntityId,
 ) -> Result<HashMap<EntityId, (EntityId, EntityId)>> {
     let table_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
@@ -99,7 +99,7 @@ fn try_replace_table_cells(
     let frag_table = &fragment_data.tables[0];
 
     // Build block→cell mapping to detect if cursor is inside a table
-    let block_to_cell = build_block_to_cell_map(uow, doc_id)?;
+    let block_to_cell = build_block_to_cell_map(&**uow, doc_id)?;
 
     // Find the block at cursor position
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
@@ -711,10 +711,10 @@ fn insert_mixed_fragment(
 
     let mut list_grouper = ListGrouper::new();
     // Pre-seed with the adjacent block's list for continuation (Word behavior)
-    if let Some(list_id) = current_block.list {
-        if let Ok(Some(list_entity)) = uow.get_list(&list_id) {
-            list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
-        }
+    if let Some(list_id) = current_block.list
+        && let Ok(Some(list_entity)) = uow.get_list(&list_id)
+    {
+        list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
     }
 
     // ── Process items in order ───────────────────────────────────
@@ -1339,10 +1339,10 @@ fn execute_insert_fragment(
 
         let mut list_grouper = ListGrouper::new();
         // Pre-seed with the adjacent block's list for continuation (Word behavior)
-        if let Some(list_id) = current_block.list {
-            if let Ok(Some(list_entity)) = uow.get_list(&list_id) {
-                list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
-            }
+        if let Some(list_id) = current_block.list
+            && let Ok(Some(list_entity)) = uow.get_list(&list_id)
+        {
+            list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
         }
         for frag_block in &fragment_data.blocks[middle_start..middle_end] {
             let block_text_len = frag_block.plain_text.chars().count() as i64;
