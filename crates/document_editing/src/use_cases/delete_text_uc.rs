@@ -341,44 +341,64 @@ fn execute_delete(
         }
 
         // ── Handle non-cell blocks in the selection range (D5 fix) ──
+        // In mixed (cross-cell) delete, non-cell blocks that overlap the
+        // selection are fully removed.  Partial truncation at the edges
+        // uses the FIRST and LAST non-cell blocks only.
         let mut non_cell_blocks_removed: i64 = 0;
         let mut non_cell_blocks_to_remove: Vec<EntityId> = Vec::new();
+        let mut first_non_cell: Option<&Block> = None;
+        let mut last_non_cell: Option<&Block> = None;
+
+        // Identify non-cell blocks in range
+        for block in &blocks {
+            let block_start = block.document_position;
+            let block_end = block_start + block.text_length;
+            if block_end < start || block_start >= end {
+                continue;
+            }
+            if block_to_cell_frame.contains_key(&block.id) {
+                continue;
+            }
+            if first_non_cell.is_none() {
+                first_non_cell = Some(block);
+            }
+            last_non_cell = Some(block);
+        }
+
+        // Determine which blocks need partial truncation vs full removal
+        let first_id = first_non_cell.map(|b| b.id);
+        let last_id = last_non_cell.map(|b| b.id);
+        let first_is_partial = first_non_cell
+            .is_some_and(|b| start > b.document_position);
+        let last_is_partial = last_non_cell
+            .is_some_and(|b| end < b.document_position + b.text_length);
 
         for block in &blocks {
             let block_start = block.document_position;
             let block_end = block_start + block.text_length;
-            if block_end < start || block_start > end {
+            if block_end < start || block_start >= end {
                 continue;
             }
-            // Skip cell blocks — already handled above
             if block_to_cell_frame.contains_key(&block.id) {
                 continue;
             }
 
-            let local_start = if start > block_start {
-                (start - block_start) as usize
-            } else {
-                0
-            };
-            let local_end = if end < block_end {
-                (end - block_start) as usize
-            } else {
-                block.text_length as usize
-            };
+            let is_first = Some(block.id) == first_id && first_is_partial;
+            let is_last = Some(block.id) == last_id && last_is_partial;
 
-            if local_start == 0 && local_end == block.text_length as usize {
-                // Fully in range — remove entirely
-                total_chars_removed += block.text_length;
-                let elem_ids =
-                    uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-                if !elem_ids.is_empty() {
-                    uow.remove_inline_element_multi(&elem_ids)?;
-                }
-                uow.remove_block(&block.id)?;
-                non_cell_blocks_to_remove.push(block.id);
-                non_cell_blocks_removed += 1;
-            } else {
-                // Partially in range — truncate the block
+            if is_first || is_last {
+                // Partial truncation at edge
+                let local_start = if is_first {
+                    (start - block_start) as usize
+                } else {
+                    0
+                };
+                let local_end = if is_last {
+                    (end - block_start) as usize
+                } else {
+                    block.text_length as usize
+                };
+
                 let elem_ids =
                     uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
                 let elems_opt = uow.get_inline_element_multi(&elem_ids)?;
@@ -399,12 +419,11 @@ fn execute_delete(
                     let oe = local_end.min(ee);
 
                     if os < oe {
-                        // Overlaps delete range
-                        let ls = os - es;
-                        let le = oe - es;
                         match &elem.content {
                             InlineContent::Text(s) => {
                                 let chars: Vec<char> = s.chars().collect();
+                                let ls = os - es;
+                                let le = oe - es;
                                 let kept: String = chars[..ls]
                                     .iter()
                                     .chain(chars[le..].iter())
@@ -443,20 +462,43 @@ fn execute_delete(
                 upd_block.text_length = new_len;
                 upd_block.updated_at = now;
                 uow.update_block(&upd_block)?;
+            } else {
+                // Fully in range — remove entirely
+                total_chars_removed += block.text_length;
+                let elem_ids =
+                    uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
+                if !elem_ids.is_empty() {
+                    uow.remove_inline_element_multi(&elem_ids)?;
+                }
+                uow.remove_block(&block.id)?;
+                non_cell_blocks_to_remove.push(block.id);
+                non_cell_blocks_removed += 1;
             }
         }
 
-        // Update root frame child_order if any non-cell blocks were removed
+        // Update owning frames' child_order for removed non-cell blocks
         if !non_cell_blocks_to_remove.is_empty() {
-            let root_frame = uow
-                .get_frame(&frame_id)?
-                .ok_or_else(|| anyhow!("Root frame not found"))?;
-            let mut updated_root_frame = root_frame.clone();
-            updated_root_frame
-                .child_order
-                .retain(|id| !non_cell_blocks_to_remove.contains(&(*id as EntityId)));
-            updated_root_frame.updated_at = now;
-            uow.update_frame(&updated_root_frame)?;
+            // Determine which frames own the removed blocks
+            let mut frames_to_update: std::collections::HashSet<EntityId> =
+                std::collections::HashSet::new();
+            frames_to_update.insert(frame_id); // root frame always
+            for block in &blocks {
+                if non_cell_blocks_to_remove.contains(&block.id)
+                    && let Some(&cf) = block_to_cell_frame.get(&block.id)
+                {
+                    frames_to_update.insert(cf);
+                }
+            }
+            for &fid in &frames_to_update {
+                if let Some(f) = uow.get_frame(&fid)? {
+                    let mut updated = f.clone();
+                    updated
+                        .child_order
+                        .retain(|id| !non_cell_blocks_to_remove.contains(&(*id as EntityId)));
+                    updated.updated_at = now;
+                    uow.update_frame(&updated)?;
+                }
+            }
         }
 
         // Update document stats

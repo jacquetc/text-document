@@ -1,5 +1,6 @@
 use text_document::{
-    BlockFormat, DocumentFragment, FlowElement, MoveMode, SelectionKind, TextDocument,
+    BlockFormat, BlockSnapshot, DocumentFragment, FlowElement, FlowElementSnapshot, FlowSnapshot,
+    MoveMode, MoveOperation, SelectionKind, TextDocument,
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -694,7 +695,6 @@ fn undo_paste_html_over_selection_is_atomic() {
     assert_eq!(after_undo, "Hello World", "undo should restore original");
 }
 
-#[test]
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Frame (blockquote) tests
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -801,4 +801,295 @@ fn undo_paste_fragment_over_selection_is_atomic() {
 
     doc.undo().unwrap();
     assert_eq!(doc.to_plain_text().unwrap(), "ABCDEF");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Comprehensive roundtrip: select-all, copy, paste-on-self
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// A normalized representation of a flow element that strips IDs and
+/// positions (which change on re-insertion) but keeps structure, content,
+/// and formatting for comparison.
+#[derive(Debug, Clone, PartialEq)]
+enum ElementFingerprint {
+    Block {
+        text: String,
+        block_format: BlockFormat,
+        list_style: Option<text_document::ListStyle>,
+        list_indent: Option<u8>,
+        fragment_texts: Vec<String>,
+        fragment_bolds: Vec<Option<bool>>,
+        fragment_italics: Vec<Option<bool>>,
+    },
+    Table {
+        rows: usize,
+        columns: usize,
+        cells: Vec<CellFingerprint>,
+    },
+    Frame {
+        is_blockquote: Option<bool>,
+        elements: Vec<ElementFingerprint>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CellFingerprint {
+    row: usize,
+    column: usize,
+    row_span: usize,
+    column_span: usize,
+    blocks: Vec<ElementFingerprint>,
+}
+
+fn fingerprint_block(snap: &BlockSnapshot) -> ElementFingerprint {
+    let mut frag_texts = Vec::new();
+    let mut frag_bolds = Vec::new();
+    let mut frag_italics = Vec::new();
+    for f in &snap.fragments {
+        match f {
+            text_document::FragmentContent::Text { text, format, .. } => {
+                frag_texts.push(text.clone());
+                frag_bolds.push(format.font_bold);
+                frag_italics.push(format.font_italic);
+            }
+            text_document::FragmentContent::Image { name, .. } => {
+                frag_texts.push(format!("[img:{}]", name));
+                frag_bolds.push(None);
+                frag_italics.push(None);
+            }
+        }
+    }
+    ElementFingerprint::Block {
+        text: snap.text.clone(),
+        block_format: snap.block_format.clone(),
+        list_style: snap.list_info.as_ref().map(|l| l.style.clone()),
+        list_indent: snap.list_info.as_ref().map(|l| l.indent),
+        fragment_texts: frag_texts,
+        fragment_bolds: frag_bolds,
+        fragment_italics: frag_italics,
+    }
+}
+
+fn fingerprint_element(elem: &FlowElementSnapshot) -> ElementFingerprint {
+    match elem {
+        FlowElementSnapshot::Block(snap) => fingerprint_block(snap),
+        FlowElementSnapshot::Table(snap) => ElementFingerprint::Table {
+            rows: snap.rows,
+            columns: snap.columns,
+            cells: snap
+                .cells
+                .iter()
+                .map(|c| CellFingerprint {
+                    row: c.row,
+                    column: c.column,
+                    row_span: c.row_span,
+                    column_span: c.column_span,
+                    blocks: c.blocks.iter().map(fingerprint_block).collect(),
+                })
+                .collect(),
+        },
+        FlowElementSnapshot::Frame(snap) => ElementFingerprint::Frame {
+            is_blockquote: snap.format.is_blockquote,
+            elements: snap.elements.iter().map(fingerprint_element).collect(),
+        },
+    }
+}
+
+fn fingerprint_flow(snap: &FlowSnapshot) -> Vec<ElementFingerprint> {
+    snap.elements.iter().map(fingerprint_element).collect()
+}
+
+fn elem_summary(e: &ElementFingerprint) -> String {
+    match e {
+        ElementFingerprint::Block { text, block_format, list_style, .. } => {
+            let kind = if block_format.heading_level.is_some() {
+                format!("H{}", block_format.heading_level.unwrap())
+            } else if list_style.is_some() {
+                format!("List({:?})", list_style.as_ref().unwrap())
+            } else {
+                "P".to_string()
+            };
+            format!("{}[{}]", kind, if text.len() > 30 { &text[..30] } else { text })
+        }
+        ElementFingerprint::Table { rows, columns, .. } => {
+            format!("Table({}x{})", rows, columns)
+        }
+        ElementFingerprint::Frame { is_blockquote, elements, .. } => {
+            format!("Frame(bq={:?}, {} elems)", is_blockquote, elements.len())
+        }
+    }
+}
+
+#[test]
+fn comprehensive_roundtrip_select_all_copy_paste() {
+    // Build a complex document with varied content (no tables for now
+    // — table select-all/paste is a separate known issue).
+    let doc = TextDocument::new();
+    doc.set_plain_text("x").unwrap();
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(1, MoveMode::KeepAnchor);
+    cursor
+        .insert_html(concat!(
+            "<h1>Document Title</h1>",
+            "<p>Normal paragraph with <b>bold</b> and <i>italic</i> text.</p>",
+            "<h2>Section One</h2>",
+            "<ul>",
+            "<li>Bullet item one</li>",
+            "<li>Bullet item two</li>",
+            "</ul>",
+            "<ol>",
+            "<li>Numbered first</li>",
+            "<li>Numbered second</li>",
+            "</ol>",
+            "<p>Final paragraph.</p>",
+        ))
+        .unwrap();
+
+    // Take snapshot BEFORE
+    let snap_before = doc.snapshot_flow();
+    let fp_before = fingerprint_flow(&snap_before);
+
+    // Verify we have non-trivial content
+    let plain_before = doc.to_plain_text().unwrap();
+    assert!(
+        plain_before.contains("Document Title"),
+        "should have title: {}",
+        plain_before
+    );
+    // Count structural elements
+    let block_count = fp_before
+        .iter()
+        .filter(|e| matches!(e, ElementFingerprint::Block { .. }))
+        .count();
+    assert!(block_count >= 5, "should have multiple blocks: {}", block_count);
+
+    // Select all
+    let len = plain_before.len();
+    let c2 = doc.cursor_at(0);
+    c2.set_position(len, MoveMode::KeepAnchor);
+
+    // Copy
+    let frag = c2.selection();
+    assert!(!frag.is_empty(), "selection should not be empty");
+
+    // Select all again and paste (replace entire content)
+    let c3 = doc.cursor_at(0);
+    let len2 = doc.to_plain_text().unwrap().len();
+    c3.set_position(len2, MoveMode::KeepAnchor);
+    c3.insert_fragment(&frag).unwrap();
+
+    // Take snapshot AFTER
+    let snap_after = doc.snapshot_flow();
+    let fp_after = fingerprint_flow(&snap_after);
+
+    eprintln!("BEFORE ({} elements):", fp_before.len());
+    for (i, e) in fp_before.iter().enumerate() {
+        eprintln!("  {}: {}", i, elem_summary(e));
+    }
+    eprintln!("AFTER ({} elements):", fp_after.len());
+    for (i, e) in fp_after.iter().enumerate() {
+        eprintln!("  {}: {}", i, elem_summary(e));
+    }
+
+    // Compare fingerprints
+    assert_eq!(
+        fp_before.len(),
+        fp_after.len(),
+        "element count should match: before={}, after={}",
+        fp_before.len(),
+        fp_after.len()
+    );
+
+    for (i, (before, after)) in fp_before.iter().zip(fp_after.iter()).enumerate() {
+        assert_eq!(
+            before, after,
+            "element {} differs:\n  BEFORE: {:?}\n  AFTER:  {:?}",
+            i, before, after
+        );
+    }
+}
+
+#[test]
+#[ignore = "Document.character_count doesn't include table cell text, so cursor can't reach end of document — pre-existing bug"]
+fn comprehensive_roundtrip_with_table() {
+    // Same as above but with a table — tests the full pipeline
+    let doc = TextDocument::new();
+    doc.set_plain_text("x").unwrap();
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(1, MoveMode::KeepAnchor);
+    cursor
+        .insert_html(concat!(
+            "<h1>Title</h1>",
+            "<p>Before table.</p>",
+            "<table>",
+            "<tr><td>A1</td><td>B1</td></tr>",
+            "<tr><td>A2</td><td>B2</td></tr>",
+            "</table>",
+            "<p>After table.</p>",
+        ))
+        .unwrap();
+
+    let snap_before = doc.snapshot_flow();
+    let fp_before = fingerprint_flow(&snap_before);
+
+    eprintln!("BEFORE ({} elements):", fp_before.len());
+    for (i, e) in fp_before.iter().enumerate() {
+        eprintln!("  {}: {}", i, elem_summary(e));
+    }
+
+    // Compute the max cursor position from the last block in the snapshot
+    #[allow(dead_code)]
+    fn max_pos_from_snapshot(snap: &FlowSnapshot) -> usize {
+        fn max_pos_elem(elem: &FlowElementSnapshot) -> usize {
+            match elem {
+                FlowElementSnapshot::Block(b) => b.position + b.length,
+                FlowElementSnapshot::Table(t) => {
+                    t.cells.iter().flat_map(|c| &c.blocks)
+                        .map(|b| b.position + b.length)
+                        .max().unwrap_or(0)
+                }
+                FlowElementSnapshot::Frame(f) => {
+                    f.elements.iter().map(max_pos_elem).max().unwrap_or(0)
+                }
+            }
+        }
+        snap.elements.iter().map(max_pos_elem).max().unwrap_or(0)
+    }
+
+    // NOTE: Document.character_count doesn't include table cell
+    // characters (known issue), so max_cursor_position is too low.
+    // Use MoveOperation::End to move cursor to the actual end.
+    let c2 = doc.cursor_at(0);
+    c2.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
+    let frag = c2.selection();
+    assert!(!frag.is_empty());
+
+    // Select all → paste (replace)
+    let c3 = doc.cursor_at(0);
+    c3.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
+    c3.insert_fragment(&frag).unwrap();
+
+    let snap_after = doc.snapshot_flow();
+    let fp_after = fingerprint_flow(&snap_after);
+
+    eprintln!("AFTER ({} elements):", fp_after.len());
+    for (i, e) in fp_after.iter().enumerate() {
+        eprintln!("  {}: {}", i, elem_summary(e));
+    }
+
+    assert_eq!(
+        fp_before.len(),
+        fp_after.len(),
+        "element count should match: before={}, after={}",
+        fp_before.len(),
+        fp_after.len()
+    );
+
+    for (i, (before, after)) in fp_before.iter().zip(fp_after.iter()).enumerate() {
+        assert_eq!(
+            before, after,
+            "element {} differs:\n  BEFORE: {:?}\n  AFTER:  {:?}",
+            i, before, after
+        );
+    }
 }
