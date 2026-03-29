@@ -24,19 +24,20 @@ pub use common::direct_access::root::root_repository::RootRelationshipField;
 pub use common::direct_access::table::table_repository::TableRelationshipField;
 pub use common::direct_access::table_cell::table_cell_repository::TableCellRelationshipField;
 pub use direct_access::block::block_controller;
-pub use direct_access::block::dtos::CreateBlockDto;
+pub use direct_access::block::dtos::{BlockRelationshipDto, CreateBlockDto, UpdateBlockDto};
 pub use direct_access::document::document_controller;
 pub use direct_access::document::dtos::CreateDocumentDto;
 pub use direct_access::frame::dtos::CreateFrameDto;
 pub use direct_access::frame::frame_controller;
-pub use direct_access::inline_element::dtos::CreateInlineElementDto;
+pub use direct_access::inline_element::dtos::{CreateInlineElementDto, UpdateInlineElementDto};
 pub use direct_access::inline_element::inline_element_controller;
+pub use direct_access::list::dtos::CreateListDto as CreateListEntityDto;
+pub use direct_access::list::list_controller;
 pub use direct_access::root::dtos::CreateRootDto;
 pub use direct_access::root::root_controller;
-pub use direct_access::list::list_controller;
-pub use direct_access::table::dtos::TableDto;
+pub use direct_access::table::dtos::{CreateTableDto, TableDto};
 pub use direct_access::table::table_controller;
-pub use direct_access::table_cell::dtos::TableCellDto;
+pub use direct_access::table_cell::dtos::{CreateTableCellDto, TableCellDto};
 pub use direct_access::table_cell::table_cell_controller;
 
 /// Create an in-memory database with a Root and empty Document.
@@ -287,4 +288,422 @@ pub fn get_document_stats(db_context: &DbContext) -> Result<BasicStats> {
         block_count: doc.block_count,
         frame_count: frame_ids.len() as i64,
     })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Test-only helpers that build richer documents (tables, lists, images,
+// frames) using entity controllers directly — no feature-crate dependency.
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct InsertTableResult {
+    pub table_id: EntityId,
+}
+
+/// Insert a `rows x columns` table at `position` using entity controllers.
+///
+/// Creates the Table, one Frame+Block+EmptyElement per cell, and adjusts
+/// `document_position` for all subsequent blocks.
+pub fn insert_table(
+    db_context: &DbContext,
+    event_hub: &Arc<EventHub>,
+    undo_redo_manager: &mut UndoRedoManager,
+    position: i64,
+    rows: i64,
+    columns: i64,
+) -> Result<InsertTableResult> {
+    let doc_id = get_doc_id(db_context)?;
+
+    // Create table owned by document
+    let table = table_controller::create(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &CreateTableDto {
+            rows,
+            columns,
+            ..Default::default()
+        },
+        doc_id,
+        -1,
+    )?;
+
+    let table_size = rows * columns;
+    let mut cell_blocks: Vec<EntityId> = Vec::new();
+
+    for r in 0..rows {
+        for c in 0..columns {
+            // Create cell frame owned by document
+            let cell_frame = frame_controller::create(
+                db_context,
+                event_hub,
+                undo_redo_manager,
+                None,
+                &CreateFrameDto::default(),
+                doc_id,
+                -1,
+            )?;
+
+            // Create block in cell frame
+            let block = block_controller::create(
+                db_context,
+                event_hub,
+                undo_redo_manager,
+                None,
+                &CreateBlockDto::default(),
+                cell_frame.id,
+                0,
+            )?;
+
+            // Create empty element in block
+            inline_element_controller::create(
+                db_context,
+                event_hub,
+                undo_redo_manager,
+                None,
+                &CreateInlineElementDto {
+                    content: InlineContent::Empty,
+                    ..Default::default()
+                },
+                block.id,
+                0,
+            )?;
+
+            // Create table cell owned by table
+            table_cell_controller::create(
+                db_context,
+                event_hub,
+                undo_redo_manager,
+                None,
+                &CreateTableCellDto {
+                    row: r,
+                    column: c,
+                    row_span: 1,
+                    column_span: 1,
+                    cell_frame: Some(cell_frame.id),
+                    ..Default::default()
+                },
+                table.id,
+                -1,
+            )?;
+
+            cell_blocks.push(block.id);
+        }
+    }
+
+    // Assign document_positions to cell blocks
+    let mut current_pos = position;
+    for &bid in &cell_blocks {
+        let mut b = block_controller::get(db_context, &bid)?
+            .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+        b.document_position = current_pos;
+        block_controller::update(
+            db_context,
+            event_hub,
+            undo_redo_manager,
+            None,
+            &b.into(),
+        )?;
+        current_pos += 1;
+    }
+
+    // Shift existing blocks (not cell blocks) that are at or after position
+    let all_bids = get_all_block_ids(db_context)?;
+    for bid in &all_bids {
+        if cell_blocks.contains(bid) {
+            continue;
+        }
+        let b = block_controller::get(db_context, bid)?
+            .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+        if b.document_position >= position {
+            let mut updated = b.clone();
+            updated.document_position += table_size;
+            block_controller::update(
+                db_context,
+                event_hub,
+                undo_redo_manager,
+                None,
+                &updated.into(),
+            )?;
+        }
+    }
+
+    undo_redo_manager.clear_all_stacks();
+    Ok(InsertTableResult { table_id: table.id })
+}
+
+pub struct CreateListResult {
+    pub list_id: EntityId,
+}
+
+/// Create a list spanning blocks in `[position, anchor]` using entity controllers.
+pub fn create_list(
+    db_context: &DbContext,
+    event_hub: &Arc<EventHub>,
+    undo_redo_manager: &mut UndoRedoManager,
+    position: i64,
+    anchor: i64,
+    style: common::entities::ListStyle,
+) -> Result<CreateListResult> {
+    let doc_id = get_doc_id(db_context)?;
+    let sel_start = std::cmp::min(position, anchor);
+    let sel_end = std::cmp::max(position, anchor);
+
+    let list = list_controller::create(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &CreateListEntityDto {
+            style,
+            ..Default::default()
+        },
+        doc_id,
+        -1,
+    )?;
+
+    // Find overlapping blocks and assign them to the list
+    let all_bids = get_all_block_ids(db_context)?;
+    for bid in &all_bids {
+        let b = block_controller::get(db_context, bid)?
+            .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+        let block_start = b.document_position;
+        let block_end = block_start + b.text_length;
+        if block_end >= sel_start && block_start <= sel_end {
+            block_controller::set_relationship(
+                db_context,
+                event_hub,
+                undo_redo_manager,
+                None,
+                &BlockRelationshipDto {
+                    id: b.id,
+                    field: BlockRelationshipField::List,
+                    right_ids: vec![list.id],
+                },
+            )?;
+        }
+    }
+
+    undo_redo_manager.clear_all_stacks();
+    Ok(CreateListResult { list_id: list.id })
+}
+
+pub struct InsertImageResult {
+    pub new_position: i64,
+    pub element_id: EntityId,
+}
+
+/// Insert an image inline element at `position` using entity controllers.
+///
+/// Splits the text element at the insertion offset when needed.
+pub fn insert_image(
+    db_context: &DbContext,
+    event_hub: &Arc<EventHub>,
+    undo_redo_manager: &mut UndoRedoManager,
+    position: i64,
+    image_name: &str,
+    width: i64,
+    height: i64,
+) -> Result<InsertImageResult> {
+    // Find block containing position
+    let all_bids = get_all_block_ids(db_context)?;
+    let mut blocks = Vec::new();
+    for bid in &all_bids {
+        blocks.push(
+            block_controller::get(db_context, bid)?
+                .ok_or_else(|| anyhow::anyhow!("Block not found"))?,
+        );
+    }
+    blocks.sort_by_key(|b| b.document_position);
+
+    let (target_block, offset) = blocks
+        .iter()
+        .find_map(|b| {
+            let s = b.document_position;
+            let e = s + b.text_length;
+            if position >= s && position <= e {
+                Some((b.clone(), (position - s) as usize))
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| anyhow::anyhow!("No block at position {}", position))?;
+
+    // Walk elements to find the one at offset
+    let elem_ids = block_controller::get_relationship(
+        db_context,
+        &target_block.id,
+        &BlockRelationshipField::Elements,
+    )?;
+
+    let mut running = 0usize;
+    let mut insert_after_idx: i32 = -1;
+    for (idx, eid) in elem_ids.iter().enumerate() {
+        let elem = inline_element_controller::get(db_context, eid)?
+            .ok_or_else(|| anyhow::anyhow!("Element not found"))?;
+        let elen = match &elem.content {
+            InlineContent::Text(s) => s.chars().count(),
+            InlineContent::Image { .. } => 1,
+            InlineContent::Empty => 0,
+        };
+
+        if running + elen > offset && offset > running {
+            // Split text element
+            if let InlineContent::Text(ref text) = elem.content {
+                let chars: Vec<char> = text.chars().collect();
+                let local = offset - running;
+                let before: String = chars[..local].iter().collect();
+                let after: String = chars[local..].iter().collect();
+
+                // Shrink original to 'before'
+                let mut upd: UpdateInlineElementDto = elem.clone().into();
+                upd.content = InlineContent::Text(before);
+                inline_element_controller::update(
+                    db_context,
+                    event_hub,
+                    undo_redo_manager,
+                    None,
+                    &upd,
+                )?;
+
+                // Create 'after' element
+                let after_entity: common::entities::InlineElement = elem.clone().into();
+                let mut after_create = CreateInlineElementDto::from(after_entity);
+                after_create.content = InlineContent::Text(after);
+                inline_element_controller::create(
+                    db_context,
+                    event_hub,
+                    undo_redo_manager,
+                    None,
+                    &after_create,
+                    target_block.id,
+                    (idx as i32) + 1,
+                )?;
+            }
+            insert_after_idx = (idx as i32) + 1;
+            break;
+        }
+        running += elen;
+        if running >= offset {
+            insert_after_idx = (idx as i32) + 1;
+            break;
+        }
+    }
+    if insert_after_idx < 0 {
+        insert_after_idx = elem_ids.len() as i32;
+    }
+
+    // Create image element
+    let img = inline_element_controller::create(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &CreateInlineElementDto {
+            content: InlineContent::Image {
+                name: image_name.to_string(),
+                width,
+                height,
+                quality: 100,
+            },
+            ..Default::default()
+        },
+        target_block.id,
+        insert_after_idx,
+    )?;
+
+    // Update block text_length (+1) and shift subsequent blocks
+    let mut upd_block = target_block.clone();
+    upd_block.text_length += 1;
+    block_controller::update(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &upd_block.into(),
+    )?;
+
+    for b in &blocks {
+        if b.id != target_block.id && b.document_position > target_block.document_position {
+            let mut shifted = b.clone();
+            shifted.document_position += 1;
+            block_controller::update(
+                db_context,
+                event_hub,
+                undo_redo_manager,
+                None,
+                &shifted.into(),
+            )?;
+        }
+    }
+
+    undo_redo_manager.clear_all_stacks();
+    Ok(InsertImageResult {
+        new_position: position + 1,
+        element_id: img.id,
+    })
+}
+
+pub struct InsertFrameResult {
+    pub frame_id: EntityId,
+}
+
+/// Insert a sub-frame at `position` using entity controllers.
+///
+/// The new frame contains one empty block and is registered in
+/// the document's frames collection.
+pub fn insert_frame(
+    db_context: &DbContext,
+    event_hub: &Arc<EventHub>,
+    undo_redo_manager: &mut UndoRedoManager,
+    position: i64,
+) -> Result<InsertFrameResult> {
+    let doc_id = get_doc_id(db_context)?;
+
+    let new_frame = frame_controller::create(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &CreateFrameDto::default(),
+        doc_id,
+        -1,
+    )?;
+
+    let block = block_controller::create(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &CreateBlockDto {
+            document_position: position,
+            ..Default::default()
+        },
+        new_frame.id,
+        0,
+    )?;
+
+    inline_element_controller::create(
+        db_context,
+        event_hub,
+        undo_redo_manager,
+        None,
+        &CreateInlineElementDto {
+            content: InlineContent::Empty,
+            ..Default::default()
+        },
+        block.id,
+        0,
+    )?;
+
+    undo_redo_manager.clear_all_stacks();
+    Ok(InsertFrameResult {
+        frame_id: new_frame.id,
+    })
+}
+
+fn get_doc_id(db_context: &DbContext) -> Result<EntityId> {
+    let root_rels =
+        root_controller::get_relationship(db_context, &1, &RootRelationshipField::Document)?;
+    Ok(root_rels[0])
 }
