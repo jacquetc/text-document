@@ -705,6 +705,8 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
                         | "pre"
                         | "br"
                         | "blockquote"
+                        | "body"
+                        | "html"
                 );
 
                 // Update formatting state
@@ -1034,8 +1036,34 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
     }
 
     let initial_state = FmtState::default();
-    for child in root.children() {
-        walk_node(child, &initial_state, &mut elements, &None, 0, 0, 0);
+    // Treat the root element as a block-level container so that
+    // top-level inline elements (e.g. `<b>Bold</b> <em>Italic</em>`)
+    // are grouped into a single block instead of becoming separate blocks.
+    let mut root_spans: Vec<ParsedSpan> = Vec::new();
+    collect_inline_spans(
+        (*root).into(),
+        &initial_state,
+        &mut root_spans,
+        &None,
+        &mut elements,
+        0,
+        0,
+        0,
+    );
+    if !root_spans.is_empty() {
+        elements.push(ParsedElement::Block(ParsedBlock {
+            spans: root_spans,
+            heading_level: None,
+            list_style: None,
+            list_indent: 0,
+            is_code_block: false,
+            code_language: None,
+            blockquote_depth: 0,
+            line_height: None,
+            non_breakable_lines: None,
+            direction: None,
+            background_color: None,
+        }));
     }
 
     // If no elements were parsed, create a single empty paragraph
