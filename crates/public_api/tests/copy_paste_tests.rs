@@ -1,5 +1,5 @@
 use text_document::{
-    BlockFormat, DocumentFragment, FlowElement, MoveMode, TextDocument,
+    BlockFormat, DocumentFragment, FlowElement, MoveMode, SelectionKind, TextDocument,
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -434,4 +434,278 @@ fn copy_paste_preserves_inline_bold() {
         "bold should survive roundtrip: {}",
         html2
     );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HTML table roundtrip (critical bug fix validation)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn html_table_roundtrip_preserves_structure() {
+    // from_html should preserve table structure (not flatten to blocks)
+    let html = "<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>";
+    let frag = DocumentFragment::from_html(html);
+
+    let out_html = frag.to_html();
+    assert!(
+        out_html.contains("<table>"),
+        "roundtrip should preserve <table>: {}",
+        out_html
+    );
+    assert!(
+        out_html.contains("<td>"),
+        "roundtrip should preserve <td>: {}",
+        out_html
+    );
+    assert!(
+        out_html.contains("A") && out_html.contains("D"),
+        "cell content preserved: {}",
+        out_html
+    );
+}
+
+#[test]
+fn html_table_with_text_roundtrip() {
+    // Mixed text + table in HTML should preserve both
+    let html = "<p>Before</p><table><tr><td>X</td></tr></table><p>After</p>";
+    let frag = DocumentFragment::from_html(html);
+
+    let out_html = frag.to_html();
+    assert!(out_html.contains("Before"), "text before table: {}", out_html);
+    assert!(out_html.contains("<table>"), "table preserved: {}", out_html);
+    assert!(out_html.contains("After"), "text after table: {}", out_html);
+}
+
+#[test]
+fn markdown_table_roundtrip() {
+    let md = "| A | B |\n| --- | --- |\n| C | D |";
+    let frag = DocumentFragment::from_markdown(md);
+
+    let out_md = frag.to_markdown();
+    assert!(
+        out_md.contains("|"),
+        "markdown table should survive roundtrip: {}",
+        out_md
+    );
+    assert!(
+        out_md.contains("A") && out_md.contains("D"),
+        "cell content preserved: {}",
+        out_md
+    );
+}
+
+#[test]
+fn insert_html_table_creates_table_entity() {
+    // Pasting HTML with a table should create a table entity, not flat blocks
+    let doc = TextDocument::new();
+    doc.set_plain_text("Text").unwrap();
+
+    let cursor = doc.cursor_at(4);
+    cursor
+        .insert_html("<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>")
+        .unwrap();
+
+    assert!(
+        find_table(&doc).is_some(),
+        "insert_html with <table> should create a table entity"
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Cell selection extraction
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn cell_selection_extract_produces_table_fragment() {
+    // When cursor has cell selection, selection() should produce a table fragment
+    let doc = TextDocument::new();
+    doc.set_plain_text("Text").unwrap();
+    let cursor = doc.cursor_at(4);
+    cursor.insert_table(2, 2).unwrap();
+
+    // Put text in cell(0,0) using the table's set_cell_text API if available,
+    // or find the cell block position from a fresh snapshot
+    let snap = doc.snapshot_flow();
+    let cell_pos = snap
+        .elements
+        .iter()
+        .find_map(|e| {
+            if let text_document::FlowElementSnapshot::Table(ts) = e {
+                ts.cells
+                    .iter()
+                    .find(|c| c.row == 0 && c.column == 0)
+                    .map(|c| c.blocks[0].position)
+            } else {
+                None
+            }
+        })
+        .expect("cell(0,0) block should exist");
+
+    let c1 = doc.cursor_at(cell_pos);
+    c1.insert_text("Hello").unwrap();
+
+    // Re-get table and use cell selection override to select all cells
+    let table2 = find_table(&doc).unwrap();
+    let table_id = table2.id();
+    let c3 = doc.cursor_at(0);
+    c3.select_cell_range(table_id, 0, 0, 1, 1);
+
+    let kind = c3.selection_kind();
+    assert!(
+        matches!(kind, SelectionKind::Cells(_)),
+        "should be cell selection: {:?}",
+        kind
+    );
+
+    let frag = c3.selection();
+    assert!(!frag.is_empty(), "cell selection should produce non-empty fragment");
+
+    let html = frag.to_html();
+    assert!(
+        html.contains("<table>"),
+        "cell selection should produce table HTML: {}",
+        html
+    );
+    assert!(
+        html.contains("Hello"),
+        "should contain cell content: {}",
+        html
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Table paste into existing table (I4)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn paste_table_into_existing_table_replaces_cells() {
+    // Create doc with a 2x2 table
+    let doc = TextDocument::new();
+    doc.set_plain_text("Text").unwrap();
+    let cursor = doc.cursor_at(4);
+    cursor.insert_table(2, 2).unwrap();
+
+    // Type into cell(0,0)
+    let table = find_table(&doc).unwrap();
+    let pos00 = table.cell(0, 0).unwrap().blocks()[0].position();
+    let c1 = doc.cursor_at(pos00);
+    c1.insert_text("Original").unwrap();
+
+    // Create a fragment from HTML table (1x1)
+    let frag = DocumentFragment::from_html("<table><tr><td>Replaced</td></tr></table>");
+
+    // Paste at the cell position — should replace the cell content
+    let table2 = find_table(&doc).unwrap();
+    let new_pos00 = table2.cell(0, 0).unwrap().blocks()[0].position();
+    let c2 = doc.cursor_at(new_pos00);
+    c2.insert_fragment(&frag).unwrap();
+
+    // Table should still exist (not a new table)
+    let _tables: Vec<_> = doc.flow().into_iter().filter_map(|e| match e {
+        FlowElement::Table(t) => Some(t),
+        _ => None,
+    }).collect();
+
+    // Check the cell content was replaced
+    let plain = doc.to_plain_text().unwrap();
+    assert!(
+        plain.contains("Replaced"),
+        "cell content should be replaced: {}",
+        plain
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// List continuation (I6)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn paste_list_continues_adjacent_list() {
+    // Create doc with existing list
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor
+        .insert_html("<ul><li>Existing item</li></ul>")
+        .unwrap();
+
+    // Create fragment with a list item
+    let frag = DocumentFragment::from_html("<ul><li>New item</li></ul>");
+
+    // Paste at the end of the existing list item
+    let plain = doc.to_plain_text().unwrap();
+    let c2 = doc.cursor_at(plain.len());
+    c2.insert_fragment(&frag).unwrap();
+
+    let plain2 = doc.to_plain_text().unwrap();
+    assert!(
+        plain2.contains("Existing item") && plain2.contains("New item"),
+        "both items should exist: {}",
+        plain2
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Heading/list interactions
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn paste_heading_into_list_preserves_tail_list() {
+    // Paste a heading block into a list item
+    // The heading should appear, tail text should retain list format
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor.insert_html("<ul><li>List item text</li></ul>").unwrap();
+
+    let frag = DocumentFragment::from_html("<h1>Heading</h1>");
+
+    // Find position inside the list item
+    let plain = doc.to_plain_text().unwrap();
+    let mid = plain.find("item").unwrap_or(5);
+    let c2 = doc.cursor_at(mid);
+    c2.insert_fragment(&frag).unwrap();
+
+    let plain2 = doc.to_plain_text().unwrap();
+    assert!(
+        plain2.contains("Heading"),
+        "heading text should appear: {}",
+        plain2
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Undo atomicity
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn undo_paste_html_over_selection_is_atomic() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello World").unwrap();
+
+    let cursor = doc.cursor_at(6);
+    cursor.set_position(11, MoveMode::KeepAnchor);
+    cursor.insert_html("<b>Bold</b>").unwrap();
+
+    let after_paste = doc.to_plain_text().unwrap();
+    assert!(after_paste.contains("Bold"), "paste worked: {}", after_paste);
+
+    // Single undo should restore original
+    doc.undo().unwrap();
+    let after_undo = doc.to_plain_text().unwrap();
+    assert_eq!(after_undo, "Hello World", "undo should restore original");
+}
+
+#[test]
+fn undo_paste_fragment_over_selection_is_atomic() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("ABCDEF").unwrap();
+
+    let cursor = doc.cursor_at(2);
+    cursor.set_position(4, MoveMode::KeepAnchor); // select "CD"
+    let frag = DocumentFragment::from_plain_text("XY");
+    cursor.insert_fragment(&frag).unwrap();
+
+    assert_eq!(doc.to_plain_text().unwrap(), "ABXYEF");
+
+    doc.undo().unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "ABCDEF");
 }

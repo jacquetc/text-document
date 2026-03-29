@@ -143,26 +143,27 @@ fn try_replace_table_cells(
     let target_cells_opt = uow.get_table_cell_multi(&target_cell_ids)?;
     let target_cells: Vec<TableCell> = target_cells_opt.into_iter().flatten().collect();
 
-    // Check dimensions match (fragment fits within table)
-    if frag_table.rows > target_table.rows as usize
-        || frag_table.columns > target_table.columns as usize
-    {
-        return Ok(None); // fragment too large, fall back to new table
-    }
-
     let now = chrono::Utc::now();
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
-    // Find the cursor's cell position to use as offset
+    // Find which cell the cursor is in to use as the paste origin
+    let cursor_cf = block_to_cell.get(&cursor_block.id).map(|(cf, _)| *cf);
     let cursor_cell = target_cells
         .iter()
-        .find(|c| {
-            c.cell_frame
-                .is_some_and(|cf| block_to_cell.get(&cursor_block.id).is_some_and(|(cf2, _)| cf == *cf2))
-        });
+        .find(|c| c.cell_frame == cursor_cf);
     let (base_row, base_col) = cursor_cell
         .map(|c| (c.row as usize, c.column as usize))
         .unwrap_or((0, 0));
+
+    // Check that the fragment fits within the table with the offset applied
+    let max_frag_row = frag_table.cells.iter().map(|c| c.row).max().unwrap_or(0);
+    let max_frag_col = frag_table.cells.iter().map(|c| c.column).max().unwrap_or(0);
+    if base_row + max_frag_row >= target_table.rows as usize
+        || base_col + max_frag_col >= target_table.columns as usize
+    {
+        // Fragment doesn't fit at this offset — fall back to new table
+        return Ok(None);
+    }
 
     // Replace cell contents
     for frag_cell in &frag_table.cells {

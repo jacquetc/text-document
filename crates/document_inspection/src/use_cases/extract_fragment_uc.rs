@@ -143,7 +143,7 @@ impl ExtractFragmentUseCase {
             let mut cross = false;
             for block in &blocks {
                 if block.document_position + block.text_length < start
-                    || block.document_position > end
+                    || block.document_position >= end
                 {
                     continue;
                 }
@@ -172,7 +172,7 @@ impl ExtractFragmentUseCase {
                 let block_start = block.document_position;
                 let block_end = block_start + block.text_length;
 
-                if block_end < start || block_start > end {
+                if block_end < start || block_start >= end {
                     continue;
                 }
 

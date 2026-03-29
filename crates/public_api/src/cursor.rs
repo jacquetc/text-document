@@ -16,7 +16,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::convert::{to_i64, to_usize};
 use crate::events::DocumentEvent;
-use crate::flow::{FlowElement, TableCellRef};
+use crate::flow::{CellRange, FlowElement, SelectionKind, TableCellRef};
 use crate::fragment::DocumentFragment;
 use crate::inner::{CursorData, QueuedEvents, TextDocumentInner};
 use crate::text_table::TextTable;
@@ -465,103 +465,15 @@ impl TextCursor {
 
     /// Insert an HTML fragment at the cursor position. Replaces selection if any.
     pub fn insert_html(&self, html: &str) -> Result<()> {
-        let (pos, anchor) = self.read_cursor();
-        let queued = {
-            let mut inner = self.doc.lock();
-
-            let (insert_pos, removed) = if pos != anchor {
-                // Composite: delete selection + insert as single undo unit
-                undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
-                let del_dto = frontend::document_editing::DeleteTextDto {
-                    position: to_i64(pos),
-                    anchor: to_i64(anchor),
-                };
-                let del_result = document_editing_commands::delete_text(
-                    &inner.ctx,
-                    Some(inner.stack_id),
-                    &del_dto,
-                )?;
-                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
-            } else {
-                (pos, 0)
-            };
-
-            let dto = frontend::document_editing::InsertHtmlAtPositionDto {
-                position: to_i64(insert_pos),
-                anchor: to_i64(insert_pos),
-                html: html.into(),
-            };
-            let result = document_editing_commands::insert_html_at_position(
-                &inner.ctx,
-                Some(inner.stack_id),
-                &dto,
-            )?;
-
-            if pos != anchor {
-                undo_redo_commands::end_composite(&inner.ctx);
-            }
-
-            let edit_pos = pos.min(anchor);
-            self.finish_edit(
-                &mut inner,
-                edit_pos,
-                removed,
-                to_usize(result.new_position),
-                to_usize(result.blocks_added),
-            )
-        };
-        crate::inner::dispatch_queued_events(queued);
-        Ok(())
+        // Delegate to insert_fragment so table structure is preserved.
+        let frag = DocumentFragment::from_html(html);
+        self.insert_fragment(&frag)
     }
 
     /// Insert a Markdown fragment at the cursor position. Replaces selection if any.
     pub fn insert_markdown(&self, markdown: &str) -> Result<()> {
-        let (pos, anchor) = self.read_cursor();
-        let queued = {
-            let mut inner = self.doc.lock();
-
-            let (insert_pos, removed) = if pos != anchor {
-                undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
-                let del_dto = frontend::document_editing::DeleteTextDto {
-                    position: to_i64(pos),
-                    anchor: to_i64(anchor),
-                };
-                let del_result = document_editing_commands::delete_text(
-                    &inner.ctx,
-                    Some(inner.stack_id),
-                    &del_dto,
-                )?;
-                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
-            } else {
-                (pos, 0)
-            };
-
-            let dto = frontend::document_editing::InsertMarkdownAtPositionDto {
-                position: to_i64(insert_pos),
-                anchor: to_i64(insert_pos),
-                markdown: markdown.into(),
-            };
-            let result = document_editing_commands::insert_markdown_at_position(
-                &inner.ctx,
-                Some(inner.stack_id),
-                &dto,
-            )?;
-
-            if pos != anchor {
-                undo_redo_commands::end_composite(&inner.ctx);
-            }
-
-            let edit_pos = pos.min(anchor);
-            self.finish_edit(
-                &mut inner,
-                edit_pos,
-                removed,
-                to_usize(result.new_position),
-                to_usize(result.blocks_added),
-            )
-        };
-        crate::inner::dispatch_queued_events(queued);
-        Ok(())
+        let frag = DocumentFragment::from_markdown(markdown);
+        self.insert_fragment(&frag)
     }
 
     /// Insert a document fragment at the cursor. Replaces selection if any.
@@ -614,13 +526,49 @@ impl TextCursor {
     /// Extract the current selection as a [`DocumentFragment`].
     pub fn selection(&self) -> DocumentFragment {
         let (pos, anchor) = self.read_cursor();
-        if pos == anchor {
+
+        // For cell/mixed selections, compute position/anchor that span the
+        // full cell range so ExtractFragment detects cross-cell correctly.
+        let (extract_pos, extract_anchor) = match self.selection_kind() {
+            SelectionKind::Cells(ref range) => {
+                match self.cell_range_positions(range) {
+                    Some((start, end)) => (start, end),
+                    None => return DocumentFragment::new(),
+                }
+            }
+            SelectionKind::Mixed {
+                ref cell_range,
+                text_before,
+                text_after,
+            } => {
+                let (cell_start, cell_end) = match self.cell_range_positions(cell_range) {
+                    Some(p) => p,
+                    None => return DocumentFragment::new(),
+                };
+                let start = if text_before {
+                    pos.min(anchor)
+                } else {
+                    cell_start
+                };
+                let end = if text_after {
+                    pos.max(anchor)
+                } else {
+                    cell_end
+                };
+                (start.min(cell_start), end.max(cell_end))
+            }
+            SelectionKind::None => return DocumentFragment::new(),
+            SelectionKind::Text => (pos, anchor),
+        };
+
+        if extract_pos == extract_anchor {
             return DocumentFragment::new();
         }
+
         let inner = self.doc.lock();
         let dto = frontend::document_inspection::ExtractFragmentDto {
-            position: to_i64(pos),
-            anchor: to_i64(anchor),
+            position: to_i64(extract_pos),
+            anchor: to_i64(extract_anchor),
         };
         match document_inspection_commands::extract_fragment(&inner.ctx, &dto) {
             Ok(result) => DocumentFragment::from_raw(result.fragment_data, result.plain_text),
@@ -1310,6 +1258,44 @@ impl TextCursor {
     pub fn clear_cell_selection(&self) {
         let mut d = self.data.lock();
         d.cell_selection_override = None;
+    }
+
+    /// Compute (min_position, max_position) spanning all blocks in a cell range.
+    /// Returns `None` if the table or cells cannot be found.
+    fn cell_range_positions(&self, range: &CellRange) -> Option<(usize, usize)> {
+        let inner = self.doc.lock();
+        let main_frame_id = get_main_frame_id(&inner);
+        let flow = crate::text_frame::build_flow_elements(&inner, &self.doc, main_frame_id);
+        drop(inner);
+
+        // Find the table matching the range's table_id
+        let table = flow.into_iter().find_map(|e| match e {
+            FlowElement::Table(t) if t.id() == range.table_id => Some(t),
+            _ => None,
+        })?;
+
+        let mut min_pos = usize::MAX;
+        let mut max_pos = 0usize;
+
+        for row in range.start_row..=range.end_row {
+            for col in range.start_col..=range.end_col {
+                if let Some(cell) = table.cell(row, col) {
+                    for block in cell.blocks() {
+                        let bp = block.position();
+                        let bl = block.length();
+                        min_pos = min_pos.min(bp);
+                        max_pos = max_pos.max(bp + bl);
+                    }
+                }
+            }
+        }
+
+        if min_pos == usize::MAX {
+            return None;
+        }
+
+        // Extend max_pos past the last block to ensure cross-cell detection
+        Some((min_pos, max_pos + 1))
     }
 
     // ── Cell selection helpers (private) ─────────────────────

@@ -1,8 +1,9 @@
 //! DocumentFragment — format-agnostic rich text interchange type.
 
 use crate::{InlineContent, ListStyle};
+use frontend::common::parser_tools::content_parser::{ParsedElement, ParsedSpan};
 use frontend::common::parser_tools::fragment_schema::{
-    FragmentBlock, FragmentData, FragmentElement, FragmentTable,
+    FragmentBlock, FragmentData, FragmentElement, FragmentTable, FragmentTableCell,
 };
 
 /// A piece of rich text that can be inserted into a [`TextDocument`](crate::TextDocument).
@@ -87,18 +88,15 @@ impl DocumentFragment {
 
     /// Create a fragment from HTML.
     pub fn from_html(html: &str) -> Self {
-        let parsed = frontend::common::parser_tools::content_parser::parse_html(html);
-        parsed_blocks_to_fragment(parsed)
+        let parsed =
+            frontend::common::parser_tools::content_parser::parse_html_elements(html);
+        parsed_elements_to_fragment(parsed)
     }
 
     /// Create a fragment from Markdown.
     pub fn from_markdown(markdown: &str) -> Self {
         let parsed = frontend::common::parser_tools::content_parser::parse_markdown(markdown);
-        let blocks =
-            frontend::common::parser_tools::content_parser::ParsedElement::flatten_to_blocks(
-                parsed,
-            );
-        parsed_blocks_to_fragment(blocks)
+        parsed_elements_to_fragment(parsed)
     }
 
     /// Create a fragment from an entire document.
@@ -617,94 +615,153 @@ fn render_table_markdown(table: &FragmentTable) -> String {
 // ── Fragment construction from parsed content ───────────────────
 
 /// Convert parsed blocks (from HTML or Markdown parser) into a `DocumentFragment`.
-fn parsed_blocks_to_fragment(
-    parsed: Vec<frontend::common::parser_tools::content_parser::ParsedBlock>,
-) -> DocumentFragment {
+/// Convert a `ParsedSpan` to a `FragmentElement`.
+fn span_to_fragment_element(span: &ParsedSpan) -> FragmentElement {
+    let content = InlineContent::Text(span.text.clone());
+    let fmt_font_family = if span.code {
+        Some("monospace".into())
+    } else {
+        None
+    };
+    let fmt_font_bold = if span.bold { Some(true) } else { None };
+    let fmt_font_italic = if span.italic { Some(true) } else { None };
+    let fmt_font_underline = if span.underline { Some(true) } else { None };
+    let fmt_font_strikeout = if span.strikeout { Some(true) } else { None };
+    let (fmt_anchor_href, fmt_is_anchor) = if let Some(ref href) = span.link_href {
+        (Some(href.clone()), Some(true))
+    } else {
+        (None, None)
+    };
+
+    FragmentElement {
+        content,
+        fmt_font_family,
+        fmt_font_point_size: None,
+        fmt_font_weight: None,
+        fmt_font_bold,
+        fmt_font_italic,
+        fmt_font_underline,
+        fmt_font_overline: None,
+        fmt_font_strikeout,
+        fmt_letter_spacing: None,
+        fmt_word_spacing: None,
+        fmt_anchor_href,
+        fmt_anchor_names: vec![],
+        fmt_is_anchor,
+        fmt_tooltip: None,
+        fmt_underline_style: None,
+        fmt_vertical_alignment: None,
+    }
+}
+
+/// Convert parsed elements (blocks + tables) into a `DocumentFragment`,
+/// preserving table structure as `FragmentTable` entries.
+fn parsed_elements_to_fragment(parsed: Vec<ParsedElement>) -> DocumentFragment {
     use frontend::common::parser_tools::fragment_schema::FragmentList;
 
-    let blocks: Vec<FragmentBlock> = parsed
-        .into_iter()
-        .map(|pb| {
-            let elements: Vec<FragmentElement> = pb
-                .spans
-                .iter()
-                .map(|span| {
-                    let content = InlineContent::Text(span.text.clone());
-                    let fmt_font_family = if span.code {
-                        Some("monospace".into())
-                    } else {
-                        None
-                    };
-                    let fmt_font_bold = if span.bold { Some(true) } else { None };
-                    let fmt_font_italic = if span.italic { Some(true) } else { None };
-                    let fmt_font_underline = if span.underline { Some(true) } else { None };
-                    let fmt_font_strikeout = if span.strikeout { Some(true) } else { None };
-                    let (fmt_anchor_href, fmt_is_anchor) = if let Some(ref href) = span.link_href {
-                        (Some(href.clone()), Some(true))
-                    } else {
-                        (None, None)
-                    };
+    let mut blocks: Vec<FragmentBlock> = Vec::new();
+    let mut tables: Vec<FragmentTable> = Vec::new();
 
-                    FragmentElement {
-                        content,
-                        fmt_font_family,
-                        fmt_font_point_size: None,
-                        fmt_font_weight: None,
-                        fmt_font_bold,
-                        fmt_font_italic,
-                        fmt_font_underline,
-                        fmt_font_overline: None,
-                        fmt_font_strikeout,
-                        fmt_letter_spacing: None,
-                        fmt_word_spacing: None,
-                        fmt_anchor_href,
-                        fmt_anchor_names: vec![],
-                        fmt_is_anchor,
-                        fmt_tooltip: None,
-                        fmt_underline_style: None,
-                        fmt_vertical_alignment: None,
-                    }
-                })
-                .collect();
+    for elem in parsed {
+        match elem {
+            ParsedElement::Block(pb) => {
+                let elements: Vec<FragmentElement> =
+                    pb.spans.iter().map(span_to_fragment_element).collect();
+                let plain_text: String = pb.spans.iter().map(|s| s.text.as_str()).collect();
+                let list = pb.list_style.map(|style| FragmentList {
+                    style,
+                    indent: pb.list_indent as i64,
+                    prefix: String::new(),
+                    suffix: String::new(),
+                });
 
-            let plain_text: String = pb.spans.iter().map(|s| s.text.as_str()).collect();
-
-            let list = pb.list_style.map(|style| FragmentList {
-                style,
-                indent: pb.list_indent as i64,
-                prefix: String::new(),
-                suffix: String::new(),
-            });
-
-            FragmentBlock {
-                plain_text,
-                elements,
-                heading_level: pb.heading_level,
-                list,
-                alignment: None,
-                indent: None,
-                text_indent: None,
-                marker: None,
-                top_margin: None,
-                bottom_margin: None,
-                left_margin: None,
-                right_margin: None,
-                tab_positions: vec![],
-                line_height: pb.line_height,
-                non_breakable_lines: pb.non_breakable_lines,
-                direction: pb.direction,
-                background_color: pb.background_color,
-                is_code_block: None,
-                code_language: None,
+                blocks.push(FragmentBlock {
+                    plain_text,
+                    elements,
+                    heading_level: pb.heading_level,
+                    list,
+                    alignment: None,
+                    indent: None,
+                    text_indent: None,
+                    marker: None,
+                    top_margin: None,
+                    bottom_margin: None,
+                    left_margin: None,
+                    right_margin: None,
+                    tab_positions: vec![],
+                    line_height: pb.line_height,
+                    non_breakable_lines: pb.non_breakable_lines,
+                    direction: pb.direction,
+                    background_color: pb.background_color,
+                    is_code_block: None,
+                    code_language: None,
+                });
             }
-        })
-        .collect();
+            ParsedElement::Table(pt) => {
+                let block_insert_index = blocks.len();
+                let num_columns = pt.rows.iter().map(|r| r.len()).max().unwrap_or(0);
+                let num_rows = pt.rows.len();
 
-    let data = serde_json::to_string(&FragmentData {
-        blocks,
-        tables: vec![],
-    })
-    .expect("fragment serialization should not fail");
+                let mut frag_cells: Vec<FragmentTableCell> = Vec::new();
+                for (row_idx, row) in pt.rows.iter().enumerate() {
+                    for (col_idx, cell) in row.iter().enumerate() {
+                        let cell_elements: Vec<FragmentElement> =
+                            cell.spans.iter().map(span_to_fragment_element).collect();
+                        let cell_text: String =
+                            cell.spans.iter().map(|s| s.text.as_str()).collect();
+
+                        frag_cells.push(FragmentTableCell {
+                            row: row_idx,
+                            column: col_idx,
+                            row_span: 1,
+                            column_span: 1,
+                            blocks: vec![FragmentBlock {
+                                plain_text: cell_text,
+                                elements: cell_elements,
+                                heading_level: None,
+                                list: None,
+                                alignment: None,
+                                indent: None,
+                                text_indent: None,
+                                marker: None,
+                                top_margin: None,
+                                bottom_margin: None,
+                                left_margin: None,
+                                right_margin: None,
+                                tab_positions: vec![],
+                                line_height: None,
+                                non_breakable_lines: None,
+                                direction: None,
+                                background_color: None,
+                                is_code_block: None,
+                                code_language: None,
+                            }],
+                            fmt_padding: None,
+                            fmt_border: None,
+                            fmt_vertical_alignment: None,
+                            fmt_background_color: None,
+                        });
+                    }
+                }
+
+                tables.push(FragmentTable {
+                    rows: num_rows,
+                    columns: num_columns,
+                    cells: frag_cells,
+                    block_insert_index,
+                    fmt_border: None,
+                    fmt_cell_spacing: None,
+                    fmt_cell_padding: None,
+                    fmt_width: None,
+                    fmt_alignment: None,
+                    column_widths: vec![],
+                });
+            }
+        }
+    }
+
+    let data = serde_json::to_string(&FragmentData { blocks, tables })
+        .expect("fragment serialization should not fail");
 
     let plain_text = parsed_plain_text_from_data(&data);
 
