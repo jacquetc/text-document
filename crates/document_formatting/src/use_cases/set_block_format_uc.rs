@@ -90,8 +90,15 @@ fn execute_set_block_format(
         let block_start = block.document_position;
         let block_end = block_start + block.text_length;
 
-        // Block overlaps the range if it starts before range_end and ends after range_start
-        if block_start <= range_end && block_end >= range_start {
+        // Block overlaps the range if its text interval [block_start, block_end)
+        // intersects [range_start, range_end].  Empty blocks (text_length == 0)
+        // are included when their position falls inside the range.
+        let overlaps = if block.text_length > 0 {
+            block_start <= range_end && block_end > range_start
+        } else {
+            block_start >= range_start && block_start <= range_end
+        };
+        if overlaps {
             let mut updated = block.clone();
             if let Some(ref a) = dto.alignment {
                 updated.fmt_alignment = Some(alignment_to_entity(a));
