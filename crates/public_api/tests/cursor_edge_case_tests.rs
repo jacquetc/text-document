@@ -391,3 +391,45 @@ fn multi_cursor_cross_block_insert_adjusts() {
     assert_eq!(doc.block_count(), 2);
     assert_eq!(doc.to_plain_text().unwrap(), "Hello\n World");
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// insert_image with selection (Word convention: replaces selection)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn insert_image_with_selection_replaces_text() {
+    let doc = new_doc("Hello World");
+    let cursor = doc.cursor();
+    // Select "World" (6..11)
+    cursor.set_position(6, MoveMode::MoveAnchor);
+    cursor.set_position(11, MoveMode::KeepAnchor);
+    cursor.insert_image("photo.png", 100, 50).unwrap();
+    // "World" deleted, image inserted → "Hello " + image = 7 chars
+    assert_eq!(doc.character_count(), 7);
+}
+
+#[test]
+fn insert_image_with_cross_block_selection_replaces() {
+    let doc = new_doc("Hello\nWorld");
+    let cursor = doc.cursor();
+    // Select "lo\nWor" (3..9)
+    cursor.set_position(3, MoveMode::MoveAnchor);
+    cursor.set_position(9, MoveMode::KeepAnchor);
+    cursor.insert_image("bridge.png", 200, 100).unwrap();
+    // Cross-block selection deleted (blocks merged), image inserted
+    // "Hel" + image + "ld" = 6 chars, 1 block
+    assert_eq!(doc.character_count(), 6);
+    assert_eq!(doc.block_count(), 1);
+}
+
+#[test]
+fn insert_image_with_selection_undo_restores() {
+    let doc = new_doc("Hello World");
+    let cursor = doc.cursor();
+    cursor.set_position(6, MoveMode::MoveAnchor);
+    cursor.set_position(11, MoveMode::KeepAnchor);
+    cursor.insert_image("photo.png", 100, 50).unwrap();
+    assert_eq!(doc.character_count(), 7);
+    doc.undo().unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "Hello World");
+}
