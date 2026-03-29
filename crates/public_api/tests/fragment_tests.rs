@@ -1,6 +1,6 @@
 use text_document::{
     Alignment, BlockFormat, DocumentFragment, FlowElement, FragmentContent, ListStyle, MoveMode,
-    MoveOperation, SelectionType, TextDocument, TextFormat,
+    MoveOperation, SelectionType, TextDocument,
 };
 
 fn new_doc_with_text(text: &str) -> TextDocument {
@@ -26,7 +26,10 @@ fn new_fragment_is_empty() {
     let frag = DocumentFragment::new();
     assert!(frag.is_empty());
     assert_eq!(frag.to_plain_text(), "");
-    assert_eq!(frag.to_html(), "<html><head><meta charset=\"utf-8\"></head><body></body></html>");
+    assert_eq!(
+        frag.to_html(),
+        "<html><head><meta charset=\"utf-8\"></head><body></body></html>"
+    );
     assert_eq!(frag.to_markdown(), "");
 }
 
@@ -131,7 +134,10 @@ fn from_document_with_heading() {
 #[test]
 fn from_document_with_list() {
     let doc = TextDocument::new();
-    doc.set_markdown("- alpha\n- beta\n- gamma").unwrap().wait().unwrap();
+    doc.set_markdown("- alpha\n- beta\n- gamma")
+        .unwrap()
+        .wait()
+        .unwrap();
     let frag = DocumentFragment::from_document(&doc).unwrap();
 
     let doc2 = insert_into_fresh_doc(&frag);
@@ -147,7 +153,9 @@ fn from_document_with_list() {
 fn from_document_with_table() {
     let doc = TextDocument::new();
     doc.set_html("<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>")
-        .unwrap().wait().unwrap();
+        .unwrap()
+        .wait()
+        .unwrap();
     let frag = DocumentFragment::from_document(&doc).unwrap();
 
     let doc2 = insert_into_fresh_doc(&frag);
@@ -169,12 +177,18 @@ fn from_document_with_table() {
 #[test]
 fn from_document_with_bold_and_italic() {
     let doc = TextDocument::new();
-    doc.set_html("<p><b>bold</b> <em>italic</em></p>").unwrap().wait().unwrap();
+    doc.set_html("<p><b>bold</b> <em>italic</em></p>")
+        .unwrap()
+        .wait()
+        .unwrap();
     let frag = DocumentFragment::from_document(&doc).unwrap();
 
     let doc2 = insert_into_fresh_doc(&frag);
     let blocks = doc2.blocks();
-    let block = blocks.iter().find(|b| b.text().contains("bold")).expect("Should have bold block");
+    let block = blocks
+        .iter()
+        .find(|b| b.text().contains("bold"))
+        .expect("Should have bold block");
     let fragments = block.fragments();
     let bold_frag = fragments.iter().find(|f| match f {
         FragmentContent::Text { text, .. } => text == "bold",
@@ -218,7 +232,11 @@ fn from_html_heading_levels() {
         let blocks = doc.blocks();
         let expected_text = format!("Level {}", level);
         let heading = blocks.iter().find(|b| b.text() == expected_text);
-        assert!(heading.is_some(), "h{}: should produce block with text", level);
+        assert!(
+            heading.is_some(),
+            "h{}: should produce block with text",
+            level
+        );
         assert_eq!(
             heading.unwrap().block_format().heading_level,
             Some(level),
@@ -233,7 +251,9 @@ fn from_html_bold() {
     let frag = DocumentFragment::from_html("<b>strong text</b>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let bold = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "strong text"));
+    let bold = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "strong text"));
     assert!(bold.is_some());
     if let FragmentContent::Text { format, .. } = bold.unwrap() {
         assert_eq!(format.font_bold, Some(true));
@@ -245,7 +265,9 @@ fn from_html_italic() {
     let frag = DocumentFragment::from_html("<em>emphasis</em>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let it = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "emphasis"));
+    let it = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "emphasis"));
     assert!(it.is_some());
     if let FragmentContent::Text { format, .. } = it.unwrap() {
         assert_eq!(format.font_italic, Some(true));
@@ -257,7 +279,9 @@ fn from_html_underline() {
     let frag = DocumentFragment::from_html("<u>underlined</u>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let u = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "underlined"));
+    let u = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "underlined"));
     assert!(u.is_some());
     if let FragmentContent::Text { format, .. } = u.unwrap() {
         assert_eq!(format.font_underline, Some(true));
@@ -269,7 +293,9 @@ fn from_html_strikeout() {
     let frag = DocumentFragment::from_html("<s>deleted</s>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let s = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "deleted"));
+    let s = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "deleted"));
     assert!(s.is_some());
     if let FragmentContent::Text { format, .. } = s.unwrap() {
         assert_eq!(format.font_strikeout, Some(true));
@@ -281,7 +307,9 @@ fn from_html_code_monospace() {
     let frag = DocumentFragment::from_html("<code>snippet</code>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let c = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "snippet"));
+    let c = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "snippet"));
     assert!(c.is_some());
     if let FragmentContent::Text { format, .. } = c.unwrap() {
         assert_eq!(format.font_family.as_deref(), Some("monospace"));
@@ -293,7 +321,9 @@ fn from_html_link() {
     let frag = DocumentFragment::from_html("<a href=\"https://example.com\">click</a>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let a = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "click"));
+    let a = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "click"));
     assert!(a.is_some());
     if let FragmentContent::Text { format, .. } = a.unwrap() {
         assert_eq!(format.is_anchor, Some(true));
@@ -306,7 +336,9 @@ fn from_html_nested_bold_italic() {
     let frag = DocumentFragment::from_html("<b><em>bold-italic</em></b>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let bi = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold-italic"));
+    let bi = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold-italic"));
     assert!(bi.is_some());
     if let FragmentContent::Text { format, .. } = bi.unwrap() {
         assert_eq!(format.font_bold, Some(true));
@@ -320,12 +352,21 @@ fn from_html_unordered_list() {
     let doc = insert_into_fresh_doc(&frag);
     let blocks = doc.blocks();
     let list_blocks: Vec<_> = blocks.iter().filter(|b| b.list().is_some()).collect();
-    assert_eq!(list_blocks.len(), 3, "Expected 3 list items, got {} (total blocks: {})", list_blocks.len(), blocks.len());
+    assert_eq!(
+        list_blocks.len(),
+        3,
+        "Expected 3 list items, got {} (total blocks: {})",
+        list_blocks.len(),
+        blocks.len()
+    );
     for (i, expected) in ["one", "two", "three"].iter().enumerate() {
         assert_eq!(list_blocks[i].text(), *expected);
         let style = list_blocks[i].list().unwrap().style();
         assert!(
-            matches!(style, ListStyle::Disc | ListStyle::Circle | ListStyle::Square),
+            matches!(
+                style,
+                ListStyle::Disc | ListStyle::Circle | ListStyle::Square
+            ),
             "Expected unordered style, got: {:?}",
             style
         );
@@ -395,37 +436,46 @@ fn from_html_multi_paragraph() {
 
 #[test]
 fn from_html_mixed_formatting() {
-    let frag = DocumentFragment::from_html(
-        "<p><b>B</b> <em>I</em> <u>U</u> <s>S</s> <code>C</code></p>",
-    );
+    let frag =
+        DocumentFragment::from_html("<p><b>B</b> <em>I</em> <u>U</u> <s>S</s> <code>C</code></p>");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
 
-    let bold = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "B"));
+    let bold = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "B"));
     assert!(bold.is_some());
     if let FragmentContent::Text { format, .. } = bold.unwrap() {
         assert_eq!(format.font_bold, Some(true));
     }
 
-    let italic = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "I"));
+    let italic = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "I"));
     assert!(italic.is_some());
     if let FragmentContent::Text { format, .. } = italic.unwrap() {
         assert_eq!(format.font_italic, Some(true));
     }
 
-    let underline = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "U"));
+    let underline = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "U"));
     assert!(underline.is_some());
     if let FragmentContent::Text { format, .. } = underline.unwrap() {
         assert_eq!(format.font_underline, Some(true));
     }
 
-    let strike = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "S"));
+    let strike = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "S"));
     assert!(strike.is_some());
     if let FragmentContent::Text { format, .. } = strike.unwrap() {
         assert_eq!(format.font_strikeout, Some(true));
     }
 
-    let code = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "C"));
+    let code = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "C"));
     assert!(code.is_some());
     if let FragmentContent::Text { format, .. } = code.unwrap() {
         assert_eq!(format.font_family.as_deref(), Some("monospace"));
@@ -471,7 +521,9 @@ fn from_markdown_bold() {
     let frag = DocumentFragment::from_markdown("**bold text**");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let b = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold text"));
+    let b = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold text"));
     assert!(b.is_some());
     if let FragmentContent::Text { format, .. } = b.unwrap() {
         assert_eq!(format.font_bold, Some(true));
@@ -483,7 +535,9 @@ fn from_markdown_italic() {
     let frag = DocumentFragment::from_markdown("*italic text*");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let i = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "italic text"));
+    let i = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "italic text"));
     assert!(i.is_some());
     if let FragmentContent::Text { format, .. } = i.unwrap() {
         assert_eq!(format.font_italic, Some(true));
@@ -495,7 +549,9 @@ fn from_markdown_bold_italic() {
     let frag = DocumentFragment::from_markdown("***bold-italic***");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let bi = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold-italic"));
+    let bi = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold-italic"));
     assert!(bi.is_some());
     if let FragmentContent::Text { format, .. } = bi.unwrap() {
         assert_eq!(format.font_bold, Some(true));
@@ -508,7 +564,9 @@ fn from_markdown_strikeout() {
     let frag = DocumentFragment::from_markdown("~~deleted~~");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let s = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "deleted"));
+    let s = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "deleted"));
     assert!(s.is_some());
     if let FragmentContent::Text { format, .. } = s.unwrap() {
         assert_eq!(format.font_strikeout, Some(true));
@@ -520,7 +578,9 @@ fn from_markdown_inline_code() {
     let frag = DocumentFragment::from_markdown("`code`");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let c = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "code"));
+    let c = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "code"));
     assert!(c.is_some());
     if let FragmentContent::Text { format, .. } = c.unwrap() {
         assert_eq!(format.font_family.as_deref(), Some("monospace"));
@@ -532,7 +592,9 @@ fn from_markdown_link() {
     let frag = DocumentFragment::from_markdown("[click](https://example.com)");
     let doc = insert_into_fresh_doc(&frag);
     let frags = doc.blocks()[0].fragments();
-    let a = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "click"));
+    let a = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "click"));
     assert!(a.is_some());
     if let FragmentContent::Text { format, .. } = a.unwrap() {
         assert_eq!(format.is_anchor, Some(true));
@@ -551,7 +613,10 @@ fn from_markdown_unordered_list() {
         assert_eq!(list_blocks[i].text(), *expected);
         let style = list_blocks[i].list().unwrap().style();
         assert!(
-            matches!(style, ListStyle::Disc | ListStyle::Circle | ListStyle::Square),
+            matches!(
+                style,
+                ListStyle::Disc | ListStyle::Circle | ListStyle::Square
+            ),
             "Expected unordered style, got: {:?}",
             style
         );
@@ -666,15 +731,24 @@ fn extract_full_document_selection() {
 #[test]
 fn extract_preserves_formatting() {
     let doc = TextDocument::new();
-    doc.set_html("<p><b>bold</b> plain</p>").unwrap().wait().unwrap();
+    doc.set_html("<p><b>bold</b> plain</p>")
+        .unwrap()
+        .wait()
+        .unwrap();
     let cursor = doc.cursor();
     cursor.select(SelectionType::Document);
     let frag = cursor.selection();
 
     let doc2 = insert_into_fresh_doc(&frag);
-    let block = doc2.blocks().into_iter().find(|b| b.text().contains("bold")).expect("Should have bold block");
+    let block = doc2
+        .blocks()
+        .into_iter()
+        .find(|b| b.text().contains("bold"))
+        .expect("Should have bold block");
     let frags = block.fragments();
-    let bold = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold"));
+    let bold = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold"));
     assert!(bold.is_some());
     if let FragmentContent::Text { format, .. } = bold.unwrap() {
         assert_eq!(format.font_bold, Some(true));
@@ -746,16 +820,24 @@ fn insert_fragment_replaces_selection() {
 fn insert_html_fragment_preserves_formatting() {
     let frag = DocumentFragment::from_html("<b>Bold</b> <em>Italic</em>");
     let doc = insert_into_fresh_doc(&frag);
-    let block = doc.blocks().into_iter().find(|b| b.text().contains("Bold")).expect("Should have block with Bold");
+    let block = doc
+        .blocks()
+        .into_iter()
+        .find(|b| b.text().contains("Bold"))
+        .expect("Should have block with Bold");
     let frags = block.fragments();
 
-    let bold = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "Bold"));
+    let bold = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "Bold"));
     assert!(bold.is_some());
     if let FragmentContent::Text { format, .. } = bold.unwrap() {
         assert_eq!(format.font_bold, Some(true));
     }
 
-    let italic = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "Italic"));
+    let italic = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "Italic"));
     assert!(italic.is_some());
     if let FragmentContent::Text { format, .. } = italic.unwrap() {
         assert_eq!(format.font_italic, Some(true));
@@ -807,7 +889,9 @@ fn cursor_insert_html_merges_inline() {
 
     // Verify the bold formatting via block fragments
     let frags = doc.blocks()[0].fragments();
-    let bold = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "beautiful"));
+    let bold = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "beautiful"));
     assert!(bold.is_some());
     if let FragmentContent::Text { format, .. } = bold.unwrap() {
         assert_eq!(format.font_bold, Some(true));
@@ -844,13 +928,22 @@ fn round_trip_plain_text() {
 #[test]
 fn round_trip_formatted_document() {
     let doc1 = TextDocument::new();
-    doc1.set_html("<p><b>bold</b> <em>italic</em></p>").unwrap().wait().unwrap();
+    doc1.set_html("<p><b>bold</b> <em>italic</em></p>")
+        .unwrap()
+        .wait()
+        .unwrap();
     let frag = DocumentFragment::from_document(&doc1).unwrap();
 
     let doc2 = insert_into_fresh_doc(&frag);
-    let block = doc2.blocks().into_iter().find(|b| b.text().contains("bold")).expect("Should have bold block");
+    let block = doc2
+        .blocks()
+        .into_iter()
+        .find(|b| b.text().contains("bold"))
+        .expect("Should have bold block");
     let frags = block.fragments();
-    let bold = frags.iter().find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold"));
+    let bold = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text == "bold"));
     assert!(bold.is_some());
     if let FragmentContent::Text { format, .. } = bold.unwrap() {
         assert_eq!(format.font_bold, Some(true));
@@ -860,7 +953,10 @@ fn round_trip_formatted_document() {
 #[test]
 fn round_trip_list_document() {
     let doc1 = TextDocument::new();
-    doc1.set_markdown("1. first\n2. second").unwrap().wait().unwrap();
+    doc1.set_markdown("1. first\n2. second")
+        .unwrap()
+        .wait()
+        .unwrap();
     let frag = DocumentFragment::from_document(&doc1).unwrap();
 
     let doc2 = insert_into_fresh_doc(&frag);
@@ -873,7 +969,9 @@ fn round_trip_list_document() {
 fn round_trip_table_document() {
     let doc1 = TextDocument::new();
     doc1.set_html("<table><tr><td>X</td><td>Y</td></tr></table>")
-        .unwrap().wait().unwrap();
+        .unwrap()
+        .wait()
+        .unwrap();
     let frag = DocumentFragment::from_document(&doc1).unwrap();
 
     let doc2 = insert_into_fresh_doc(&frag);
@@ -908,7 +1006,11 @@ fn to_html_single_inline_no_p_wrapper() {
     let frag = DocumentFragment::from_html("<b>bold</b>");
     let html = frag.to_html();
     assert!(html.contains("<strong>bold</strong>"), "got: {}", html);
-    assert!(!html.contains("<p>"), "Inline-only should not wrap in <p>, got: {}", html);
+    assert!(
+        !html.contains("<p>"),
+        "Inline-only should not wrap in <p>, got: {}",
+        html
+    );
 }
 
 #[test]
@@ -918,7 +1020,11 @@ fn to_html_single_plain_block_no_p_wrapper() {
     cursor.select(SelectionType::Document);
     let frag = cursor.selection();
     let html = frag.to_html();
-    assert!(!html.contains("<p>"), "Single plain block → no <p>, got: {}", html);
+    assert!(
+        !html.contains("<p>"),
+        "Single plain block → no <p>, got: {}",
+        html
+    );
     assert!(html.contains("Hello world"));
 }
 
@@ -938,7 +1044,12 @@ fn to_html_heading_levels() {
         let html = frag.to_html();
         let open = format!("<h{}>", level);
         let close = format!("</h{}>", level);
-        assert!(html.contains(&open) && html.contains(&close), "h{}: got: {}", level, html);
+        assert!(
+            html.contains(&open) && html.contains(&close),
+            "h{}: got: {}",
+            level,
+            html
+        );
     }
 }
 
@@ -962,7 +1073,8 @@ fn to_html_ordered_list() {
 
 #[test]
 fn to_html_inline_formatting_all() {
-    let frag = DocumentFragment::from_html("<p><b>B</b><em>I</em><u>U</u><s>S</s><code>C</code></p>");
+    let frag =
+        DocumentFragment::from_html("<p><b>B</b><em>I</em><u>U</u><s>S</s><code>C</code></p>");
     let html = frag.to_html();
     assert!(html.contains("<strong>B</strong>"), "bold, got: {}", html);
     assert!(html.contains("<em>I</em>"), "italic, got: {}", html);
@@ -995,8 +1107,16 @@ fn to_html_table() {
     let md = "| H1 | H2 |\n| --- | --- |\n| c1 | c2 |";
     let frag = DocumentFragment::from_markdown(md);
     let html = frag.to_html();
-    assert!(html.contains("<table>") && html.contains("</table>"), "got: {}", html);
-    assert!(html.contains("<tr>") && html.contains("<td>"), "got: {}", html);
+    assert!(
+        html.contains("<table>") && html.contains("</table>"),
+        "got: {}",
+        html
+    );
+    assert!(
+        html.contains("<tr>") && html.contains("<td>"),
+        "got: {}",
+        html
+    );
     assert!(html.contains("H1") && html.contains("c2"), "got: {}", html);
 }
 
@@ -1065,7 +1185,11 @@ fn to_markdown_multi_paragraph() {
     let frag = DocumentFragment::from_plain_text("Para 1\nPara 2");
     let md = frag.to_markdown();
     assert!(md.contains("Para 1") && md.contains("Para 2"));
-    assert!(md.contains("\n\n"), "Paragraphs separated by \\n\\n, got: {:?}", md);
+    assert!(
+        md.contains("\n\n"),
+        "Paragraphs separated by \\n\\n, got: {:?}",
+        md
+    );
 }
 
 #[test]
@@ -1118,7 +1242,11 @@ fn to_markdown_inline_code() {
 fn to_markdown_link() {
     let frag = DocumentFragment::from_html("<a href=\"https://example.com\">click</a>");
     let md = frag.to_markdown();
-    assert!(md.contains("[") && md.contains("](https://example.com)"), "got: {:?}", md);
+    assert!(
+        md.contains("[") && md.contains("](https://example.com)"),
+        "got: {:?}",
+        md
+    );
 }
 
 #[test]
@@ -1134,7 +1262,11 @@ fn to_markdown_unordered_list() {
 fn to_markdown_ordered_list() {
     let frag = DocumentFragment::from_markdown("1. first\n2. second\n3. third");
     let md = frag.to_markdown();
-    assert!(md.contains("1. ") && md.contains("2. ") && md.contains("3. "), "got: {:?}", md);
+    assert!(
+        md.contains("1. ") && md.contains("2. ") && md.contains("3. "),
+        "got: {:?}",
+        md
+    );
 }
 
 #[test]
@@ -1159,7 +1291,11 @@ fn to_markdown_mixed_blocks_and_table() {
     let input = "Before\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter";
     let frag = DocumentFragment::from_markdown(input);
     let md = frag.to_markdown();
-    assert!(md.contains("Before") && md.contains("|") && md.contains("After"), "got: {:?}", md);
+    assert!(
+        md.contains("Before") && md.contains("|") && md.contains("After"),
+        "got: {:?}",
+        md
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1208,14 +1344,30 @@ fn markdown_round_trip_complex() {
     let frag = DocumentFragment::from_markdown(input);
     let md = frag.to_markdown();
 
-    assert!(md.contains("## ") && md.contains("Title"), "heading, got: {:?}", md);
+    assert!(
+        md.contains("## ") && md.contains("Title"),
+        "heading, got: {:?}",
+        md
+    );
     assert!(md.contains("**bold**"), "bold, got: {:?}", md);
     assert!(md.contains("*italic*"), "italic, got: {:?}", md);
     assert!(md.contains("~~strike~~"), "strike, got: {:?}", md);
     assert!(md.contains("`code`"), "code, got: {:?}", md);
-    assert!(md.contains("- item 1") && md.contains("- item 2"), "ul, got: {:?}", md);
-    assert!(md.contains("1. ") && md.contains("2. "), "ol, got: {:?}", md);
-    assert!(md.contains("| H1") && md.contains("| b"), "table, got: {:?}", md);
+    assert!(
+        md.contains("- item 1") && md.contains("- item 2"),
+        "ul, got: {:?}",
+        md
+    );
+    assert!(
+        md.contains("1. ") && md.contains("2. "),
+        "ol, got: {:?}",
+        md
+    );
+    assert!(
+        md.contains("| H1") && md.contains("| b"),
+        "table, got: {:?}",
+        md
+    );
 
     // Second round-trip should be stable
     let frag2 = DocumentFragment::from_markdown(&md);
@@ -1235,7 +1387,11 @@ fn html_to_markdown_complex() {
         "<table><tr><td>a</td><td>b</td></tr></table>",
     ));
     let md = frag.to_markdown();
-    assert!(md.contains("## ") && md.contains("Title"), "heading, got: {:?}", md);
+    assert!(
+        md.contains("## ") && md.contains("Title"),
+        "heading, got: {:?}",
+        md
+    );
     assert!(md.contains("- "), "list, got: {:?}", md);
     assert!(md.contains("|") && md.contains("a"), "table, got: {:?}", md);
 }
@@ -1295,33 +1451,47 @@ fn complex_document_fragment_round_trip() {
     let bold_block = blocks.iter().find(|b| b.text().contains("bold text"));
     assert!(bold_block.is_some());
     let frags = bold_block.unwrap().fragments();
-    let bold = frags.iter().find(|f| {
-        matches!(f, FragmentContent::Text { text, .. } if text.contains("bold text"))
-    });
+    let bold = frags
+        .iter()
+        .find(|f| matches!(f, FragmentContent::Text { text, .. } if text.contains("bold text")));
     assert!(bold.is_some());
     if let FragmentContent::Text { format, .. } = bold.unwrap() {
         assert_eq!(format.font_bold, Some(true));
     }
 
     // Verify plain paragraph
-    let plain = blocks
-        .iter()
-        .find(|b| b.text() == "A plain paragraph.");
+    let plain = blocks.iter().find(|b| b.text() == "A plain paragraph.");
     assert!(plain.is_some());
     assert_eq!(plain.unwrap().block_format().heading_level, None);
     assert!(plain.unwrap().list().is_none());
 
     // to_html should contain all content
     let html = frag.to_html();
-    assert!(html.contains("<h1>") && html.contains("Title"), "heading in html, got: {}", html);
+    assert!(
+        html.contains("<h1>") && html.contains("Title"),
+        "heading in html, got: {}",
+        html
+    );
     assert!(html.contains("<strong>"), "bold in html, got: {}", html);
-    assert!(html.contains("A plain paragraph."), "paragraph in html, got: {}", html);
+    assert!(
+        html.contains("A plain paragraph."),
+        "paragraph in html, got: {}",
+        html
+    );
 
     // to_markdown should contain all content
     let md = frag.to_markdown();
-    assert!(md.contains("# ") && md.contains("Title"), "heading in md, got: {:?}", md);
+    assert!(
+        md.contains("# ") && md.contains("Title"),
+        "heading in md, got: {:?}",
+        md
+    );
     assert!(md.contains("**bold text**"), "bold in md, got: {:?}", md);
-    assert!(md.contains("A plain paragraph"), "paragraph in md, got: {:?}", md);
+    assert!(
+        md.contains("A plain paragraph"),
+        "paragraph in md, got: {:?}",
+        md
+    );
 }
 
 #[test]
@@ -1332,7 +1502,9 @@ fn complex_list_table_round_trip() {
         "- apples\n- bananas\n- cherries\n\n",
         "| Fruit | Price |\n| --- | --- |\n| Apple | 1.50 |\n| Banana | 0.75 |",
     ))
-    .unwrap().wait().unwrap();
+    .unwrap()
+    .wait()
+    .unwrap();
 
     let frag = DocumentFragment::from_document(&doc).unwrap();
     let doc2 = insert_into_fresh_doc(&frag);
@@ -1367,7 +1539,11 @@ fn complex_list_table_round_trip() {
 
     // Verify to_markdown preserves everything
     let md = frag.to_markdown();
-    assert!(md.contains("## ") && md.contains("Shopping"), "heading, got: {:?}", md);
+    assert!(
+        md.contains("## ") && md.contains("Shopping"),
+        "heading, got: {:?}",
+        md
+    );
     assert!(md.contains("- apples"), "list, got: {:?}", md);
     assert!(md.contains("| Fruit"), "table, got: {:?}", md);
 

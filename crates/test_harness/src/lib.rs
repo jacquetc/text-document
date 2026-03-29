@@ -397,13 +397,7 @@ pub fn insert_table(
         let mut b = block_controller::get(db_context, &bid)?
             .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
         b.document_position = current_pos;
-        block_controller::update(
-            db_context,
-            event_hub,
-            undo_redo_manager,
-            None,
-            &b.into(),
-        )?;
+        block_controller::update(db_context, event_hub, undo_redo_manager, None, &b.into())?;
         current_pos += 1;
     }
 

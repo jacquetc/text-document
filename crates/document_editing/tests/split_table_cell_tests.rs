@@ -6,9 +6,7 @@ use anyhow::Result;
 use document_editing::document_editing_controller;
 use document_editing::{InsertTableDto, MergeTableCellsDto, SplitTableCellDto};
 
-use test_harness::{
-    get_document_stats, get_sorted_cells, setup_with_text, table_cell_controller,
-};
+use test_harness::{get_document_stats, get_sorted_cells, setup_with_text, table_cell_controller};
 
 // ═══════════════════════════════════════════════════════════════════
 // SplitTableCell additional tests

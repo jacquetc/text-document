@@ -8,8 +8,8 @@ use document_formatting::document_formatting_controller;
 use document_formatting::{Alignment, MarkerType, SetBlockFormatDto};
 
 use test_harness::{
-    FrameRelationshipField, block_controller, create_list,
-    frame_controller, get_block_ids, get_sorted_cells, insert_table, setup_with_text,
+    FrameRelationshipField, block_controller, create_list, frame_controller, get_block_ids,
+    get_sorted_cells, insert_table, setup_with_text,
 };
 
 #[test]
@@ -44,10 +44,16 @@ fn test_set_block_format_all_fields() -> Result<()> {
     let block_ids = get_block_ids(&db)?;
     let block = block_controller::get(&db, &block_ids[0])?.unwrap();
 
-    assert_eq!(block.fmt_alignment, Some(common::entities::Alignment::Justify));
+    assert_eq!(
+        block.fmt_alignment,
+        Some(common::entities::Alignment::Justify)
+    );
     assert_eq!(block.fmt_heading_level, Some(3));
     assert_eq!(block.fmt_indent, Some(2));
-    assert_eq!(block.fmt_marker, Some(common::entities::MarkerType::Checked));
+    assert_eq!(
+        block.fmt_marker,
+        Some(common::entities::MarkerType::Checked)
+    );
     assert_eq!(block.fmt_line_height, Some(150));
     assert_eq!(block.fmt_non_breakable_lines, Some(true));
     assert_eq!(
@@ -84,7 +90,11 @@ fn test_set_block_format_heading_level_clamping() -> Result<()> {
 
     let block_ids = get_block_ids(&db)?;
     let block = block_controller::get(&db, &block_ids[0])?.unwrap();
-    assert_eq!(block.fmt_heading_level, Some(6), "Heading level should be clamped to 6");
+    assert_eq!(
+        block.fmt_heading_level,
+        Some(6),
+        "Heading level should be clamped to 6"
+    );
 
     // Heading level < 0 should be clamped to 0
     document_formatting_controller::set_block_format(
@@ -101,7 +111,11 @@ fn test_set_block_format_heading_level_clamping() -> Result<()> {
     )?;
 
     let block = block_controller::get(&db, &block_ids[0])?.unwrap();
-    assert_eq!(block.fmt_heading_level, Some(0), "Heading level should be clamped to 0");
+    assert_eq!(
+        block.fmt_heading_level,
+        Some(0),
+        "Heading level should be clamped to 0"
+    );
     Ok(())
 }
 
@@ -110,7 +124,14 @@ fn test_set_block_format_on_list_items() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("First\nSecond\nThird")?;
 
     // Create list spanning all blocks
-    let list_result = create_list(&db, &hub, &mut urm, 0, 18, common::entities::ListStyle::Decimal)?;
+    let list_result = create_list(
+        &db,
+        &hub,
+        &mut urm,
+        0,
+        18,
+        common::entities::ListStyle::Decimal,
+    )?;
 
     // Format only the second list item (position 6..12 = "Second")
     document_formatting_controller::set_block_format(
@@ -137,9 +158,15 @@ fn test_set_block_format_on_list_items() -> Result<()> {
 
     // Second block should be formatted
     let block_1 = block_controller::get(&db, &block_ids[1])?.unwrap();
-    assert_eq!(block_1.fmt_alignment, Some(common::entities::Alignment::Center));
+    assert_eq!(
+        block_1.fmt_alignment,
+        Some(common::entities::Alignment::Center)
+    );
     assert_eq!(block_1.fmt_indent, Some(2));
-    assert_eq!(block_1.fmt_marker, Some(common::entities::MarkerType::Unchecked));
+    assert_eq!(
+        block_1.fmt_marker,
+        Some(common::entities::MarkerType::Unchecked)
+    );
     assert_eq!(block_1.list, Some(list_result.list_id));
 
     // Third block should not be formatted
@@ -180,7 +207,10 @@ fn test_set_block_format_in_table_cell() -> Result<()> {
     let cell_block_after = block_controller::get(&db, &cell_block_ids[0])?.unwrap();
     assert_eq!(cell_block_after.fmt_is_code_block, Some(true));
     assert_eq!(cell_block_after.fmt_code_language, Some("python".into()));
-    assert_eq!(cell_block_after.fmt_background_color, Some("#1e1e1e".into()));
+    assert_eq!(
+        cell_block_after.fmt_background_color,
+        Some("#1e1e1e".into())
+    );
 
     // Verify "Before" block is unaffected
     let main_block_ids = get_block_ids(&db)?;
@@ -265,7 +295,11 @@ fn test_set_block_format_preserves_unset_fields() -> Result<()> {
 
     let block_ids = get_block_ids(&db)?;
     let block = block_controller::get(&db, &block_ids[0])?.unwrap();
-    assert_eq!(block.fmt_heading_level, Some(1), "Heading should be preserved");
+    assert_eq!(
+        block.fmt_heading_level,
+        Some(1),
+        "Heading should be preserved"
+    );
     assert_eq!(
         block.fmt_alignment,
         Some(common::entities::Alignment::Center),

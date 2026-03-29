@@ -372,10 +372,11 @@ fn test_insert_formatted_text_replaces_selection() -> Result<()> {
     let mut found_bold_earth = false;
     for elem_id in &elem_ids {
         let elem = inline_element_controller::get(&db, elem_id)?.unwrap();
-        if let common::entities::InlineContent::Text(ref t) = elem.content {
-            if t.contains("Earth") && elem.fmt_font_bold == Some(true) {
-                found_bold_earth = true;
-            }
+        if let common::entities::InlineContent::Text(ref t) = elem.content
+            && t.contains("Earth")
+            && elem.fmt_font_bold == Some(true)
+        {
+            found_bold_earth = true;
         }
     }
     assert!(found_bold_earth, "Should find bold 'Earth' element");

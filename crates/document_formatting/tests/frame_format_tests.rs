@@ -4,8 +4,8 @@ extern crate text_document_formatting as document_formatting;
 
 use anyhow::Result;
 
-use document_formatting::document_formatting_controller;
 use document_formatting::SetFrameFormatDto;
+use document_formatting::document_formatting_controller;
 
 use test_harness::{
     frame_controller, get_frame_id, get_sorted_cells, insert_frame, insert_table, setup_with_text,

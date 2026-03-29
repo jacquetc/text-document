@@ -88,8 +88,7 @@ impl DocumentFragment {
 
     /// Create a fragment from HTML.
     pub fn from_html(html: &str) -> Self {
-        let parsed =
-            frontend::common::parser_tools::content_parser::parse_html_elements(html);
+        let parsed = frontend::common::parser_tools::content_parser::parse_html_elements(html);
         parsed_elements_to_fragment(parsed)
     }
 

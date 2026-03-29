@@ -6,10 +6,10 @@ use anyhow::Result;
 
 use document_editing::document_editing_controller;
 use document_editing::{
-    AddBlockToListDto, CreateListDto, InsertBlockDto, InsertFrameDto,
-    InsertMarkdownAtPositionDto, InsertTableColumnDto, InsertTableDto, InsertTableRowDto,
-    InsertTextDto, ListStyle, MergeTableCellsDto, RemoveBlockFromListDto, RemoveTableColumnDto,
-    RemoveTableDto, RemoveTableRowDto, SplitTableCellDto,
+    AddBlockToListDto, CreateListDto, InsertBlockDto, InsertFrameDto, InsertMarkdownAtPositionDto,
+    InsertTableColumnDto, InsertTableDto, InsertTableRowDto, InsertTextDto, ListStyle,
+    MergeTableCellsDto, RemoveBlockFromListDto, RemoveTableColumnDto, RemoveTableDto,
+    RemoveTableRowDto, SplitTableCellDto,
 };
 
 use test_harness::{
@@ -109,8 +109,7 @@ fn test_frame_with_table_and_list() -> Result<()> {
     assert!(_frame_result.frame_id > 0);
 
     // After inserting frame, the document should have 2 frames
-    let root_rels =
-        root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
+    let root_rels = root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
     let doc_id = root_rels[0];
     let frame_ids =
         document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Frames)?;
@@ -494,8 +493,7 @@ fn test_frame_insertion_with_existing_list() -> Result<()> {
     )?;
 
     // Document should have 2 frames
-    let root_rels =
-        root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
+    let root_rels = root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
     let doc_id = root_rels[0];
     let frame_ids =
         document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Frames)?;
@@ -908,8 +906,7 @@ fn test_complex_frame_table_list_undo_sequence() -> Result<()> {
     )?;
 
     // Verify: 2 frames, 1 table, list on first block
-    let root_rels =
-        root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
+    let root_rels = root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
     let doc_id = root_rels[0];
     let frame_ids =
         document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Frames)?;
@@ -1082,8 +1079,7 @@ fn test_insert_table_preserves_frame_relationships() -> Result<()> {
         },
     )?;
 
-    let root_rels =
-        root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
+    let root_rels = root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?;
     let doc_id = root_rels[0];
     let frame_ids =
         document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Frames)?;
@@ -1092,7 +1088,9 @@ fn test_insert_table_preserves_frame_relationships() -> Result<()> {
     // Verify sub-frame has parent
     let sub_frame =
         frame_controller::get(&db, &(frame_result.frame_id as u64))?.expect("Sub-frame not found");
-    let parent_id = sub_frame.parent_frame.expect("Sub-frame should have parent");
+    let parent_id = sub_frame
+        .parent_frame
+        .expect("Sub-frame should have parent");
 
     // Insert a table
     let text = export_text(&db, &hub)?;

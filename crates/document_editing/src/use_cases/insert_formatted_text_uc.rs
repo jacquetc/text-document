@@ -52,7 +52,7 @@ struct SimpleUndoData {
 }
 
 enum InsertFormattedTextUndo {
-    Simple(SimpleUndoData),
+    Simple(Box<SimpleUndoData>),
     SelectionReplacement(common::snapshot::EntityTreeSnapshot),
 }
 
@@ -502,7 +502,7 @@ fn execute_insert_simple(
         InsertFormattedTextResultDto {
             new_position: position + text_len,
         },
-        InsertFormattedTextUndo::Simple(undo_data),
+        InsertFormattedTextUndo::Simple(Box::new(undo_data)),
     ))
 }
 

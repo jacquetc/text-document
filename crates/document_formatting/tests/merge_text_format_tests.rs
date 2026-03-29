@@ -51,14 +51,15 @@ fn test_merge_text_format_empty_family_preserves_existing() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids = block_controller::get_relationship(
-        &db,
-        &block_ids[0],
-        &BlockRelationshipField::Elements,
-    )?;
+    let elem_ids =
+        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
     let elem = inline_element_controller::get(&db, &elem_ids[0])?.unwrap();
 
-    assert_eq!(elem.fmt_font_family, Some("Arial".into()), "Empty string should not replace family");
+    assert_eq!(
+        elem.fmt_font_family,
+        Some("Arial".into()),
+        "Empty string should not replace family"
+    );
     assert_eq!(elem.fmt_font_bold, Some(true), "Bold should be merged");
     Ok(())
 }
@@ -68,7 +69,14 @@ fn test_merge_text_format_on_list_blocks() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("Alpha\nBeta\nGamma")?;
 
     // Create list
-    create_list(&db, &hub, &mut urm, 0, 16, common::entities::ListStyle::Disc)?;
+    create_list(
+        &db,
+        &hub,
+        &mut urm,
+        0,
+        16,
+        common::entities::ListStyle::Disc,
+    )?;
 
     // Set initial formatting on all text
     document_formatting_controller::set_text_format(
@@ -107,22 +115,16 @@ fn test_merge_text_format_on_list_blocks() -> Result<()> {
     let block_ids = get_block_ids(&db)?;
 
     // First block "Alpha" should be bold but keep Georgia family
-    let elem_ids_0 = block_controller::get_relationship(
-        &db,
-        &block_ids[0],
-        &BlockRelationshipField::Elements,
-    )?;
+    let elem_ids_0 =
+        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
     let elem0 = inline_element_controller::get(&db, &elem_ids_0[0])?.unwrap();
     assert_eq!(elem0.fmt_font_bold, Some(true));
     assert_eq!(elem0.fmt_font_family, Some("Georgia".into()));
     assert_eq!(elem0.fmt_font_point_size, Some(14));
 
     // Third block "Gamma" should NOT be bold
-    let elem_ids_2 = block_controller::get_relationship(
-        &db,
-        &block_ids[2],
-        &BlockRelationshipField::Elements,
-    )?;
+    let elem_ids_2 =
+        block_controller::get_relationship(&db, &block_ids[2], &BlockRelationshipField::Elements)?;
     let elem2 = inline_element_controller::get(&db, &elem_ids_2[0])?.unwrap();
     assert_eq!(elem2.fmt_font_bold, Some(false), "Gamma should not be bold");
     Ok(())
@@ -174,26 +176,23 @@ fn test_merge_text_format_partial_split_preserves_fields() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids = block_controller::get_relationship(
-        &db,
-        &block_ids[0],
-        &BlockRelationshipField::Elements,
-    )?;
+    let elem_ids =
+        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
 
     // Find the "CD" element
     let mut found_cd = false;
     for eid in &elem_ids {
         let elem = inline_element_controller::get(&db, eid)?.unwrap();
-        if let InlineContent::Text(ref t) = elem.content {
-            if t == "CD" {
-                assert_eq!(elem.fmt_font_italic, Some(true), "CD should be italic");
-                // All other fields should be preserved from set_text_format
-                assert_eq!(elem.fmt_font_family, Some("Courier".into()));
-                assert_eq!(elem.fmt_font_point_size, Some(12));
-                assert_eq!(elem.fmt_font_overline, Some(true));
-                assert_eq!(elem.fmt_letter_spacing, Some(2));
-                found_cd = true;
-            }
+        if let InlineContent::Text(ref t) = elem.content
+            && t == "CD"
+        {
+            assert_eq!(elem.fmt_font_italic, Some(true), "CD should be italic");
+            // All other fields should be preserved from set_text_format
+            assert_eq!(elem.fmt_font_family, Some("Courier".into()));
+            assert_eq!(elem.fmt_font_point_size, Some(12));
+            assert_eq!(elem.fmt_font_overline, Some(true));
+            assert_eq!(elem.fmt_letter_spacing, Some(2));
+            found_cd = true;
         }
     }
     assert!(found_cd, "Should find 'CD' element with merged italic");
@@ -250,9 +249,17 @@ fn test_merge_text_format_undo_redo() -> Result<()> {
     assert_eq!(get_bold(&db)?, Some(true));
 
     urm.undo(None)?;
-    assert_eq!(get_bold(&db)?, Some(false), "After undo merge, bold should be false");
+    assert_eq!(
+        get_bold(&db)?,
+        Some(false),
+        "After undo merge, bold should be false"
+    );
 
     urm.redo(None)?;
-    assert_eq!(get_bold(&db)?, Some(true), "After redo merge, bold should be true");
+    assert_eq!(
+        get_bold(&db)?,
+        Some(true),
+        "After redo merge, bold should be true"
+    );
     Ok(())
 }

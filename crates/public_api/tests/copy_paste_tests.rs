@@ -50,11 +50,7 @@ fn extract_partial_block_no_gap() {
         "partial block should not have heading: {}",
         html
     );
-    assert!(
-        html.contains("Title"),
-        "should contain the text: {}",
-        html
-    );
+    assert!(html.contains("Title"), "should contain the text: {}", html);
 }
 
 #[test]
@@ -396,11 +392,7 @@ fn roundtrip_mixed_text_table() {
         "should contain 'Before' text: {}",
         html
     );
-    assert!(
-        html.contains("<table>"),
-        "should contain table: {}",
-        html
-    );
+    assert!(html.contains("<table>"), "should contain table: {}", html);
 }
 
 #[test]
@@ -472,8 +464,16 @@ fn html_table_with_text_roundtrip() {
     let frag = DocumentFragment::from_html(html);
 
     let out_html = frag.to_html();
-    assert!(out_html.contains("Before"), "text before table: {}", out_html);
-    assert!(out_html.contains("<table>"), "table preserved: {}", out_html);
+    assert!(
+        out_html.contains("Before"),
+        "text before table: {}",
+        out_html
+    );
+    assert!(
+        out_html.contains("<table>"),
+        "table preserved: {}",
+        out_html
+    );
     assert!(out_html.contains("After"), "text after table: {}", out_html);
 }
 
@@ -559,7 +559,10 @@ fn cell_selection_extract_produces_table_fragment() {
     );
 
     let frag = c3.selection();
-    assert!(!frag.is_empty(), "cell selection should produce non-empty fragment");
+    assert!(
+        !frag.is_empty(),
+        "cell selection should produce non-empty fragment"
+    );
 
     let html = frag.to_html();
     assert!(
@@ -602,10 +605,14 @@ fn paste_table_into_existing_table_replaces_cells() {
     c2.insert_fragment(&frag).unwrap();
 
     // Table should still exist (not a new table)
-    let _tables: Vec<_> = doc.flow().into_iter().filter_map(|e| match e {
-        FlowElement::Table(t) => Some(t),
-        _ => None,
-    }).collect();
+    let _tables: Vec<_> = doc
+        .flow()
+        .into_iter()
+        .filter_map(|e| match e {
+            FlowElement::Table(t) => Some(t),
+            _ => None,
+        })
+        .collect();
 
     // Check the cell content was replaced
     let plain = doc.to_plain_text().unwrap();
@@ -655,7 +662,9 @@ fn paste_heading_into_list_preserves_tail_list() {
     // The heading should appear, tail text should retain list format
     let doc = TextDocument::new();
     let cursor = doc.cursor_at(0);
-    cursor.insert_html("<ul><li>List item text</li></ul>").unwrap();
+    cursor
+        .insert_html("<ul><li>List item text</li></ul>")
+        .unwrap();
 
     let frag = DocumentFragment::from_html("<h1>Heading</h1>");
 
@@ -687,7 +696,11 @@ fn undo_paste_html_over_selection_is_atomic() {
     cursor.insert_html("<b>Bold</b>").unwrap();
 
     let after_paste = doc.to_plain_text().unwrap();
-    assert!(after_paste.contains("Bold"), "paste worked: {}", after_paste);
+    assert!(
+        after_paste.contains("Bold"),
+        "paste worked: {}",
+        after_paste
+    );
 
     // Single undo should restore original
     doc.undo().unwrap();
@@ -729,9 +742,7 @@ fn insert_into_blockquote_stays_in_blockquote() {
     // Pasting text inside a blockquote should keep it within the blockquote
     let doc = TextDocument::new();
     let cursor = doc.cursor_at(0);
-    cursor
-        .insert_markdown("> Quoted text")
-        .unwrap();
+    cursor.insert_markdown("> Quoted text").unwrap();
 
     let plain = doc.to_plain_text().unwrap();
     let mid = plain.find("text").unwrap_or(plain.len().saturating_sub(2));
@@ -905,20 +916,33 @@ fn fingerprint_flow(snap: &FlowSnapshot) -> Vec<ElementFingerprint> {
 
 fn elem_summary(e: &ElementFingerprint) -> String {
     match e {
-        ElementFingerprint::Block { text, block_format, list_style, .. } => {
-            let kind = if block_format.heading_level.is_some() {
-                format!("H{}", block_format.heading_level.unwrap())
-            } else if list_style.is_some() {
-                format!("List({:?})", list_style.as_ref().unwrap())
+        ElementFingerprint::Block {
+            text,
+            block_format,
+            list_style,
+            ..
+        } => {
+            let kind = if let Some(level) = block_format.heading_level {
+                format!("H{}", level)
+            } else if let Some(style) = list_style {
+                format!("List({:?})", style)
             } else {
                 "P".to_string()
             };
-            format!("{}[{}]", kind, if text.len() > 30 { &text[..30] } else { text })
+            format!(
+                "{}[{}]",
+                kind,
+                if text.len() > 30 { &text[..30] } else { text }
+            )
         }
         ElementFingerprint::Table { rows, columns, .. } => {
             format!("Table({}x{})", rows, columns)
         }
-        ElementFingerprint::Frame { is_blockquote, elements, .. } => {
+        ElementFingerprint::Frame {
+            is_blockquote,
+            elements,
+            ..
+        } => {
             format!("Frame(bq={:?}, {} elems)", is_blockquote, elements.len())
         }
     }
@@ -965,7 +989,11 @@ fn comprehensive_roundtrip_select_all_copy_paste() {
         .iter()
         .filter(|e| matches!(e, ElementFingerprint::Block { .. }))
         .count();
-    assert!(block_count >= 5, "should have multiple blocks: {}", block_count);
+    assert!(
+        block_count >= 5,
+        "should have multiple blocks: {}",
+        block_count
+    );
 
     // Select all
     let len = plain_before.len();
@@ -1046,11 +1074,13 @@ fn comprehensive_roundtrip_with_table() {
         fn max_pos_elem(elem: &FlowElementSnapshot) -> usize {
             match elem {
                 FlowElementSnapshot::Block(b) => b.position + b.length,
-                FlowElementSnapshot::Table(t) => {
-                    t.cells.iter().flat_map(|c| &c.blocks)
-                        .map(|b| b.position + b.length)
-                        .max().unwrap_or(0)
-                }
+                FlowElementSnapshot::Table(t) => t
+                    .cells
+                    .iter()
+                    .flat_map(|c| &c.blocks)
+                    .map(|b| b.position + b.length)
+                    .max()
+                    .unwrap_or(0),
                 FlowElementSnapshot::Frame(f) => {
                     f.elements.iter().map(max_pos_elem).max().unwrap_or(0)
                 }

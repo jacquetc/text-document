@@ -1047,7 +1047,7 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
     // are grouped into a single block instead of becoming separate blocks.
     let mut root_spans: Vec<ParsedSpan> = Vec::new();
     collect_inline_spans(
-        (*root).into(),
+        *root,
         &initial_state,
         &mut root_spans,
         &None,

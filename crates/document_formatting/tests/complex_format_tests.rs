@@ -8,8 +8,8 @@ use common::entities::InlineContent;
 
 use document_formatting::document_formatting_controller;
 use document_formatting::{
-    Alignment, CellVerticalAlignment, SetBlockFormatDto, SetFrameFormatDto,
-    SetListFormatDto, SetTableCellFormatDto, SetTableFormatDto, SetTextFormatDto,
+    Alignment, CellVerticalAlignment, SetBlockFormatDto, SetFrameFormatDto, SetListFormatDto,
+    SetTableCellFormatDto, SetTableFormatDto, SetTextFormatDto,
 };
 
 use test_harness::{
@@ -24,37 +24,85 @@ fn test_mixed_list_block_and_text_formatting() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("Heading\nItem A\nItem B\nItem C")?;
 
     // create_list clears the undo stack, so call it before undoable formatting ops
-    let list_result = create_list(&db, &hub, &mut urm, 8, 28, common::entities::ListStyle::Decimal)?;
-
-    document_formatting_controller::set_block_format(&db, &hub, &mut urm, None,
-        &SetBlockFormatDto { position: 0, anchor: 7, heading_level: Some(1), alignment: Some(Alignment::Center), ..Default::default() },
+    let list_result = create_list(
+        &db,
+        &hub,
+        &mut urm,
+        8,
+        28,
+        common::entities::ListStyle::Decimal,
     )?;
 
-    document_formatting_controller::set_list_format(&db, &hub, &mut urm, None,
-        &SetListFormatDto { list_id: list_result.list_id as i64, style: Some(common::entities::ListStyle::UpperAlpha), indent: Some(2), prefix: None, suffix: Some(".".into()) },
+    document_formatting_controller::set_block_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetBlockFormatDto {
+            position: 0,
+            anchor: 7,
+            heading_level: Some(1),
+            alignment: Some(Alignment::Center),
+            ..Default::default()
+        },
     )?;
 
-    document_formatting_controller::set_text_format(&db, &hub, &mut urm, None,
-        &SetTextFormatDto { position: 8, anchor: 28, font_bold: Some(true), ..Default::default() },
+    document_formatting_controller::set_list_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetListFormatDto {
+            list_id: list_result.list_id as i64,
+            style: Some(common::entities::ListStyle::UpperAlpha),
+            indent: Some(2),
+            prefix: None,
+            suffix: Some(".".into()),
+        },
+    )?;
+
+    document_formatting_controller::set_text_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetTextFormatDto {
+            position: 8,
+            anchor: 28,
+            font_bold: Some(true),
+            ..Default::default()
+        },
     )?;
 
     let block_ids = get_block_ids(&db)?;
     let heading_block = block_controller::get(&db, &block_ids[0])?.unwrap();
     assert_eq!(heading_block.fmt_heading_level, Some(1));
-    assert_eq!(heading_block.fmt_alignment, Some(common::entities::Alignment::Center));
+    assert_eq!(
+        heading_block.fmt_alignment,
+        Some(common::entities::Alignment::Center)
+    );
 
     let list = list_controller::get(&db, &list_result.list_id)?.unwrap();
     assert_eq!(list.style, common::entities::ListStyle::UpperAlpha);
     assert_eq!(list.indent, 2);
     assert_eq!(list.suffix, ".");
 
-    for i in 1..=3 {
-        let elem_ids = block_controller::get_relationship(&db, &block_ids[i], &BlockRelationshipField::Elements)?;
+    for (i, bid) in block_ids.iter().enumerate().take(4).skip(1) {
+        let elem_ids =
+            block_controller::get_relationship(&db, bid, &BlockRelationshipField::Elements)?;
         for eid in &elem_ids {
             let elem = inline_element_controller::get(&db, eid)?.unwrap();
-            if let InlineContent::Text(ref t) = elem.content { if !t.is_empty() {
-                assert_eq!(elem.fmt_font_bold, Some(true), "Text '{}' in block {} should be bold", t, i);
-            }}
+            if let InlineContent::Text(ref t) = elem.content
+                && !t.is_empty()
+            {
+                assert_eq!(
+                    elem.fmt_font_bold,
+                    Some(true),
+                    "Text '{}' in block {} should be bold",
+                    t,
+                    i
+                );
+            }
         }
     }
 
@@ -75,24 +123,47 @@ fn test_mixed_table_with_formatted_cells() -> Result<()> {
     let table_result = insert_table(&db, &hub, &mut urm, 6, 2, 3)?;
     let table_id = table_result.table_id;
 
-    document_formatting_controller::set_table_format(&db, &hub, &mut urm, None,
-        &SetTableFormatDto { table_id: table_id as i64, border: Some(1), cell_padding: Some(5), width: Some(500), alignment: Some(Alignment::Center), ..Default::default() },
+    document_formatting_controller::set_table_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetTableFormatDto {
+            table_id: table_id as i64,
+            border: Some(1),
+            cell_padding: Some(5),
+            width: Some(500),
+            alignment: Some(Alignment::Center),
+            ..Default::default()
+        },
     )?;
 
     let cells = get_sorted_cells(&db, &table_id)?;
-    for i in 0..3 {
-        document_formatting_controller::set_table_cell_format(&db, &hub, &mut urm, None,
-            &SetTableCellFormatDto { cell_id: cells[i].id as i64, background_color: Some("#333333".into()), vertical_alignment: Some(CellVerticalAlignment::Middle), ..Default::default() },
+    for c in cells.iter().take(3) {
+        document_formatting_controller::set_table_cell_format(
+            &db,
+            &hub,
+            &mut urm,
+            None,
+            &SetTableCellFormatDto {
+                cell_id: c.id as i64,
+                background_color: Some("#333333".into()),
+                vertical_alignment: Some(CellVerticalAlignment::Middle),
+                ..Default::default()
+            },
         )?;
     }
 
-    for i in 0..3 {
-        let cell = table_cell_controller::get(&db, &cells[i].id)?.unwrap();
+    for c in cells.iter().take(3) {
+        let cell = table_cell_controller::get(&db, &c.id)?.unwrap();
         assert_eq!(cell.fmt_background_color, Some("#333333".into()));
-        assert_eq!(cell.fmt_vertical_alignment, Some(common::entities::CellVerticalAlignment::Middle));
+        assert_eq!(
+            cell.fmt_vertical_alignment,
+            Some(common::entities::CellVerticalAlignment::Middle)
+        );
     }
-    for i in 3..6 {
-        let cell = table_cell_controller::get(&db, &cells[i].id)?.unwrap();
+    for c in cells.iter().take(6).skip(3) {
+        let cell = table_cell_controller::get(&db, &c.id)?.unwrap();
         assert_eq!(cell.fmt_background_color, None);
     }
 
@@ -108,8 +179,21 @@ fn test_mixed_sub_frame_with_list_and_formatting() -> Result<()> {
     let frame_result = insert_frame(&db, &hub, &mut urm, 9)?;
     let sub_frame_id = frame_result.frame_id;
 
-    document_formatting_controller::set_frame_format(&db, &hub, &mut urm, None,
-        &SetFrameFormatDto { position: 0, anchor: 0, frame_id: sub_frame_id as i64, is_blockquote: Some(true), left_margin: Some(20), padding: Some(10), border: Some(1), ..Default::default() },
+    document_formatting_controller::set_frame_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetFrameFormatDto {
+            position: 0,
+            anchor: 0,
+            frame_id: sub_frame_id as i64,
+            is_blockquote: Some(true),
+            left_margin: Some(20),
+            padding: Some(10),
+            border: Some(1),
+            ..Default::default()
+        },
     )?;
 
     let sub_frame = frame_controller::get(&db, &sub_frame_id)?.unwrap();
@@ -128,67 +212,195 @@ fn test_mixed_sub_frame_with_list_and_formatting() -> Result<()> {
 fn test_mixed_full_document_formatting_undo_chain() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("Title\nParagraph one\nParagraph two")?;
 
-    document_formatting_controller::set_block_format(&db, &hub, &mut urm, None,
-        &SetBlockFormatDto { position: 0, anchor: 5, heading_level: Some(1), ..Default::default() },
+    document_formatting_controller::set_block_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetBlockFormatDto {
+            position: 0,
+            anchor: 5,
+            heading_level: Some(1),
+            ..Default::default()
+        },
     )?;
-    document_formatting_controller::set_text_format(&db, &hub, &mut urm, None,
-        &SetTextFormatDto { position: 0, anchor: 5, font_bold: Some(true), font_family: Some("Helvetica".into()), ..Default::default() },
+    document_formatting_controller::set_text_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetTextFormatDto {
+            position: 0,
+            anchor: 5,
+            font_bold: Some(true),
+            font_family: Some("Helvetica".into()),
+            ..Default::default()
+        },
     )?;
-    document_formatting_controller::set_text_format(&db, &hub, &mut urm, None,
-        &SetTextFormatDto { position: 16, anchor: 19, font_italic: Some(true), ..Default::default() },
+    document_formatting_controller::set_text_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetTextFormatDto {
+            position: 16,
+            anchor: 19,
+            font_italic: Some(true),
+            ..Default::default()
+        },
     )?;
 
     let frame_id = get_frame_id(&db)?;
-    document_formatting_controller::set_frame_format(&db, &hub, &mut urm, None,
-        &SetFrameFormatDto { position: 0, anchor: 0, frame_id: frame_id as i64, padding: Some(20), ..Default::default() },
+    document_formatting_controller::set_frame_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetFrameFormatDto {
+            position: 0,
+            anchor: 0,
+            frame_id: frame_id as i64,
+            padding: Some(20),
+            ..Default::default()
+        },
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    assert_eq!(block_controller::get(&db, &block_ids[0])?.unwrap().fmt_heading_level, Some(1));
-    assert_eq!(frame_controller::get(&db, &frame_id)?.unwrap().fmt_padding, Some(20));
+    assert_eq!(
+        block_controller::get(&db, &block_ids[0])?
+            .unwrap()
+            .fmt_heading_level,
+        Some(1)
+    );
+    assert_eq!(
+        frame_controller::get(&db, &frame_id)?.unwrap().fmt_padding,
+        Some(20)
+    );
 
     urm.undo(None)?;
-    assert_eq!(frame_controller::get(&db, &frame_id)?.unwrap().fmt_padding, None);
+    assert_eq!(
+        frame_controller::get(&db, &frame_id)?.unwrap().fmt_padding,
+        None
+    );
     urm.undo(None)?;
     urm.undo(None)?;
-    let title_elems = block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    assert_eq!(inline_element_controller::get(&db, &title_elems[0])?.unwrap().fmt_font_bold, None);
+    let title_elems =
+        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
+    assert_eq!(
+        inline_element_controller::get(&db, &title_elems[0])?
+            .unwrap()
+            .fmt_font_bold,
+        None
+    );
     urm.undo(None)?;
-    assert_eq!(block_controller::get(&db, &block_ids[0])?.unwrap().fmt_heading_level, None);
+    assert_eq!(
+        block_controller::get(&db, &block_ids[0])?
+            .unwrap()
+            .fmt_heading_level,
+        None
+    );
 
-    urm.redo(None)?; urm.redo(None)?; urm.redo(None)?; urm.redo(None)?;
-    assert_eq!(block_controller::get(&db, &block_ids[0])?.unwrap().fmt_heading_level, Some(1));
-    assert_eq!(frame_controller::get(&db, &frame_id)?.unwrap().fmt_padding, Some(20));
+    urm.redo(None)?;
+    urm.redo(None)?;
+    urm.redo(None)?;
+    urm.redo(None)?;
+    assert_eq!(
+        block_controller::get(&db, &block_ids[0])?
+            .unwrap()
+            .fmt_heading_level,
+        Some(1)
+    );
+    assert_eq!(
+        frame_controller::get(&db, &frame_id)?.unwrap().fmt_padding,
+        Some(20)
+    );
     Ok(())
 }
 
 #[test]
 fn test_mixed_table_and_list_same_document_formatting() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("Header\nBullet A\nBullet B")?;
-    let list_result = create_list(&db, &hub, &mut urm, 7, 24, common::entities::ListStyle::Disc)?;
+    let list_result = create_list(
+        &db,
+        &hub,
+        &mut urm,
+        7,
+        24,
+        common::entities::ListStyle::Disc,
+    )?;
     let table_result = insert_table(&db, &hub, &mut urm, 24, 2, 2)?;
 
     let table_id = table_result.table_id;
     let list_id = list_result.list_id;
 
-    document_formatting_controller::set_list_format(&db, &hub, &mut urm, None,
-        &SetListFormatDto { list_id: list_id as i64, style: Some(common::entities::ListStyle::Circle), indent: Some(1), prefix: Some("- ".into()), suffix: None },
+    document_formatting_controller::set_list_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetListFormatDto {
+            list_id: list_id as i64,
+            style: Some(common::entities::ListStyle::Circle),
+            indent: Some(1),
+            prefix: Some("- ".into()),
+            suffix: None,
+        },
     )?;
-    document_formatting_controller::set_table_format(&db, &hub, &mut urm, None,
-        &SetTableFormatDto { table_id: table_id as i64, border: Some(2), alignment: Some(Alignment::Left), ..Default::default() },
+    document_formatting_controller::set_table_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetTableFormatDto {
+            table_id: table_id as i64,
+            border: Some(2),
+            alignment: Some(Alignment::Left),
+            ..Default::default()
+        },
     )?;
-    document_formatting_controller::set_block_format(&db, &hub, &mut urm, None,
-        &SetBlockFormatDto { position: 0, anchor: 6, heading_level: Some(2), alignment: Some(Alignment::Center), ..Default::default() },
+    document_formatting_controller::set_block_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetBlockFormatDto {
+            position: 0,
+            anchor: 6,
+            heading_level: Some(2),
+            alignment: Some(Alignment::Center),
+            ..Default::default()
+        },
     )?;
 
-    assert_eq!(list_controller::get(&db, &list_id)?.unwrap().style, common::entities::ListStyle::Circle);
+    assert_eq!(
+        list_controller::get(&db, &list_id)?.unwrap().style,
+        common::entities::ListStyle::Circle
+    );
     assert_eq!(list_controller::get(&db, &list_id)?.unwrap().prefix, "- ");
-    assert_eq!(table_controller::get(&db, &table_id)?.unwrap().fmt_border, Some(2));
-    assert_eq!(block_controller::get(&db, &get_block_ids(&db)?[0])?.unwrap().fmt_heading_level, Some(2));
+    assert_eq!(
+        table_controller::get(&db, &table_id)?.unwrap().fmt_border,
+        Some(2)
+    );
+    assert_eq!(
+        block_controller::get(&db, &get_block_ids(&db)?[0])?
+            .unwrap()
+            .fmt_heading_level,
+        Some(2)
+    );
 
-    for _ in 0..3 { urm.undo(None)?; }
-    assert_eq!(table_controller::get(&db, &table_id)?.unwrap().fmt_border, None, "Table format should be undone");
-    assert_eq!(list_controller::get(&db, &list_id)?.unwrap().style, common::entities::ListStyle::Disc, "List style should be reverted");
+    for _ in 0..3 {
+        urm.undo(None)?;
+    }
+    assert_eq!(
+        table_controller::get(&db, &table_id)?.unwrap().fmt_border,
+        None,
+        "Table format should be undone"
+    );
+    assert_eq!(
+        list_controller::get(&db, &list_id)?.unwrap().style,
+        common::entities::ListStyle::Disc,
+        "List style should be reverted"
+    );
     Ok(())
 }
 
@@ -196,14 +408,31 @@ fn test_mixed_table_and_list_same_document_formatting() -> Result<()> {
 fn test_mixed_text_format_with_image_and_list() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("Start\nList item")?;
     insert_image(&db, &hub, &mut urm, 3, "icon.png", 16, 16)?;
-    create_list(&db, &hub, &mut urm, 7, 16, common::entities::ListStyle::Disc)?;
+    create_list(
+        &db,
+        &hub,
+        &mut urm,
+        7,
+        16,
+        common::entities::ListStyle::Disc,
+    )?;
 
-    document_formatting_controller::set_text_format(&db, &hub, &mut urm, None,
-        &SetTextFormatDto { position: 0, anchor: 6, font_bold: Some(true), ..Default::default() },
+    document_formatting_controller::set_text_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetTextFormatDto {
+            position: 0,
+            anchor: 6,
+            font_bold: Some(true),
+            ..Default::default()
+        },
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids = block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
+    let elem_ids =
+        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
     let mut text_bold_count = 0;
     let mut image_bold = false;
     for eid in &elem_ids {
@@ -216,7 +445,10 @@ fn test_mixed_text_format_with_image_and_list() -> Result<()> {
             }
         }
     }
-    assert!(text_bold_count > 0, "At least one text element should be bold");
+    assert!(
+        text_bold_count > 0,
+        "At least one text element should be bold"
+    );
     assert!(image_bold, "Image should be bold when fully in range");
 
     let text = export_text(&db, &hub)?;
@@ -230,7 +462,10 @@ fn test_format_blocks_across_multiple_frames() -> Result<()> {
     insert_frame(&db, &hub, &mut urm, 15)?;
 
     let all_block_ids = get_all_block_ids(&db)?;
-    assert!(all_block_ids.len() >= 2, "Should have blocks in both frames");
+    assert!(
+        all_block_ids.len() >= 2,
+        "Should have blocks in both frames"
+    );
 
     let mut min_pos = i64::MAX;
     let mut max_end = 0;
@@ -240,13 +475,27 @@ fn test_format_blocks_across_multiple_frames() -> Result<()> {
         max_end = max_end.max(b.document_position + b.text_length);
     }
 
-    document_formatting_controller::set_block_format(&db, &hub, &mut urm, None,
-        &SetBlockFormatDto { position: min_pos, anchor: max_end, direction: Some(common::entities::TextDirection::RightToLeft), ..Default::default() },
+    document_formatting_controller::set_block_format(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &SetBlockFormatDto {
+            position: min_pos,
+            anchor: max_end,
+            direction: Some(common::entities::TextDirection::RightToLeft),
+            ..Default::default()
+        },
     )?;
 
     for bid in &all_block_ids {
         let b = block_controller::get(&db, bid)?.unwrap();
-        assert_eq!(b.fmt_direction, Some(common::entities::TextDirection::RightToLeft), "Block at position {} should have RTL direction", b.document_position);
+        assert_eq!(
+            b.fmt_direction,
+            Some(common::entities::TextDirection::RightToLeft),
+            "Block at position {} should have RTL direction",
+            b.document_position
+        );
     }
     Ok(())
 }

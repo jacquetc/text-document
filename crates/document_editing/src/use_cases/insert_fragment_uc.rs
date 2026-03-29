@@ -14,13 +14,13 @@ use common::direct_access::table::TableRelationshipField;
 use common::entities::{
     Block, Document, Frame, InlineContent, InlineElement, List, Root, Table, TableCell,
 };
-use std::collections::HashMap;
 use common::parser_tools::fragment_schema::{FragmentBlock, FragmentData, FragmentTable};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
+use std::collections::HashMap;
 
 pub trait InsertFragmentUnitOfWorkFactoryTrait: Send + Sync {
     fn create(&self) -> Box<dyn InsertFragmentUnitOfWorkTrait>;
@@ -192,9 +192,7 @@ fn try_replace_table_cells(
 
     // Find which cell the cursor is in to use as the paste origin
     let cursor_cf = block_to_cell.get(&cursor_block.id).map(|(cf, _)| *cf);
-    let cursor_cell = target_cells
-        .iter()
-        .find(|c| c.cell_frame == cursor_cf);
+    let cursor_cell = target_cells.iter().find(|c| c.cell_frame == cursor_cf);
     let (base_row, base_col) = cursor_cell
         .map(|c| (c.row as usize, c.column as usize))
         .unwrap_or((0, 0));
@@ -215,9 +213,9 @@ fn try_replace_table_cells(
         let target_col = base_col + frag_cell.column;
 
         // Find the matching target cell
-        let target = target_cells.iter().find(|c| {
-            c.row as usize == target_row && c.column as usize == target_col
-        });
+        let target = target_cells
+            .iter()
+            .find(|c| c.row as usize == target_row && c.column as usize == target_col);
         let target = match target {
             Some(t) => t,
             None => continue, // no matching cell, skip
@@ -589,8 +587,7 @@ fn insert_mixed_fragment(
 
     let all_block_ids: Vec<EntityId> = {
         let get_table_cell_frames = |table_id: &EntityId| -> Result<Vec<EntityId>> {
-            let cell_ids =
-                uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+            let cell_ids = uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
             let cells = uow.get_table_cell_multi(&cell_ids)?;
             let mut sorted: Vec<_> = cells.into_iter().flatten().collect();
             sorted.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
@@ -739,9 +736,8 @@ fn insert_mixed_fragment(
 
     // When text_before is empty and we can't merge, overwrite the current
     // block with the first fragment block instead of leaving an empty orphan.
-    let overwrite_head = text_before.is_empty()
-        && !merge_first
-        && matches!(items.first(), Some(FragItem::Block(_)));
+    let overwrite_head =
+        text_before.is_empty() && !merge_first && matches!(items.first(), Some(FragItem::Block(_)));
 
     let first_len: i64 = if merge_first {
         fragment_data.blocks[0].plain_text.chars().count() as i64
@@ -820,7 +816,11 @@ fn insert_mixed_fragment(
     let mut running_position = current_block.document_position + updated_current.text_length + 1;
     let mut new_child_order_entries: Vec<i64> = Vec::new();
     let head_delta = updated_current.text_length - current_block.text_length;
-    let mut total_new_chars: i64 = if merge_first || overwrite_head { head_delta } else { 0 };
+    let mut total_new_chars: i64 = if merge_first || overwrite_head {
+        head_delta
+    } else {
+        0
+    };
     let mut total_blocks_added: i64 = 0;
 
     let skip_first = merge_first || overwrite_head;
@@ -844,7 +844,11 @@ fn insert_mixed_fragment(
     if let Some(list_id) = current_block.list
         && let Ok(Some(list_entity)) = uow.get_list(&list_id)
     {
-        list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
+        list_grouper.register(
+            list_id,
+            list_entity.style.clone(),
+            list_entity.indent as u32,
+        );
     }
 
     // ── Process items in order ───────────────────────────────────
@@ -1077,7 +1081,7 @@ fn insert_mixed_fragment(
     // When tail would be empty (no text, not merging last), skip creating it
     let skip_tail_block = tail_plain.is_empty() && last_frag.is_none();
 
-    let mut created_tail_id: Option<EntityId> = None;
+    #[allow(unused_assignments)]
     let mut tail_text_len: i64 = 0;
 
     if !skip_tail_block {
@@ -1086,31 +1090,98 @@ fn insert_mixed_fragment(
             created_at: now,
             updated_at: now,
             elements: vec![],
-            list: if overwrite_head { None } else { current_block.list },
+            list: if overwrite_head {
+                None
+            } else {
+                current_block.list
+            },
             text_length: tail_plain.chars().count() as i64,
             document_position: running_position,
             plain_text: tail_plain,
-            fmt_alignment: if overwrite_head { None } else { current_block.fmt_alignment.clone() },
-            fmt_top_margin: if overwrite_head { None } else { current_block.fmt_top_margin },
-            fmt_bottom_margin: if overwrite_head { None } else { current_block.fmt_bottom_margin },
-            fmt_left_margin: if overwrite_head { None } else { current_block.fmt_left_margin },
-            fmt_right_margin: if overwrite_head { None } else { current_block.fmt_right_margin },
-            fmt_heading_level: if overwrite_head { None } else { current_block.fmt_heading_level },
-            fmt_indent: if overwrite_head { None } else { current_block.fmt_indent },
-            fmt_text_indent: if overwrite_head { None } else { current_block.fmt_text_indent },
-            fmt_marker: if overwrite_head { None } else { current_block.fmt_marker.clone() },
-            fmt_tab_positions: if overwrite_head { vec![] } else { current_block.fmt_tab_positions.clone() },
-            fmt_line_height: if overwrite_head { None } else { current_block.fmt_line_height },
-            fmt_non_breakable_lines: if overwrite_head { None } else { current_block.fmt_non_breakable_lines },
-            fmt_direction: if overwrite_head { None } else { current_block.fmt_direction.clone() },
-            fmt_background_color: if overwrite_head { None } else { current_block.fmt_background_color.clone() },
-            fmt_is_code_block: if overwrite_head { None } else { current_block.fmt_is_code_block },
-            fmt_code_language: if overwrite_head { None } else { current_block.fmt_code_language.clone() },
+            fmt_alignment: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_alignment.clone()
+            },
+            fmt_top_margin: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_top_margin
+            },
+            fmt_bottom_margin: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_bottom_margin
+            },
+            fmt_left_margin: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_left_margin
+            },
+            fmt_right_margin: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_right_margin
+            },
+            fmt_heading_level: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_heading_level
+            },
+            fmt_indent: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_indent
+            },
+            fmt_text_indent: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_text_indent
+            },
+            fmt_marker: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_marker.clone()
+            },
+            fmt_tab_positions: if overwrite_head {
+                vec![]
+            } else {
+                current_block.fmt_tab_positions.clone()
+            },
+            fmt_line_height: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_line_height
+            },
+            fmt_non_breakable_lines: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_non_breakable_lines
+            },
+            fmt_direction: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_direction.clone()
+            },
+            fmt_background_color: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_background_color.clone()
+            },
+            fmt_is_code_block: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_is_code_block
+            },
+            fmt_code_language: if overwrite_head {
+                None
+            } else {
+                current_block.fmt_code_language.clone()
+            },
         };
 
         let created_tail = uow.create_block(&tail_block, frame_id, -1)?;
         tail_text_len = created_tail.text_length;
-        created_tail_id = Some(created_tail.id);
 
         if let Some(lfb) = last_frag {
             create_frag_elements_mixed(uow, &lfb.elements, created_tail.id)?;
@@ -1242,8 +1313,7 @@ fn execute_insert_fragment(
 
     let all_block_ids: Vec<EntityId> = {
         let get_table_cell_frames = |table_id: &EntityId| -> Result<Vec<EntityId>> {
-            let cell_ids =
-                uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+            let cell_ids = uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
             let cells = uow.get_table_cell_multi(&cell_ids)?;
             let mut sorted: Vec<_> = cells.into_iter().flatten().collect();
             sorted.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
@@ -1532,13 +1602,15 @@ fn execute_insert_fragment(
         // Determine the list for the overwritten head block
         let mut list_grouper = ListGrouper::new();
         // Pre-seed with the adjacent block's list for continuation (Word behavior)
-        if !overwrite_head {
-            if let Some(list_id) = current_block.list
-                && let Ok(Some(list_entity)) = uow.get_list(&list_id)
-            {
-                list_grouper
-                    .register(list_id, list_entity.style.clone(), list_entity.indent as u32);
-            }
+        if !overwrite_head
+            && let Some(list_id) = current_block.list
+            && let Ok(Some(list_entity)) = uow.get_list(&list_id)
+        {
+            list_grouper.register(
+                list_id,
+                list_entity.style.clone(),
+                list_entity.indent as u32,
+            );
         }
 
         if overwrite_head {
@@ -1692,26 +1764,94 @@ fn execute_insert_fragment(
                 created_at: now,
                 updated_at: now,
                 elements: vec![],
-                list: if overwrite_head { None } else { current_block.list },
+                list: if overwrite_head {
+                    None
+                } else {
+                    current_block.list
+                },
                 text_length: tail_plain.chars().count() as i64,
                 document_position: running_position,
                 plain_text: tail_plain,
-                fmt_alignment: if overwrite_head { None } else { current_block.fmt_alignment.clone() },
-                fmt_top_margin: if overwrite_head { None } else { current_block.fmt_top_margin },
-                fmt_bottom_margin: if overwrite_head { None } else { current_block.fmt_bottom_margin },
-                fmt_left_margin: if overwrite_head { None } else { current_block.fmt_left_margin },
-                fmt_right_margin: if overwrite_head { None } else { current_block.fmt_right_margin },
-                fmt_heading_level: if overwrite_head { None } else { current_block.fmt_heading_level },
-                fmt_indent: if overwrite_head { None } else { current_block.fmt_indent },
-                fmt_text_indent: if overwrite_head { None } else { current_block.fmt_text_indent },
-                fmt_marker: if overwrite_head { None } else { current_block.fmt_marker.clone() },
-                fmt_tab_positions: if overwrite_head { vec![] } else { current_block.fmt_tab_positions.clone() },
-                fmt_line_height: if overwrite_head { None } else { current_block.fmt_line_height },
-                fmt_non_breakable_lines: if overwrite_head { None } else { current_block.fmt_non_breakable_lines },
-                fmt_direction: if overwrite_head { None } else { current_block.fmt_direction.clone() },
-                fmt_background_color: if overwrite_head { None } else { current_block.fmt_background_color.clone() },
-                fmt_is_code_block: if overwrite_head { None } else { current_block.fmt_is_code_block },
-                fmt_code_language: if overwrite_head { None } else { current_block.fmt_code_language.clone() },
+                fmt_alignment: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_alignment.clone()
+                },
+                fmt_top_margin: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_top_margin
+                },
+                fmt_bottom_margin: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_bottom_margin
+                },
+                fmt_left_margin: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_left_margin
+                },
+                fmt_right_margin: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_right_margin
+                },
+                fmt_heading_level: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_heading_level
+                },
+                fmt_indent: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_indent
+                },
+                fmt_text_indent: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_text_indent
+                },
+                fmt_marker: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_marker.clone()
+                },
+                fmt_tab_positions: if overwrite_head {
+                    vec![]
+                } else {
+                    current_block.fmt_tab_positions.clone()
+                },
+                fmt_line_height: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_line_height
+                },
+                fmt_non_breakable_lines: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_non_breakable_lines
+                },
+                fmt_direction: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_direction.clone()
+                },
+                fmt_background_color: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_background_color.clone()
+                },
+                fmt_is_code_block: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_is_code_block
+                },
+                fmt_code_language: if overwrite_head {
+                    None
+                } else {
+                    current_block.fmt_code_language.clone()
+                },
             };
 
             let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
@@ -1847,11 +1987,10 @@ fn execute_insert_fragment(
                 uow.create_inline_element(&elem, current_block.id, -1)?;
             }
 
-            let mut running_position =
-                current_block.document_position + block_text_len + 1;
+            let mut running_position = current_block.document_position + block_text_len + 1;
             let skip_tail = text_after.is_empty();
             let mut blocks_added: i64 = 0;
-            let mut created_tail_id: Option<EntityId> = None;
+            #[allow(unused_assignments)]
             let mut tail_text_len: i64 = 0;
 
             if !skip_tail {
@@ -1886,7 +2025,6 @@ fn execute_insert_fragment(
                 let created_tail =
                     uow.create_block(&tail_block, frame_id, (block_idx + 1) as i32)?;
                 tail_text_len = created_tail.text_length;
-                created_tail_id = Some(created_tail.id);
                 blocks_added = 1;
 
                 for after_elem in &after_elements {
@@ -1894,8 +2032,7 @@ fn execute_insert_fragment(
                 }
 
                 let mut updated_frame = frame.clone();
-                let child_order_insert_pos =
-                    (block_idx + 1).min(updated_frame.child_order.len());
+                let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
                 updated_frame
                     .child_order
                     .insert(child_order_insert_pos, created_tail.id as i64);
@@ -1907,8 +2044,7 @@ fn execute_insert_fragment(
                 running_position += tail_text_len + 1;
             }
 
-            let original_next_pos =
-                current_block.document_position + current_block.text_length + 1;
+            let original_next_pos = current_block.document_position + current_block.text_length + 1;
             let new_next_pos = if skip_tail {
                 current_block.document_position + block_text_len + 1
             } else {
@@ -2031,8 +2167,7 @@ fn execute_insert_fragment(
                 fmt_code_language: current_block.fmt_code_language.clone(),
             };
 
-            let created_tail =
-                uow.create_block(&tail_block, frame_id, (block_idx + 2) as i32)?;
+            let created_tail = uow.create_block(&tail_block, frame_id, (block_idx + 2) as i32)?;
             for after_elem in &after_elements {
                 uow.create_inline_element(after_elem, created_tail.id, -1)?;
             }
@@ -2051,8 +2186,7 @@ fn execute_insert_fragment(
             uow.update_frame(&updated_frame)?;
 
             let blocks_added: i64 = 2;
-            let original_next_pos =
-                current_block.document_position + current_block.text_length + 1;
+            let original_next_pos = current_block.document_position + current_block.text_length + 1;
             let new_next_pos = running_position + created_tail.text_length + 1;
             let pos_shift = new_next_pos - original_next_pos;
 

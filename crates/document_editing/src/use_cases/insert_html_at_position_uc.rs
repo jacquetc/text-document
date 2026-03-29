@@ -554,26 +554,94 @@ macro_rules! impl_content_insert {
                         created_at: now,
                         updated_at: now,
                         elements: vec![],
-                        list: if overwrite_head { None } else { current_block.list },
+                        list: if overwrite_head {
+                            None
+                        } else {
+                            current_block.list
+                        },
                         text_length: tail_plain.chars().count() as i64,
                         document_position: running_position,
                         plain_text: tail_plain,
-                        fmt_alignment: if overwrite_head { None } else { current_block.fmt_alignment.clone() },
-                        fmt_top_margin: if overwrite_head { None } else { current_block.fmt_top_margin },
-                        fmt_bottom_margin: if overwrite_head { None } else { current_block.fmt_bottom_margin },
-                        fmt_left_margin: if overwrite_head { None } else { current_block.fmt_left_margin },
-                        fmt_right_margin: if overwrite_head { None } else { current_block.fmt_right_margin },
-                        fmt_heading_level: if overwrite_head { None } else { current_block.fmt_heading_level },
-                        fmt_indent: if overwrite_head { None } else { current_block.fmt_indent },
-                        fmt_text_indent: if overwrite_head { None } else { current_block.fmt_text_indent },
-                        fmt_marker: if overwrite_head { None } else { current_block.fmt_marker.clone() },
-                        fmt_tab_positions: if overwrite_head { vec![] } else { current_block.fmt_tab_positions.clone() },
-                        fmt_line_height: if overwrite_head { None } else { current_block.fmt_line_height },
-                        fmt_non_breakable_lines: if overwrite_head { None } else { current_block.fmt_non_breakable_lines },
-                        fmt_direction: if overwrite_head { None } else { current_block.fmt_direction.clone() },
-                        fmt_background_color: if overwrite_head { None } else { current_block.fmt_background_color.clone() },
-                        fmt_is_code_block: if overwrite_head { None } else { current_block.fmt_is_code_block },
-                        fmt_code_language: if overwrite_head { None } else { current_block.fmt_code_language.clone() },
+                        fmt_alignment: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_alignment.clone()
+                        },
+                        fmt_top_margin: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_top_margin
+                        },
+                        fmt_bottom_margin: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_bottom_margin
+                        },
+                        fmt_left_margin: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_left_margin
+                        },
+                        fmt_right_margin: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_right_margin
+                        },
+                        fmt_heading_level: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_heading_level
+                        },
+                        fmt_indent: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_indent
+                        },
+                        fmt_text_indent: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_text_indent
+                        },
+                        fmt_marker: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_marker.clone()
+                        },
+                        fmt_tab_positions: if overwrite_head {
+                            vec![]
+                        } else {
+                            current_block.fmt_tab_positions.clone()
+                        },
+                        fmt_line_height: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_line_height
+                        },
+                        fmt_non_breakable_lines: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_non_breakable_lines
+                        },
+                        fmt_direction: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_direction.clone()
+                        },
+                        fmt_background_color: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_background_color.clone()
+                        },
+                        fmt_is_code_block: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_is_code_block
+                        },
+                        fmt_code_language: if overwrite_head {
+                            None
+                        } else {
+                            current_block.fmt_code_language.clone()
+                        },
                     };
 
                     tail_doc_pos = running_position;
@@ -594,8 +662,7 @@ macro_rules! impl_content_insert {
                 // Update frame child_order
                 let mut updated_frame = frame.clone();
                 let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
-                let new_child_ids: Vec<i64> =
-                    new_block_ids.iter().map(|id| *id as i64).collect();
+                let new_child_ids: Vec<i64> = new_block_ids.iter().map(|id| *id as i64).collect();
 
                 for (i, id) in new_child_ids.iter().enumerate() {
                     updated_frame
@@ -729,11 +796,8 @@ macro_rules! impl_content_insert {
                             fmt_is_code_block: None,
                             fmt_code_language: None,
                         };
-                        let created_tail = uow.create_block(
-                            &tail_block,
-                            frame_id,
-                            (block_idx + 1) as i32,
-                        )?;
+                        let created_tail =
+                            uow.create_block(&tail_block, frame_id, (block_idx + 1) as i32)?;
                         for after_elem in &after_elements {
                             uow.create_inline_element(after_elem, created_tail.id, -1)?;
                         }
@@ -752,8 +816,8 @@ macro_rules! impl_content_insert {
                                 .insert(child_order_insert_pos + i, block_id as i64);
                         }
                         updated_frame.updated_at = now;
-                        updated_frame.blocks = uow
-                            .get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+                        updated_frame.blocks =
+                            uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
                         uow.update_frame(&updated_frame)?;
                     }
 

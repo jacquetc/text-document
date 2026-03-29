@@ -486,7 +486,10 @@ impl TextCursor {
                     Some(inner.stack_id),
                     &del_dto,
                 )?;
-                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
+                (
+                    to_usize(del_result.new_position),
+                    pos.max(anchor) - pos.min(anchor),
+                )
             } else {
                 (pos, 0)
             };
@@ -545,7 +548,10 @@ impl TextCursor {
                     Some(inner.stack_id),
                     &del_dto,
                 )?;
-                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
+                (
+                    to_usize(del_result.new_position),
+                    pos.max(anchor) - pos.min(anchor),
+                )
             } else {
                 (pos, 0)
             };
@@ -582,12 +588,10 @@ impl TextCursor {
         // For cell/mixed selections, compute position/anchor that span the
         // full cell range so ExtractFragment detects cross-cell correctly.
         let (extract_pos, extract_anchor) = match self.selection_kind() {
-            SelectionKind::Cells(ref range) => {
-                match self.cell_range_positions(range) {
-                    Some((start, end)) => (start, end),
-                    None => return DocumentFragment::new(),
-                }
-            }
+            SelectionKind::Cells(ref range) => match self.cell_range_positions(range) {
+                Some((start, end)) => (start, end),
+                None => return DocumentFragment::new(),
+            },
             SelectionKind::Mixed {
                 ref cell_range,
                 text_before,
@@ -645,7 +649,10 @@ impl TextCursor {
                     Some(inner.stack_id),
                     &del_dto,
                 )?;
-                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
+                (
+                    to_usize(del_result.new_position),
+                    pos.max(anchor) - pos.min(anchor),
+                )
             } else {
                 (pos, 0)
             };

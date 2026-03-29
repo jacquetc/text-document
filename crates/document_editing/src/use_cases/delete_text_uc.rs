@@ -10,7 +10,9 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, Table, TableCell};
+use common::entities::{
+    Block, Document, Frame, InlineContent, InlineElement, Root, Table, TableCell,
+};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -262,10 +264,9 @@ fn execute_delete(
             let cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
 
             // Check if ALL cells were affected
-            let all_affected = cells.iter().all(|c| {
-                c.cell_frame
-                    .is_some_and(|cf| affected_set.contains(&cf))
-            });
+            let all_affected = cells
+                .iter()
+                .all(|c| c.cell_frame.is_some_and(|cf| affected_set.contains(&cf)));
             if !all_affected || cells.is_empty() {
                 continue;
             }
@@ -280,8 +281,7 @@ fn execute_delete(
                     let blk_opts = uow.get_block_multi(&blk_ids)?;
                     for b in blk_opts.into_iter().flatten() {
                         table_min_pos = table_min_pos.min(b.document_position);
-                        table_max_pos =
-                            table_max_pos.max(b.document_position + b.text_length);
+                        table_max_pos = table_max_pos.max(b.document_position + b.text_length);
                     }
                 }
             }
@@ -297,7 +297,8 @@ fn execute_delete(
                 }
 
                 // Remove the anchor frame (negative entry in root child_order)
-                let root_frame = uow.get_frame(&frame_id)?
+                let root_frame = uow
+                    .get_frame(&frame_id)?
                     .ok_or_else(|| anyhow!("Root frame not found"))?;
                 // Find the anchor frame for this table
                 for &entry in &root_frame.child_order {
@@ -319,7 +320,8 @@ fn execute_delete(
 
         // Update root frame child_order if tables were removed
         if !tables_to_remove.is_empty() {
-            let root_frame = uow.get_frame(&frame_id)?
+            let root_frame = uow
+                .get_frame(&frame_id)?
                 .ok_or_else(|| anyhow!("Root frame not found"))?;
             let mut updated_root = root_frame.clone();
             updated_root.child_order.retain(|entry| {
@@ -369,10 +371,9 @@ fn execute_delete(
         // Determine which blocks need partial truncation vs full removal
         let first_id = first_non_cell.map(|b| b.id);
         let last_id = last_non_cell.map(|b| b.id);
-        let first_is_partial = first_non_cell
-            .is_some_and(|b| start > b.document_position);
-        let last_is_partial = last_non_cell
-            .is_some_and(|b| end < b.document_position + b.text_length);
+        let first_is_partial = first_non_cell.is_some_and(|b| start > b.document_position);
+        let last_is_partial =
+            last_non_cell.is_some_and(|b| end < b.document_position + b.text_length);
 
         for block in &blocks {
             let block_start = block.document_position;
@@ -425,10 +426,8 @@ fn execute_delete(
                                 let chars: Vec<char> = s.chars().collect();
                                 let ls = os - es;
                                 let le = oe - es;
-                                let kept: String = chars[..ls]
-                                    .iter()
-                                    .chain(chars[le..].iter())
-                                    .collect();
+                                let kept: String =
+                                    chars[..ls].iter().chain(chars[le..].iter()).collect();
                                 total_chars_removed += (le - ls) as i64;
                                 new_plain.push_str(&kept);
                                 new_len += kept.chars().count() as i64;
@@ -529,7 +528,8 @@ fn execute_delete(
                 ..InlineElement::default()
             };
             uow.create_inline_element(&empty_elem, created.id, -1)?;
-            let f = uow.get_frame(&frame_id)?
+            let f = uow
+                .get_frame(&frame_id)?
                 .ok_or_else(|| anyhow!("Frame not found"))?;
             let mut uf = f.clone();
             uf.child_order.push(created.id as i64);
