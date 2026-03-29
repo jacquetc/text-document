@@ -98,7 +98,7 @@ fn execute_insert_table(
             .ok_or_else(|| anyhow!("Document has no frames"))?;
         (*first_frame_id, 0usize)
     } else {
-        let (target_block, _, _) = find_block_at_position(&all_blocks, insert_pos)?;
+        let (target_block, _, offset) = find_block_at_position(&all_blocks, insert_pos)?;
         // Find which frame owns this block
         let mut found_frame_id = frame_ids[0];
         let mut found_block_idx = 0usize;
@@ -112,7 +112,10 @@ fn execute_insert_table(
                 }
             }
         }
-        (found_frame_id, found_block_idx + 1)
+        // When at the very start of the block (offset == 0), place the
+        // table before it so the table can be the first flow element.
+        let after = if offset > 0 { 1 } else { 0 };
+        (found_frame_id, found_block_idx + after)
     };
 
     // 1. Create the Table entity (owned by Document)
