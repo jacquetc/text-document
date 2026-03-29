@@ -112,10 +112,13 @@ impl CommandUnitOfWork for InsertHtmlAtPositionUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
+#[macros::uow_action(entity = "Block", action = "UpdateWithRelationships")]
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "InlineElement", action = "Remove")]
+#[macros::uow_action(entity = "List", action = "Get")]
 #[macros::uow_action(entity = "List", action = "Create")]
 impl InsertHtmlAtPositionUnitOfWorkTrait for InsertHtmlAtPositionUnitOfWork {}
 

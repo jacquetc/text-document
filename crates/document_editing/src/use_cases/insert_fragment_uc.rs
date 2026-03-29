@@ -40,6 +40,7 @@ pub trait InsertFragmentUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "Update")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
+#[macros::uow_action(entity = "Block", action = "UpdateWithRelationships")]
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
@@ -736,6 +737,12 @@ fn insert_mixed_fragment(
     let merge_last = fragment_data.blocks.len() >= 2
         && matches!(items.last(), Some(FragItem::Block(b)) if b.is_inline_only());
 
+    // When text_before is empty and we can't merge, overwrite the current
+    // block with the first fragment block instead of leaving an empty orphan.
+    let overwrite_head = text_before.is_empty()
+        && !merge_first
+        && matches!(items.first(), Some(FragItem::Block(_)));
+
     let first_len: i64 = if merge_first {
         fragment_data.blocks[0].plain_text.chars().count() as i64
     } else {
@@ -744,31 +751,79 @@ fn insert_mixed_fragment(
 
     // Update current block (text_before + optional first-block merge)
     let mut updated_current = current_block.clone();
-    if merge_first {
+    if overwrite_head {
+        let fb = &fragment_data.blocks[0];
+        // Remove existing elements on the current block
+        let elem_ids =
+            uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
+        for eid in &elem_ids {
+            uow.remove_inline_element(eid)?;
+        }
+        // Resolve list for the head block
+        let head_list_id = if let Some(ref frag_list) = fb.list {
+            let list = frag_list.to_entity();
+            let created_list = uow.create_list(&list, doc_id, -1)?;
+            Some(created_list.id)
+        } else {
+            None
+        };
+        updated_current.plain_text = fb.plain_text.clone();
+        updated_current.text_length = fb.plain_text.chars().count() as i64;
+        updated_current.list = head_list_id;
+        updated_current.fmt_alignment = fb.alignment.clone();
+        updated_current.fmt_top_margin = fb.top_margin;
+        updated_current.fmt_bottom_margin = fb.bottom_margin;
+        updated_current.fmt_left_margin = fb.left_margin;
+        updated_current.fmt_right_margin = fb.right_margin;
+        updated_current.fmt_heading_level = fb.heading_level;
+        updated_current.fmt_indent = fb.indent;
+        updated_current.fmt_text_indent = fb.text_indent;
+        updated_current.fmt_marker = fb.marker.clone();
+        updated_current.fmt_tab_positions = fb.tab_positions.clone();
+        updated_current.fmt_line_height = fb.line_height;
+        updated_current.fmt_non_breakable_lines = fb.non_breakable_lines;
+        updated_current.fmt_direction = fb.direction.clone();
+        updated_current.fmt_background_color = fb.background_color.clone();
+        updated_current.fmt_is_code_block = fb.is_code_block;
+        updated_current.fmt_code_language = fb.code_language.clone();
+        updated_current.elements = Vec::new();
+        updated_current.updated_at = now;
+        uow.update_with_relationships_block(&updated_current)?;
+        create_frag_elements_mixed(uow, &fb.elements, current_block.id)?;
+        if fb.elements.is_empty() {
+            let elem = InlineElement {
+                id: 0,
+                created_at: now,
+                updated_at: now,
+                content: InlineContent::Text(String::new()),
+                ..Default::default()
+            };
+            uow.create_inline_element(&elem, current_block.id, -1)?;
+        }
+    } else if merge_first {
         let fb = &fragment_data.blocks[0];
         updated_current.plain_text = text_before.clone() + &fb.plain_text;
         updated_current.text_length = text_before.chars().count() as i64 + first_len;
-    } else {
-        updated_current.plain_text = text_before.clone();
-        updated_current.text_length = text_before.chars().count() as i64;
-    }
-    updated_current.updated_at = now;
-    uow.update_block(&updated_current)?;
-
-    if merge_first {
-        let fb = &fragment_data.blocks[0];
+        updated_current.updated_at = now;
+        uow.update_block(&updated_current)?;
         for frag_elem in &fb.elements {
             let elem = frag_elem.to_entity();
             uow.create_inline_element(&elem, current_block.id, -1)?;
         }
+    } else {
+        updated_current.plain_text = text_before.clone();
+        updated_current.text_length = text_before.chars().count() as i64;
+        updated_current.updated_at = now;
+        uow.update_block(&updated_current)?;
     }
 
     let mut running_position = current_block.document_position + updated_current.text_length + 1;
     let mut new_child_order_entries: Vec<i64> = Vec::new();
-    let mut total_new_chars: i64 = if merge_first { first_len } else { 0 };
+    let head_delta = updated_current.text_length - current_block.text_length;
+    let mut total_new_chars: i64 = if merge_first || overwrite_head { head_delta } else { 0 };
     let mut total_blocks_added: i64 = 0;
 
-    let skip_first = merge_first;
+    let skip_first = merge_first || overwrite_head;
     let skip_last = merge_last;
     let mut block_index = 0usize; // index into fragment_data.blocks
 
@@ -1019,44 +1074,54 @@ fn insert_mixed_fragment(
         text_after.clone()
     };
 
-    let tail_block = Block {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        elements: vec![],
-        list: current_block.list,
-        text_length: tail_plain.chars().count() as i64,
-        document_position: running_position,
-        plain_text: tail_plain,
-        fmt_alignment: current_block.fmt_alignment.clone(),
-        fmt_top_margin: current_block.fmt_top_margin,
-        fmt_bottom_margin: current_block.fmt_bottom_margin,
-        fmt_left_margin: current_block.fmt_left_margin,
-        fmt_right_margin: current_block.fmt_right_margin,
-        fmt_heading_level: current_block.fmt_heading_level,
-        fmt_indent: current_block.fmt_indent,
-        fmt_text_indent: current_block.fmt_text_indent,
-        fmt_marker: current_block.fmt_marker.clone(),
-        fmt_tab_positions: current_block.fmt_tab_positions.clone(),
-        fmt_line_height: current_block.fmt_line_height,
-        fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
-        fmt_direction: current_block.fmt_direction.clone(),
-        fmt_background_color: current_block.fmt_background_color.clone(),
-        fmt_is_code_block: current_block.fmt_is_code_block,
-        fmt_code_language: current_block.fmt_code_language.clone(),
-    };
+    // When tail would be empty (no text, not merging last), skip creating it
+    let skip_tail_block = tail_plain.is_empty() && last_frag.is_none();
 
-    let created_tail = uow.create_block(&tail_block, frame_id, -1)?;
+    let mut created_tail_id: Option<EntityId> = None;
+    let mut tail_text_len: i64 = 0;
 
-    if let Some(lfb) = last_frag {
-        create_frag_elements_mixed(uow, &lfb.elements, created_tail.id)?;
+    if !skip_tail_block {
+        let tail_block = Block {
+            id: 0,
+            created_at: now,
+            updated_at: now,
+            elements: vec![],
+            list: if overwrite_head { None } else { current_block.list },
+            text_length: tail_plain.chars().count() as i64,
+            document_position: running_position,
+            plain_text: tail_plain,
+            fmt_alignment: if overwrite_head { None } else { current_block.fmt_alignment.clone() },
+            fmt_top_margin: if overwrite_head { None } else { current_block.fmt_top_margin },
+            fmt_bottom_margin: if overwrite_head { None } else { current_block.fmt_bottom_margin },
+            fmt_left_margin: if overwrite_head { None } else { current_block.fmt_left_margin },
+            fmt_right_margin: if overwrite_head { None } else { current_block.fmt_right_margin },
+            fmt_heading_level: if overwrite_head { None } else { current_block.fmt_heading_level },
+            fmt_indent: if overwrite_head { None } else { current_block.fmt_indent },
+            fmt_text_indent: if overwrite_head { None } else { current_block.fmt_text_indent },
+            fmt_marker: if overwrite_head { None } else { current_block.fmt_marker.clone() },
+            fmt_tab_positions: if overwrite_head { vec![] } else { current_block.fmt_tab_positions.clone() },
+            fmt_line_height: if overwrite_head { None } else { current_block.fmt_line_height },
+            fmt_non_breakable_lines: if overwrite_head { None } else { current_block.fmt_non_breakable_lines },
+            fmt_direction: if overwrite_head { None } else { current_block.fmt_direction.clone() },
+            fmt_background_color: if overwrite_head { None } else { current_block.fmt_background_color.clone() },
+            fmt_is_code_block: if overwrite_head { None } else { current_block.fmt_is_code_block },
+            fmt_code_language: if overwrite_head { None } else { current_block.fmt_code_language.clone() },
+        };
+
+        let created_tail = uow.create_block(&tail_block, frame_id, -1)?;
+        tail_text_len = created_tail.text_length;
+        created_tail_id = Some(created_tail.id);
+
+        if let Some(lfb) = last_frag {
+            create_frag_elements_mixed(uow, &lfb.elements, created_tail.id)?;
+        }
+        for after_elem in &after_elements {
+            uow.create_inline_element(after_elem, created_tail.id, -1)?;
+        }
+
+        new_child_order_entries.push(created_tail.id as i64);
+        total_blocks_added += 1;
     }
-    for after_elem in &after_elements {
-        uow.create_inline_element(after_elem, created_tail.id, -1)?;
-    }
-
-    new_child_order_entries.push(created_tail.id as i64);
-    total_blocks_added += 1;
 
     // ── Update frame child_order ─────────────────────────────────
     let mut updated_frame = frame.clone();
@@ -1073,7 +1138,11 @@ fn insert_mixed_fragment(
 
     // ── Shift existing blocks after insertion point ───────────────
     let original_next_pos = current_block.document_position + current_block.text_length + 1;
-    let new_next_pos = running_position + created_tail.text_length + 1;
+    let new_next_pos = if skip_tail_block {
+        running_position
+    } else {
+        running_position + tail_text_len + 1
+    };
     let pos_shift = new_next_pos - original_next_pos;
 
     let mut blocks_to_update: Vec<Block> = Vec::new();
@@ -1094,10 +1163,12 @@ fn insert_mixed_fragment(
     updated_doc.updated_at = now;
     uow.update_document(&updated_doc)?;
 
-    let new_position = if skip_last {
-        created_tail.document_position + last_len
+    let new_position = if skip_tail_block {
+        running_position - 1
+    } else if last_frag.is_some() {
+        running_position + last_len
     } else {
-        created_tail.document_position
+        running_position
     };
 
     Ok((
@@ -1415,8 +1486,41 @@ fn execute_insert_fragment(
 
         let first_len = first_frag.plain_text.chars().count() as i64;
 
+        // When text_before is empty and we can't merge, overwrite the current
+        // block with the first standalone fragment block instead of leaving an
+        // empty orphan block.
+        let overwrite_head = text_before.is_empty() && !merge_first;
+
         let mut updated_current = current_block.clone();
-        if merge_first {
+        if overwrite_head {
+            // Absorb the first fragment block into the current block position.
+            // First remove existing elements on the current block.
+            let elem_ids =
+                uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
+            for eid in &elem_ids {
+                uow.remove_inline_element(eid)?;
+            }
+            let head_frag = &fragment_data.blocks[0];
+            updated_current.plain_text = head_frag.plain_text.clone();
+            updated_current.text_length = head_frag.plain_text.chars().count() as i64;
+            // list will be resolved by the list_grouper below
+            updated_current.fmt_alignment = head_frag.alignment.clone();
+            updated_current.fmt_top_margin = head_frag.top_margin;
+            updated_current.fmt_bottom_margin = head_frag.bottom_margin;
+            updated_current.fmt_left_margin = head_frag.left_margin;
+            updated_current.fmt_right_margin = head_frag.right_margin;
+            updated_current.fmt_heading_level = head_frag.heading_level;
+            updated_current.fmt_indent = head_frag.indent;
+            updated_current.fmt_text_indent = head_frag.text_indent;
+            updated_current.fmt_marker = head_frag.marker.clone();
+            updated_current.fmt_tab_positions = head_frag.tab_positions.clone();
+            updated_current.fmt_line_height = head_frag.line_height;
+            updated_current.fmt_non_breakable_lines = head_frag.non_breakable_lines;
+            updated_current.fmt_direction = head_frag.direction.clone();
+            updated_current.fmt_background_color = head_frag.background_color.clone();
+            updated_current.fmt_is_code_block = head_frag.is_code_block;
+            updated_current.fmt_code_language = head_frag.code_language.clone();
+        } else if merge_first {
             updated_current.plain_text = text_before.clone() + &first_frag.plain_text;
             updated_current.text_length = text_before.chars().count() as i64 + first_len;
         } else {
@@ -1424,31 +1528,78 @@ fn execute_insert_fragment(
             updated_current.text_length = text_before.chars().count() as i64;
         }
         updated_current.updated_at = now;
-        uow.update_block(&updated_current)?;
 
-        if merge_first {
-            create_frag_elements(uow, &first_frag.elements, current_block.id)?;
+        // Determine the list for the overwritten head block
+        let mut list_grouper = ListGrouper::new();
+        // Pre-seed with the adjacent block's list for continuation (Word behavior)
+        if !overwrite_head {
+            if let Some(list_id) = current_block.list
+                && let Ok(Some(list_entity)) = uow.get_list(&list_id)
+            {
+                list_grouper
+                    .register(list_id, list_entity.style.clone(), list_entity.indent as u32);
+            }
+        }
+
+        if overwrite_head {
+            let head_frag = &fragment_data.blocks[0];
+            let head_list_id = if let Some(ref frag_list) = head_frag.list {
+                if let Some(existing_id) =
+                    list_grouper.try_reuse(&frag_list.style, frag_list.indent as u32)
+                {
+                    Some(existing_id)
+                } else {
+                    let list = frag_list.to_entity();
+                    let created_list = uow.create_list(&list, doc_id, -1)?;
+                    list_grouper.register(
+                        created_list.id,
+                        frag_list.style.clone(),
+                        frag_list.indent as u32,
+                    );
+                    Some(created_list.id)
+                }
+            } else {
+                list_grouper.reset();
+                None
+            };
+            updated_current.list = head_list_id;
+            updated_current.elements = Vec::new();
+            uow.update_with_relationships_block(&updated_current)?;
+            create_frag_elements(uow, &head_frag.elements, current_block.id)?;
+            if head_frag.elements.is_empty() {
+                let elem = InlineElement {
+                    id: 0,
+                    created_at: now,
+                    updated_at: now,
+                    content: InlineContent::Text(String::new()),
+                    ..Default::default()
+                };
+                uow.create_inline_element(&elem, current_block.id, -1)?;
+            }
+        } else {
+            uow.update_block(&updated_current)?;
+            if merge_first {
+                create_frag_elements(uow, &first_frag.elements, current_block.id)?;
+            }
         }
 
         let mut new_block_ids: Vec<EntityId> = Vec::new();
-        let mut total_new_chars: i64 = if merge_first { first_len } else { 0 };
-        let mut running_position =
-            current_block.document_position + updated_current.text_length + 1;
+        let head_chars = updated_current.text_length;
+        let mut total_new_chars: i64 = if merge_first || overwrite_head {
+            head_chars - current_block.text_length
+        } else {
+            0
+        };
+        let mut running_position = current_block.document_position + head_chars + 1;
 
-        let middle_start = if merge_first { 1 } else { 0 };
+        // overwrite_head already consumed first frag block, so skip it
+        let middle_start = if merge_first || overwrite_head { 1 } else { 0 };
         let middle_end = if merge_last {
             fragment_data.blocks.len() - 1
         } else {
             fragment_data.blocks.len()
         };
 
-        let mut list_grouper = ListGrouper::new();
-        // Pre-seed with the adjacent block's list for continuation (Word behavior)
-        if let Some(list_id) = current_block.list
-            && let Ok(Some(list_entity)) = uow.get_list(&list_id)
-        {
-            list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
-        }
         for frag_block in &fragment_data.blocks[middle_start..middle_end] {
             let block_text_len = frag_block.plain_text.chars().count() as i64;
 
@@ -1528,48 +1679,61 @@ fn execute_insert_fragment(
         } else {
             text_after.clone()
         };
-        let tail_block = Block {
-            id: 0,
-            created_at: now,
-            updated_at: now,
-            elements: vec![],
-            list: current_block.list,
-            text_length: tail_plain.chars().count() as i64,
-            document_position: running_position,
-            plain_text: tail_plain,
-            fmt_alignment: current_block.fmt_alignment.clone(),
-            fmt_top_margin: current_block.fmt_top_margin,
-            fmt_bottom_margin: current_block.fmt_bottom_margin,
-            fmt_left_margin: current_block.fmt_left_margin,
-            fmt_right_margin: current_block.fmt_right_margin,
-            fmt_heading_level: current_block.fmt_heading_level,
-            fmt_indent: current_block.fmt_indent,
-            fmt_text_indent: current_block.fmt_text_indent,
-            fmt_marker: current_block.fmt_marker.clone(),
-            fmt_tab_positions: current_block.fmt_tab_positions.clone(),
-            fmt_line_height: current_block.fmt_line_height,
-            fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
-            fmt_direction: current_block.fmt_direction.clone(),
-            fmt_background_color: current_block.fmt_background_color.clone(),
-            fmt_is_code_block: current_block.fmt_is_code_block,
-            fmt_code_language: current_block.fmt_code_language.clone(),
-        };
 
-        let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
-        let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
+        // When tail would be empty (no text, not merging), skip creating it
+        let skip_tail = tail_plain.is_empty() && !merge_last;
 
-        if merge_last {
-            create_frag_elements(uow, &last_frag.elements, created_tail.id)?;
-        }
-        for after_elem in &after_elements {
-            uow.create_inline_element(after_elem, created_tail.id, -1)?;
+        let mut created_tail_id: Option<EntityId> = None;
+        let mut tail_text_len: i64 = 0;
+
+        if !skip_tail {
+            let tail_block = Block {
+                id: 0,
+                created_at: now,
+                updated_at: now,
+                elements: vec![],
+                list: if overwrite_head { None } else { current_block.list },
+                text_length: tail_plain.chars().count() as i64,
+                document_position: running_position,
+                plain_text: tail_plain,
+                fmt_alignment: if overwrite_head { None } else { current_block.fmt_alignment.clone() },
+                fmt_top_margin: if overwrite_head { None } else { current_block.fmt_top_margin },
+                fmt_bottom_margin: if overwrite_head { None } else { current_block.fmt_bottom_margin },
+                fmt_left_margin: if overwrite_head { None } else { current_block.fmt_left_margin },
+                fmt_right_margin: if overwrite_head { None } else { current_block.fmt_right_margin },
+                fmt_heading_level: if overwrite_head { None } else { current_block.fmt_heading_level },
+                fmt_indent: if overwrite_head { None } else { current_block.fmt_indent },
+                fmt_text_indent: if overwrite_head { None } else { current_block.fmt_text_indent },
+                fmt_marker: if overwrite_head { None } else { current_block.fmt_marker.clone() },
+                fmt_tab_positions: if overwrite_head { vec![] } else { current_block.fmt_tab_positions.clone() },
+                fmt_line_height: if overwrite_head { None } else { current_block.fmt_line_height },
+                fmt_non_breakable_lines: if overwrite_head { None } else { current_block.fmt_non_breakable_lines },
+                fmt_direction: if overwrite_head { None } else { current_block.fmt_direction.clone() },
+                fmt_background_color: if overwrite_head { None } else { current_block.fmt_background_color.clone() },
+                fmt_is_code_block: if overwrite_head { None } else { current_block.fmt_is_code_block },
+                fmt_code_language: if overwrite_head { None } else { current_block.fmt_code_language.clone() },
+            };
+
+            let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
+            let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
+            tail_text_len = created_tail.text_length;
+            created_tail_id = Some(created_tail.id);
+
+            if merge_last {
+                create_frag_elements(uow, &last_frag.elements, created_tail.id)?;
+            }
+            for after_elem in &after_elements {
+                uow.create_inline_element(after_elem, created_tail.id, -1)?;
+            }
         }
 
         // Update frame child_order
         let mut updated_frame = frame.clone();
         let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
         let mut new_child_ids: Vec<i64> = new_block_ids.iter().map(|id| *id as i64).collect();
-        new_child_ids.push(created_tail.id as i64);
+        if let Some(tid) = created_tail_id {
+            new_child_ids.push(tid as i64);
+        }
 
         for (i, id) in new_child_ids.iter().enumerate() {
             updated_frame
@@ -1582,9 +1746,14 @@ fn execute_insert_fragment(
         uow.update_frame(&updated_frame)?;
 
         let standalone_count = (middle_end - middle_start) as i64;
-        let blocks_added = standalone_count + 1;
+        let tail_count: i64 = if skip_tail { 0 } else { 1 };
+        let blocks_added = standalone_count + tail_count;
         let original_next_pos = current_block.document_position + current_block.text_length + 1;
-        let new_next_pos = running_position + created_tail.text_length + 1;
+        let new_next_pos = if skip_tail {
+            running_position
+        } else {
+            running_position + tail_text_len + 1
+        };
         let pos_shift = new_next_pos - original_next_pos;
 
         let mut blocks_to_update: Vec<Block> = Vec::new();
@@ -1604,10 +1773,13 @@ fn execute_insert_fragment(
         updated_doc.updated_at = now;
         uow.update_document(&updated_doc)?;
 
-        let new_position = if merge_last {
-            created_tail.document_position + last_len
+        let new_position = if skip_tail {
+            // Position at end of last standalone block
+            running_position - 1
+        } else if merge_last {
+            running_position + last_len
         } else {
-            created_tail.document_position
+            running_position
         };
 
         Ok((
@@ -1622,140 +1794,293 @@ fn execute_insert_fragment(
         let frag_block = &fragment_data.blocks[0];
         let block_text_len = frag_block.plain_text.chars().count() as i64;
 
-        let mut updated_current = current_block.clone();
-        updated_current.plain_text = text_before.clone();
-        updated_current.text_length = text_before.chars().count() as i64;
-        updated_current.updated_at = now;
-        uow.update_block(&updated_current)?;
+        // When text_before is empty, overwrite the current block with the
+        // fragment block rather than leaving an empty orphan.
+        let overwrite_head = text_before.is_empty();
 
-        let mut running_position =
-            current_block.document_position + updated_current.text_length + 1;
+        if overwrite_head {
+            let elem_ids =
+                uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
+            for eid in &elem_ids {
+                uow.remove_inline_element(eid)?;
+            }
+            let list_id = if let Some(ref frag_list) = frag_block.list {
+                let list = frag_list.to_entity();
+                let created_list = uow.create_list(&list, doc_id, -1)?;
+                Some(created_list.id)
+            } else {
+                None
+            };
+            let mut updated_current = current_block.clone();
+            updated_current.plain_text = frag_block.plain_text.clone();
+            updated_current.text_length = block_text_len;
+            updated_current.list = list_id;
+            updated_current.fmt_alignment = frag_block.alignment.clone();
+            updated_current.fmt_top_margin = frag_block.top_margin;
+            updated_current.fmt_bottom_margin = frag_block.bottom_margin;
+            updated_current.fmt_left_margin = frag_block.left_margin;
+            updated_current.fmt_right_margin = frag_block.right_margin;
+            updated_current.fmt_heading_level = frag_block.heading_level;
+            updated_current.fmt_indent = frag_block.indent;
+            updated_current.fmt_text_indent = frag_block.text_indent;
+            updated_current.fmt_marker = frag_block.marker.clone();
+            updated_current.fmt_tab_positions = frag_block.tab_positions.clone();
+            updated_current.fmt_line_height = frag_block.line_height;
+            updated_current.fmt_non_breakable_lines = frag_block.non_breakable_lines;
+            updated_current.fmt_direction = frag_block.direction.clone();
+            updated_current.fmt_background_color = frag_block.background_color.clone();
+            updated_current.fmt_is_code_block = frag_block.is_code_block;
+            updated_current.fmt_code_language = frag_block.code_language.clone();
+            updated_current.elements = Vec::new();
+            updated_current.updated_at = now;
+            uow.update_with_relationships_block(&updated_current)?;
 
-        let list_id = if let Some(ref frag_list) = frag_block.list {
-            let list = frag_list.to_entity();
-            let created_list = uow.create_list(&list, doc_id, -1)?;
-            Some(created_list.id)
+            create_frag_elements(uow, &frag_block.elements, current_block.id)?;
+            if frag_block.elements.is_empty() {
+                let elem = InlineElement {
+                    id: 0,
+                    created_at: now,
+                    updated_at: now,
+                    content: InlineContent::Text(String::new()),
+                    ..Default::default()
+                };
+                uow.create_inline_element(&elem, current_block.id, -1)?;
+            }
+
+            let mut running_position =
+                current_block.document_position + block_text_len + 1;
+            let skip_tail = text_after.is_empty();
+            let mut blocks_added: i64 = 0;
+            let mut created_tail_id: Option<EntityId> = None;
+            let mut tail_text_len: i64 = 0;
+
+            if !skip_tail {
+                // overwrite_head is always true here, so use defaults for tail
+                let tail_block = Block {
+                    id: 0,
+                    created_at: now,
+                    updated_at: now,
+                    elements: vec![],
+                    list: None,
+                    text_length: text_after.chars().count() as i64,
+                    document_position: running_position,
+                    plain_text: text_after,
+                    fmt_alignment: None,
+                    fmt_top_margin: None,
+                    fmt_bottom_margin: None,
+                    fmt_left_margin: None,
+                    fmt_right_margin: None,
+                    fmt_heading_level: None,
+                    fmt_indent: None,
+                    fmt_text_indent: None,
+                    fmt_marker: None,
+                    fmt_tab_positions: vec![],
+                    fmt_line_height: None,
+                    fmt_non_breakable_lines: None,
+                    fmt_direction: None,
+                    fmt_background_color: None,
+                    fmt_is_code_block: None,
+                    fmt_code_language: None,
+                };
+
+                let created_tail =
+                    uow.create_block(&tail_block, frame_id, (block_idx + 1) as i32)?;
+                tail_text_len = created_tail.text_length;
+                created_tail_id = Some(created_tail.id);
+                blocks_added = 1;
+
+                for after_elem in &after_elements {
+                    uow.create_inline_element(after_elem, created_tail.id, -1)?;
+                }
+
+                let mut updated_frame = frame.clone();
+                let child_order_insert_pos =
+                    (block_idx + 1).min(updated_frame.child_order.len());
+                updated_frame
+                    .child_order
+                    .insert(child_order_insert_pos, created_tail.id as i64);
+                updated_frame.updated_at = now;
+                updated_frame.blocks =
+                    uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+                uow.update_frame(&updated_frame)?;
+
+                running_position += tail_text_len + 1;
+            }
+
+            let original_next_pos =
+                current_block.document_position + current_block.text_length + 1;
+            let new_next_pos = if skip_tail {
+                current_block.document_position + block_text_len + 1
+            } else {
+                running_position
+            };
+            let pos_shift = new_next_pos - original_next_pos;
+
+            let mut blocks_to_update: Vec<Block> = Vec::new();
+            for b in &blocks[(block_idx + 1)..] {
+                let mut ub = b.clone();
+                ub.document_position += pos_shift;
+                ub.updated_at = now;
+                blocks_to_update.push(ub);
+            }
+            if !blocks_to_update.is_empty() {
+                uow.update_block_multi(&blocks_to_update)?;
+            }
+
+            let char_delta = block_text_len - current_block.text_length;
+            let mut updated_doc = document.clone();
+            updated_doc.block_count += blocks_added;
+            updated_doc.character_count += char_delta;
+            updated_doc.updated_at = now;
+            uow.update_document(&updated_doc)?;
+
+            let new_position = current_block.document_position + block_text_len;
+            Ok((
+                InsertFragmentResultDto {
+                    new_position,
+                    blocks_added,
+                },
+                snapshot,
+            ))
         } else {
-            None
-        };
+            // Normal path: text_before is not empty, keep the head block
+            let mut updated_current = current_block.clone();
+            updated_current.plain_text = text_before.clone();
+            updated_current.text_length = text_before.chars().count() as i64;
+            updated_current.updated_at = now;
+            uow.update_block(&updated_current)?;
 
-        let new_block = Block {
-            id: 0,
-            created_at: now,
-            updated_at: now,
-            elements: vec![],
-            list: list_id,
-            text_length: block_text_len,
-            document_position: running_position,
-            plain_text: frag_block.plain_text.clone(),
-            fmt_alignment: frag_block.alignment.clone(),
-            fmt_top_margin: frag_block.top_margin,
-            fmt_bottom_margin: frag_block.bottom_margin,
-            fmt_left_margin: frag_block.left_margin,
-            fmt_right_margin: frag_block.right_margin,
-            fmt_heading_level: frag_block.heading_level,
-            fmt_indent: frag_block.indent,
-            fmt_text_indent: frag_block.text_indent,
-            fmt_marker: frag_block.marker.clone(),
-            fmt_tab_positions: frag_block.tab_positions.clone(),
-            fmt_line_height: frag_block.line_height,
-            fmt_non_breakable_lines: frag_block.non_breakable_lines,
-            fmt_direction: frag_block.direction.clone(),
-            fmt_background_color: frag_block.background_color.clone(),
-            fmt_is_code_block: frag_block.is_code_block,
-            fmt_code_language: frag_block.code_language.clone(),
-        };
+            let mut running_position =
+                current_block.document_position + updated_current.text_length + 1;
 
-        let created_block = uow.create_block(&new_block, frame_id, (block_idx + 1) as i32)?;
-        create_frag_elements(uow, &frag_block.elements, created_block.id)?;
+            let list_id = if let Some(ref frag_list) = frag_block.list {
+                let list = frag_list.to_entity();
+                let created_list = uow.create_list(&list, doc_id, -1)?;
+                Some(created_list.id)
+            } else {
+                None
+            };
 
-        if frag_block.elements.is_empty() {
-            let elem = InlineElement {
+            let new_block = Block {
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                content: InlineContent::Text(String::new()),
-                ..Default::default()
+                elements: vec![],
+                list: list_id,
+                text_length: block_text_len,
+                document_position: running_position,
+                plain_text: frag_block.plain_text.clone(),
+                fmt_alignment: frag_block.alignment.clone(),
+                fmt_top_margin: frag_block.top_margin,
+                fmt_bottom_margin: frag_block.bottom_margin,
+                fmt_left_margin: frag_block.left_margin,
+                fmt_right_margin: frag_block.right_margin,
+                fmt_heading_level: frag_block.heading_level,
+                fmt_indent: frag_block.indent,
+                fmt_text_indent: frag_block.text_indent,
+                fmt_marker: frag_block.marker.clone(),
+                fmt_tab_positions: frag_block.tab_positions.clone(),
+                fmt_line_height: frag_block.line_height,
+                fmt_non_breakable_lines: frag_block.non_breakable_lines,
+                fmt_direction: frag_block.direction.clone(),
+                fmt_background_color: frag_block.background_color.clone(),
+                fmt_is_code_block: frag_block.is_code_block,
+                fmt_code_language: frag_block.code_language.clone(),
             };
-            uow.create_inline_element(&elem, created_block.id, -1)?;
+
+            let created_block = uow.create_block(&new_block, frame_id, (block_idx + 1) as i32)?;
+            create_frag_elements(uow, &frag_block.elements, created_block.id)?;
+
+            if frag_block.elements.is_empty() {
+                let elem = InlineElement {
+                    id: 0,
+                    created_at: now,
+                    updated_at: now,
+                    content: InlineContent::Text(String::new()),
+                    ..Default::default()
+                };
+                uow.create_inline_element(&elem, created_block.id, -1)?;
+            }
+
+            running_position += block_text_len + 1;
+
+            let tail_block = Block {
+                id: 0,
+                created_at: now,
+                updated_at: now,
+                elements: vec![],
+                list: current_block.list,
+                text_length: text_after.chars().count() as i64,
+                document_position: running_position,
+                plain_text: text_after,
+                fmt_alignment: current_block.fmt_alignment.clone(),
+                fmt_top_margin: current_block.fmt_top_margin,
+                fmt_bottom_margin: current_block.fmt_bottom_margin,
+                fmt_left_margin: current_block.fmt_left_margin,
+                fmt_right_margin: current_block.fmt_right_margin,
+                fmt_heading_level: current_block.fmt_heading_level,
+                fmt_indent: current_block.fmt_indent,
+                fmt_text_indent: current_block.fmt_text_indent,
+                fmt_marker: current_block.fmt_marker.clone(),
+                fmt_tab_positions: current_block.fmt_tab_positions.clone(),
+                fmt_line_height: current_block.fmt_line_height,
+                fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
+                fmt_direction: current_block.fmt_direction.clone(),
+                fmt_background_color: current_block.fmt_background_color.clone(),
+                fmt_is_code_block: current_block.fmt_is_code_block,
+                fmt_code_language: current_block.fmt_code_language.clone(),
+            };
+
+            let created_tail =
+                uow.create_block(&tail_block, frame_id, (block_idx + 2) as i32)?;
+            for after_elem in &after_elements {
+                uow.create_inline_element(after_elem, created_tail.id, -1)?;
+            }
+
+            let mut updated_frame = frame.clone();
+            let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
+            let new_child_ids = [created_block.id as i64, created_tail.id as i64];
+            for (i, id) in new_child_ids.iter().enumerate() {
+                updated_frame
+                    .child_order
+                    .insert(child_order_insert_pos + i, *id);
+            }
+            updated_frame.updated_at = now;
+            updated_frame.blocks =
+                uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+            uow.update_frame(&updated_frame)?;
+
+            let blocks_added: i64 = 2;
+            let original_next_pos =
+                current_block.document_position + current_block.text_length + 1;
+            let new_next_pos = running_position + created_tail.text_length + 1;
+            let pos_shift = new_next_pos - original_next_pos;
+
+            let mut blocks_to_update: Vec<Block> = Vec::new();
+            for b in &blocks[(block_idx + 1)..] {
+                let mut ub = b.clone();
+                ub.document_position += pos_shift;
+                ub.updated_at = now;
+                blocks_to_update.push(ub);
+            }
+            if !blocks_to_update.is_empty() {
+                uow.update_block_multi(&blocks_to_update)?;
+            }
+
+            let mut updated_doc = document.clone();
+            updated_doc.block_count += blocks_added;
+            updated_doc.character_count += block_text_len;
+            updated_doc.updated_at = now;
+            uow.update_document(&updated_doc)?;
+
+            Ok((
+                InsertFragmentResultDto {
+                    new_position: running_position,
+                    blocks_added: 1,
+                },
+                snapshot,
+            ))
         }
-
-        running_position += block_text_len + 1;
-
-        let tail_block = Block {
-            id: 0,
-            created_at: now,
-            updated_at: now,
-            elements: vec![],
-            list: current_block.list,
-            text_length: text_after.chars().count() as i64,
-            document_position: running_position,
-            plain_text: text_after,
-            fmt_alignment: current_block.fmt_alignment.clone(),
-            fmt_top_margin: current_block.fmt_top_margin,
-            fmt_bottom_margin: current_block.fmt_bottom_margin,
-            fmt_left_margin: current_block.fmt_left_margin,
-            fmt_right_margin: current_block.fmt_right_margin,
-            fmt_heading_level: current_block.fmt_heading_level,
-            fmt_indent: current_block.fmt_indent,
-            fmt_text_indent: current_block.fmt_text_indent,
-            fmt_marker: current_block.fmt_marker.clone(),
-            fmt_tab_positions: current_block.fmt_tab_positions.clone(),
-            fmt_line_height: current_block.fmt_line_height,
-            fmt_non_breakable_lines: current_block.fmt_non_breakable_lines,
-            fmt_direction: current_block.fmt_direction.clone(),
-            fmt_background_color: current_block.fmt_background_color.clone(),
-            fmt_is_code_block: current_block.fmt_is_code_block,
-            fmt_code_language: current_block.fmt_code_language.clone(),
-        };
-
-        let created_tail = uow.create_block(&tail_block, frame_id, (block_idx + 2) as i32)?;
-        for after_elem in &after_elements {
-            uow.create_inline_element(after_elem, created_tail.id, -1)?;
-        }
-
-        let mut updated_frame = frame.clone();
-        let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
-        let new_child_ids = [created_block.id as i64, created_tail.id as i64];
-        for (i, id) in new_child_ids.iter().enumerate() {
-            updated_frame
-                .child_order
-                .insert(child_order_insert_pos + i, *id);
-        }
-        updated_frame.updated_at = now;
-        updated_frame.blocks =
-            uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
-        uow.update_frame(&updated_frame)?;
-
-        let blocks_added: i64 = 2;
-        let original_next_pos = current_block.document_position + current_block.text_length + 1;
-        let new_next_pos = running_position + created_tail.text_length + 1;
-        let pos_shift = new_next_pos - original_next_pos;
-
-        let mut blocks_to_update: Vec<Block> = Vec::new();
-        for b in &blocks[(block_idx + 1)..] {
-            let mut ub = b.clone();
-            ub.document_position += pos_shift;
-            ub.updated_at = now;
-            blocks_to_update.push(ub);
-        }
-        if !blocks_to_update.is_empty() {
-            uow.update_block_multi(&blocks_to_update)?;
-        }
-
-        let mut updated_doc = document.clone();
-        updated_doc.block_count += blocks_added;
-        updated_doc.character_count += block_text_len;
-        updated_doc.updated_at = now;
-        uow.update_document(&updated_doc)?;
-
-        Ok((
-            InsertFragmentResultDto {
-                new_position: running_position,
-                blocks_added: 1,
-            },
-            snapshot,
-        ))
     }
 }
 
