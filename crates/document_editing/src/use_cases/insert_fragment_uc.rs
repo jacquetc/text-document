@@ -10,9 +10,11 @@ use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
+use common::direct_access::table::TableRelationshipField;
 use common::entities::{
     Block, Document, Frame, InlineContent, InlineElement, List, Root, Table, TableCell,
 };
+use std::collections::HashMap;
 use common::parser_tools::fragment_schema::{FragmentBlock, FragmentData, FragmentTable};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
@@ -44,13 +46,224 @@ pub trait InsertFragmentUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "Block", action = "Remove")]
+#[macros::uow_action(entity = "InlineElement", action = "Remove")]
+#[macros::uow_action(entity = "InlineElement", action = "RemoveMulti")]
+#[macros::uow_action(entity = "List", action = "Get")]
 #[macros::uow_action(entity = "List", action = "Create")]
 #[macros::uow_action(entity = "Frame", action = "Create")]
+#[macros::uow_action(entity = "Table", action = "Get")]
 #[macros::uow_action(entity = "Table", action = "Create")]
+#[macros::uow_action(entity = "Table", action = "GetRelationship")]
+#[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 #[macros::uow_action(entity = "TableCell", action = "Create")]
 pub trait InsertFragmentUnitOfWorkTrait: CommandUnitOfWork {}
 
 impl_cell_frame_creator!(dyn InsertFragmentUnitOfWorkTrait);
+
+/// Build a mapping from block_id → (cell_frame_id, table_id) for all tables in the document.
+fn build_block_to_cell_map(
+    uow: &Box<dyn InsertFragmentUnitOfWorkTrait>,
+    doc_id: EntityId,
+) -> Result<HashMap<EntityId, (EntityId, EntityId)>> {
+    let table_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
+    let mut map: HashMap<EntityId, (EntityId, EntityId)> = HashMap::new();
+    for &tid in &table_ids {
+        let cell_ids = uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
+        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+        for cell in cells_opt.into_iter().flatten() {
+            if let Some(cf_id) = cell.cell_frame {
+                let blk_ids =
+                    uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+                for bid in blk_ids {
+                    map.insert(bid, (cf_id, tid));
+                }
+            }
+        }
+    }
+    Ok(map)
+}
+
+/// Replace cell contents in an existing table with fragment data.
+/// Returns Ok(Some(result)) if replacement was performed, Ok(None) if not applicable.
+fn try_replace_table_cells(
+    uow: &mut Box<dyn InsertFragmentUnitOfWorkTrait>,
+    dto: &InsertFragmentDto,
+    fragment_data: &FragmentData,
+    doc_id: EntityId,
+) -> Result<Option<(InsertFragmentResultDto, EntityTreeSnapshot)>> {
+    // Only handle single-table fragments
+    if fragment_data.tables.len() != 1 {
+        return Ok(None);
+    }
+    let frag_table = &fragment_data.tables[0];
+
+    // Build block→cell mapping to detect if cursor is inside a table
+    let block_to_cell = build_block_to_cell_map(uow, doc_id)?;
+
+    // Find the block at cursor position
+    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+    let frame_id = *frame_ids
+        .first()
+        .ok_or_else(|| anyhow!("Document has no frames"))?;
+
+    let block_ids = uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
+    let blocks_opt = uow.get_block_multi(&block_ids)?;
+    let mut all_blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+
+    // Also collect cell blocks
+    for &tid in &uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)? {
+        let cell_ids = uow.get_table_relationship(&tid, &TableRelationshipField::Cells)?;
+        let cells = uow.get_table_cell_multi(&cell_ids)?;
+        for cell in cells.into_iter().flatten() {
+            if let Some(cf_id) = cell.cell_frame {
+                let cf_blk_ids =
+                    uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+                let cf_blks = uow.get_block_multi(&cf_blk_ids)?;
+                all_blocks.extend(cf_blks.into_iter().flatten());
+            }
+        }
+    }
+    all_blocks.sort_by_key(|b| b.document_position);
+
+    let (cursor_block, _, _) = find_block_at_position(&all_blocks, dto.position)?;
+
+    // Check if cursor block is inside a table
+    let target_table_id = match block_to_cell.get(&cursor_block.id) {
+        Some((_, tid)) => *tid,
+        None => return Ok(None), // cursor not in a table
+    };
+
+    // Get the target table's cells
+    let target_table = uow
+        .get_table(&target_table_id)?
+        .ok_or_else(|| anyhow!("Target table not found"))?;
+    let target_cell_ids =
+        uow.get_table_relationship(&target_table_id, &TableRelationshipField::Cells)?;
+    let target_cells_opt = uow.get_table_cell_multi(&target_cell_ids)?;
+    let target_cells: Vec<TableCell> = target_cells_opt.into_iter().flatten().collect();
+
+    // Check dimensions match (fragment fits within table)
+    if frag_table.rows > target_table.rows as usize
+        || frag_table.columns > target_table.columns as usize
+    {
+        return Ok(None); // fragment too large, fall back to new table
+    }
+
+    let now = chrono::Utc::now();
+    let snapshot = uow.snapshot_document(&[doc_id])?;
+
+    // Find the cursor's cell position to use as offset
+    let cursor_cell = target_cells
+        .iter()
+        .find(|c| {
+            c.cell_frame
+                .is_some_and(|cf| block_to_cell.get(&cursor_block.id).is_some_and(|(cf2, _)| cf == *cf2))
+        });
+    let (base_row, base_col) = cursor_cell
+        .map(|c| (c.row as usize, c.column as usize))
+        .unwrap_or((0, 0));
+
+    // Replace cell contents
+    for frag_cell in &frag_table.cells {
+        let target_row = base_row + frag_cell.row;
+        let target_col = base_col + frag_cell.column;
+
+        // Find the matching target cell
+        let target = target_cells.iter().find(|c| {
+            c.row as usize == target_row && c.column as usize == target_col
+        });
+        let target = match target {
+            Some(t) => t,
+            None => continue, // no matching cell, skip
+        };
+
+        let cf_id = match target.cell_frame {
+            Some(id) => id,
+            None => continue,
+        };
+
+        // Clear existing cell content
+        let existing_blk_ids =
+            uow.get_frame_relationship(&cf_id, &FrameRelationshipField::Blocks)?;
+        let existing_blks_opt = uow.get_block_multi(&existing_blk_ids)?;
+        let existing_blks: Vec<Block> = existing_blks_opt.into_iter().flatten().collect();
+
+        // Remove all existing blocks except the first (which we'll update)
+        for blk in existing_blks.iter().skip(1) {
+            let elem_ids =
+                uow.get_block_relationship(&blk.id, &BlockRelationshipField::Elements)?;
+            uow.remove_inline_element_multi(&elem_ids)?;
+            uow.remove_block(&blk.id)?;
+        }
+
+        if let Some(first_blk) = existing_blks.first() {
+            // Clear existing elements from first block
+            let elem_ids =
+                uow.get_block_relationship(&first_blk.id, &BlockRelationshipField::Elements)?;
+            uow.remove_inline_element_multi(&elem_ids)?;
+
+            if let Some(first_frag_blk) = frag_cell.blocks.first() {
+                // Update first block with fragment content
+                let mut updated = first_blk.clone();
+                updated.plain_text = first_frag_blk.plain_text.clone();
+                updated.text_length = first_frag_blk.plain_text.chars().count() as i64;
+                updated.updated_at = now;
+                uow.update_block(&updated)?;
+
+                // Create elements for first block
+                for frag_elem in &first_frag_blk.elements {
+                    let elem = frag_elem.to_entity();
+                    uow.create_inline_element(&elem, first_blk.id, -1)?;
+                }
+
+                // Create additional blocks for multi-block cells
+                for extra_frag in &frag_cell.blocks[1..] {
+                    let extra_block = Block {
+                        id: 0,
+                        created_at: now,
+                        updated_at: now,
+                        elements: vec![],
+                        list: None,
+                        text_length: extra_frag.plain_text.chars().count() as i64,
+                        document_position: 0, // will be reassigned
+                        plain_text: extra_frag.plain_text.clone(),
+                        ..Default::default()
+                    };
+                    let created = uow.create_block(&extra_block, cf_id, -1)?;
+                    for frag_elem in &extra_frag.elements {
+                        let elem = frag_elem.to_entity();
+                        uow.create_inline_element(&elem, created.id, -1)?;
+                    }
+                }
+            } else {
+                // Empty fragment cell: clear the block
+                let mut updated = first_blk.clone();
+                updated.plain_text = String::new();
+                updated.text_length = 0;
+                updated.updated_at = now;
+                uow.update_block(&updated)?;
+
+                let empty_elem = InlineElement {
+                    id: 0,
+                    created_at: now,
+                    updated_at: now,
+                    content: InlineContent::Empty,
+                    ..Default::default()
+                };
+                uow.create_inline_element(&empty_elem, first_blk.id, -1)?;
+            }
+        }
+    }
+
+    Ok(Some((
+        InsertFragmentResultDto {
+            new_position: dto.position,
+            blocks_added: 0,
+        },
+        snapshot,
+    )))
+}
 
 /// Insert a table-only fragment at the cursor position.
 /// Creates one table per `FragmentTable` entry, each with its cells and content.
@@ -68,6 +281,11 @@ fn insert_table_fragment(
     let doc_id = *doc_ids
         .first()
         .ok_or_else(|| anyhow!("Root has no document"))?;
+
+    // Try to replace cell contents in an existing table first (Word behavior)
+    if let Some(result) = try_replace_table_cells(uow, dto, fragment_data, doc_id)? {
+        return Ok(result);
+    }
 
     let document = uow
         .get_document(&doc_id)?
@@ -492,6 +710,12 @@ fn insert_mixed_fragment(
     }
 
     let mut list_grouper = ListGrouper::new();
+    // Pre-seed with the adjacent block's list for continuation (Word behavior)
+    if let Some(list_id) = current_block.list {
+        if let Ok(Some(list_entity)) = uow.get_list(&list_id) {
+            list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
+        }
+    }
 
     // ── Process items in order ───────────────────────────────────
     for item in &items {
@@ -1114,6 +1338,12 @@ fn execute_insert_fragment(
         };
 
         let mut list_grouper = ListGrouper::new();
+        // Pre-seed with the adjacent block's list for continuation (Word behavior)
+        if let Some(list_id) = current_block.list {
+            if let Ok(Some(list_entity)) = uow.get_list(&list_id) {
+                list_grouper.register(list_id, list_entity.style.clone(), list_entity.indent as u32);
+            }
+        }
         for frag_block in &fragment_data.blocks[middle_start..middle_end] {
             let block_text_len = frag_block.plain_text.chars().count() as i64;
 

@@ -102,9 +102,16 @@ impl CommandUnitOfWork for InsertFragmentUnitOfWork {
 #[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "InlineElement", action = "Update")]
 #[macros::uow_action(entity = "InlineElement", action = "Create")]
+#[macros::uow_action(entity = "Block", action = "Remove")]
+#[macros::uow_action(entity = "InlineElement", action = "Remove")]
+#[macros::uow_action(entity = "InlineElement", action = "RemoveMulti")]
+#[macros::uow_action(entity = "List", action = "Get")]
 #[macros::uow_action(entity = "List", action = "Create")]
 #[macros::uow_action(entity = "Frame", action = "Create")]
+#[macros::uow_action(entity = "Table", action = "Get")]
 #[macros::uow_action(entity = "Table", action = "Create")]
+#[macros::uow_action(entity = "Table", action = "GetRelationship")]
+#[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 #[macros::uow_action(entity = "TableCell", action = "Create")]
 impl InsertFragmentUnitOfWorkTrait for InsertFragmentUnitOfWork {}
 
