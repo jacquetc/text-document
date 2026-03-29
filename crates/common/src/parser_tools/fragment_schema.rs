@@ -21,6 +21,19 @@ pub struct FragmentTable {
     /// blocks `[index..]` come after.  Default `0` for backward compat.
     #[serde(default)]
     pub block_insert_index: usize,
+    // ── Table-level formatting ────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_border: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_cell_spacing: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_cell_padding: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_width: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_alignment: Option<Alignment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub column_widths: Vec<i64>,
 }
 
 /// One cell within a [`FragmentTable`].
@@ -31,6 +44,15 @@ pub struct FragmentTableCell {
     pub row_span: usize,
     pub column_span: usize,
     pub blocks: Vec<FragmentBlock>,
+    // ── Cell-level formatting ─────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_padding: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_border: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_vertical_alignment: Option<CellVerticalAlignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fmt_background_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

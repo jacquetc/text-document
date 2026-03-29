@@ -118,12 +118,16 @@ fn insert_table_fragment(
             cells: vec![],
             rows: frag_table.rows as i64,
             columns: frag_table.columns as i64,
-            column_widths: vec![0; frag_table.columns],
-            fmt_border: None,
-            fmt_cell_spacing: None,
-            fmt_cell_padding: None,
-            fmt_width: None,
-            fmt_alignment: None,
+            column_widths: if frag_table.column_widths.is_empty() {
+                vec![0; frag_table.columns]
+            } else {
+                frag_table.column_widths.clone()
+            },
+            fmt_border: frag_table.fmt_border,
+            fmt_cell_spacing: frag_table.fmt_cell_spacing,
+            fmt_cell_padding: frag_table.fmt_cell_padding,
+            fmt_width: frag_table.fmt_width,
+            fmt_alignment: frag_table.fmt_alignment.clone(),
         };
         let created_table = uow.create_table(&table, doc_id, -1)?;
 
@@ -196,10 +200,10 @@ fn insert_table_fragment(
                 row_span: frag_cell.row_span as i64,
                 column_span: frag_cell.column_span as i64,
                 cell_frame: Some(cell_frame_id),
-                fmt_padding: None,
-                fmt_border: None,
-                fmt_vertical_alignment: None,
-                fmt_background_color: None,
+                fmt_padding: frag_cell.fmt_padding,
+                fmt_border: frag_cell.fmt_border,
+                fmt_vertical_alignment: frag_cell.fmt_vertical_alignment.clone(),
+                fmt_background_color: frag_cell.fmt_background_color.clone(),
             };
             uow.create_table_cell(&cell, created_table.id, -1)?;
         }
@@ -584,12 +588,16 @@ fn insert_mixed_fragment(
                     cells: vec![],
                     rows: frag_table.rows as i64,
                     columns: frag_table.columns as i64,
-                    column_widths: vec![0; frag_table.columns],
-                    fmt_border: None,
-                    fmt_cell_spacing: None,
-                    fmt_cell_padding: None,
-                    fmt_width: None,
-                    fmt_alignment: None,
+                    column_widths: if frag_table.column_widths.is_empty() {
+                        vec![0; frag_table.columns]
+                    } else {
+                        frag_table.column_widths.clone()
+                    },
+                    fmt_border: frag_table.fmt_border,
+                    fmt_cell_spacing: frag_table.fmt_cell_spacing,
+                    fmt_cell_padding: frag_table.fmt_cell_padding,
+                    fmt_width: frag_table.fmt_width,
+                    fmt_alignment: frag_table.fmt_alignment.clone(),
                 };
                 let created_table = uow.create_table(&table, doc_id, -1)?;
 
@@ -654,10 +662,10 @@ fn insert_mixed_fragment(
                         row_span: frag_cell.row_span as i64,
                         column_span: frag_cell.column_span as i64,
                         cell_frame: Some(cell_frame_id),
-                        fmt_padding: None,
-                        fmt_border: None,
-                        fmt_vertical_alignment: None,
-                        fmt_background_color: None,
+                        fmt_padding: frag_cell.fmt_padding,
+                        fmt_border: frag_cell.fmt_border,
+                        fmt_vertical_alignment: frag_cell.fmt_vertical_alignment.clone(),
+                        fmt_background_color: frag_cell.fmt_background_color.clone(),
                     };
                     uow.create_table_cell(&cell, created_table.id, -1)?;
                 }

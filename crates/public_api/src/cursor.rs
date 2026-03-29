@@ -468,9 +468,27 @@ impl TextCursor {
         let (pos, anchor) = self.read_cursor();
         let queued = {
             let mut inner = self.doc.lock();
+
+            let (insert_pos, removed) = if pos != anchor {
+                // Composite: delete selection + insert as single undo unit
+                undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
+                let del_dto = frontend::document_editing::DeleteTextDto {
+                    position: to_i64(pos),
+                    anchor: to_i64(anchor),
+                };
+                let del_result = document_editing_commands::delete_text(
+                    &inner.ctx,
+                    Some(inner.stack_id),
+                    &del_dto,
+                )?;
+                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
+            } else {
+                (pos, 0)
+            };
+
             let dto = frontend::document_editing::InsertHtmlAtPositionDto {
-                position: to_i64(pos),
-                anchor: to_i64(anchor),
+                position: to_i64(insert_pos),
+                anchor: to_i64(insert_pos),
                 html: html.into(),
             };
             let result = document_editing_commands::insert_html_at_position(
@@ -478,8 +496,12 @@ impl TextCursor {
                 Some(inner.stack_id),
                 &dto,
             )?;
+
+            if pos != anchor {
+                undo_redo_commands::end_composite(&inner.ctx);
+            }
+
             let edit_pos = pos.min(anchor);
-            let removed = pos.max(anchor) - edit_pos;
             self.finish_edit(
                 &mut inner,
                 edit_pos,
@@ -497,9 +519,26 @@ impl TextCursor {
         let (pos, anchor) = self.read_cursor();
         let queued = {
             let mut inner = self.doc.lock();
+
+            let (insert_pos, removed) = if pos != anchor {
+                undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
+                let del_dto = frontend::document_editing::DeleteTextDto {
+                    position: to_i64(pos),
+                    anchor: to_i64(anchor),
+                };
+                let del_result = document_editing_commands::delete_text(
+                    &inner.ctx,
+                    Some(inner.stack_id),
+                    &del_dto,
+                )?;
+                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
+            } else {
+                (pos, 0)
+            };
+
             let dto = frontend::document_editing::InsertMarkdownAtPositionDto {
-                position: to_i64(pos),
-                anchor: to_i64(anchor),
+                position: to_i64(insert_pos),
+                anchor: to_i64(insert_pos),
                 markdown: markdown.into(),
             };
             let result = document_editing_commands::insert_markdown_at_position(
@@ -507,8 +546,12 @@ impl TextCursor {
                 Some(inner.stack_id),
                 &dto,
             )?;
+
+            if pos != anchor {
+                undo_redo_commands::end_composite(&inner.ctx);
+            }
+
             let edit_pos = pos.min(anchor);
-            let removed = pos.max(anchor) - edit_pos;
             self.finish_edit(
                 &mut inner,
                 edit_pos,
@@ -526,15 +569,36 @@ impl TextCursor {
         let (pos, anchor) = self.read_cursor();
         let queued = {
             let mut inner = self.doc.lock();
+
+            let (insert_pos, removed) = if pos != anchor {
+                undo_redo_commands::begin_composite(&inner.ctx, Some(inner.stack_id));
+                let del_dto = frontend::document_editing::DeleteTextDto {
+                    position: to_i64(pos),
+                    anchor: to_i64(anchor),
+                };
+                let del_result = document_editing_commands::delete_text(
+                    &inner.ctx,
+                    Some(inner.stack_id),
+                    &del_dto,
+                )?;
+                (to_usize(del_result.new_position), pos.max(anchor) - pos.min(anchor))
+            } else {
+                (pos, 0)
+            };
+
             let dto = frontend::document_editing::InsertFragmentDto {
-                position: to_i64(pos),
-                anchor: to_i64(anchor),
+                position: to_i64(insert_pos),
+                anchor: to_i64(insert_pos),
                 fragment_data: fragment.raw_data().into(),
             };
             let result =
                 document_editing_commands::insert_fragment(&inner.ctx, Some(inner.stack_id), &dto)?;
+
+            if pos != anchor {
+                undo_redo_commands::end_composite(&inner.ctx);
+            }
+
             let edit_pos = pos.min(anchor);
-            let removed = pos.max(anchor) - edit_pos;
             self.finish_edit(
                 &mut inner,
                 edit_pos,

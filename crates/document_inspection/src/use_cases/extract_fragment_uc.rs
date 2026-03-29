@@ -228,6 +228,10 @@ impl ExtractFragmentUseCase {
                             row_span: cell.row_span.max(1) as usize,
                             column_span: cell.column_span.max(1) as usize,
                             blocks: cell_frag_blocks,
+                            fmt_padding: cell.fmt_padding,
+                            fmt_border: cell.fmt_border,
+                            fmt_vertical_alignment: cell.fmt_vertical_alignment.clone(),
+                            fmt_background_color: cell.fmt_background_color.clone(),
                         });
                     }
 
@@ -236,6 +240,12 @@ impl ExtractFragmentUseCase {
                         columns: table.columns as usize,
                         cells: frag_cells,
                         block_insert_index,
+                        fmt_border: table.fmt_border,
+                        fmt_cell_spacing: table.fmt_cell_spacing,
+                        fmt_cell_padding: table.fmt_cell_padding,
+                        fmt_width: table.fmt_width,
+                        fmt_alignment: table.fmt_alignment.clone(),
+                        column_widths: table.column_widths.clone(),
                     });
                 } else {
                     // Non-table block — extract with partial-block handling
@@ -264,7 +274,13 @@ impl ExtractFragmentUseCase {
                     let (extracted_elements, extracted_text) =
                         extract_elements_in_range(&elements, local_start, local_end);
 
-                    let is_full_block = local_start == 0 && local_end == block.text_length as usize;
+                    // Word paragraph-mark rule: a block is "full" only when the
+                    // selection extends past its text into the paragraph break
+                    // gap.  Intermediate blocks are always full (the selection
+                    // necessarily traverses their gap).
+                    let is_full_block = local_start == 0
+                        && local_end == block.text_length as usize
+                        && end > block_start + block.text_length;
 
                     plain_texts.push(extracted_text.clone());
                     fragment_blocks.push(block_to_fragment_block(
@@ -332,7 +348,11 @@ impl ExtractFragmentUseCase {
             let (extracted_elements, extracted_text) =
                 extract_elements_in_range(&elements, local_start, local_end);
 
-            let is_full_block = local_start == 0 && local_end == block.text_length as usize;
+            // Word paragraph-mark rule: a block is "full" only when the
+            // selection extends past its text into the paragraph break gap.
+            let is_full_block = local_start == 0
+                && local_end == block.text_length as usize
+                && end > block_start + block.text_length;
 
             plain_texts.push(extracted_text.clone());
             fragment_blocks.push(block_to_fragment_block(
