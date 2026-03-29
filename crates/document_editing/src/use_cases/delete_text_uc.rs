@@ -35,6 +35,7 @@ pub trait DeleteTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "Update")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
+#[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "Remove")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
 #[macros::uow_action(entity = "InlineElement", action = "Get")]
@@ -499,6 +500,42 @@ fn execute_delete(
                     uow.update_frame(&updated)?;
                 }
             }
+        }
+
+        // Ensure at least one empty block remains (document can't be fully empty)
+        let remaining_blocks = {
+            let get_tcf = |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
+                let cids = uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+                let cs = uow.get_table_cell_multi(&cids)?;
+                let mut s: Vec<_> = cs.into_iter().flatten().collect();
+                s.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+                Ok(s.into_iter().filter_map(|c| c.cell_frame).collect())
+            };
+            collect_block_ids_recursive(
+                &|id| uow.get_frame(id),
+                &|id, field| uow.get_frame_relationship(id, field),
+                &get_tcf,
+                &frame_id,
+            )?
+        };
+        if remaining_blocks.is_empty() {
+            let empty_block = Block {
+                document_position: 0,
+                ..Block::default()
+            };
+            let created = uow.create_block(&empty_block, frame_id, -1)?;
+            let empty_elem = InlineElement {
+                content: InlineContent::Empty,
+                ..InlineElement::default()
+            };
+            uow.create_inline_element(&empty_elem, created.id, -1)?;
+            let f = uow.get_frame(&frame_id)?
+                .ok_or_else(|| anyhow!("Frame not found"))?;
+            let mut uf = f.clone();
+            uf.child_order.push(created.id as i64);
+            uf.updated_at = now;
+            uow.update_frame(&uf)?;
+            non_cell_blocks_removed -= 1; // net: we added one back
         }
 
         // Update document stats
