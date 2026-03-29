@@ -247,9 +247,12 @@ impl ExtractFragmentUseCase {
                     // selection extends past its text into the paragraph break
                     // gap.  Intermediate blocks are always full (the selection
                     // necessarily traverses their gap).
+                    // Exception: the last block in the document has no gap after
+                    // it, so covering its entire text is sufficient.
+                    let is_last_block = block.id == blocks.last().map(|b| b.id).unwrap_or_default();
                     let is_full_block = local_start == 0
                         && local_end == block.text_length as usize
-                        && end > block_start + block.text_length;
+                        && (end > block_start + block.text_length || is_last_block);
 
                     plain_texts.push(extracted_text.clone());
                     fragment_blocks.push(block_to_fragment_block(
@@ -319,9 +322,12 @@ impl ExtractFragmentUseCase {
 
             // Word paragraph-mark rule: a block is "full" only when the
             // selection extends past its text into the paragraph break gap.
+            // Exception: the last block in the document has no gap after
+            // it, so covering its entire text is sufficient.
+            let is_last_block = block.id == blocks.last().map(|b| b.id).unwrap_or_default();
             let is_full_block = local_start == 0
                 && local_end == block.text_length as usize
-                && end > block_start + block.text_length;
+                && (end > block_start + block.text_length || is_last_block);
 
             plain_texts.push(extracted_text.clone());
             fragment_blocks.push(block_to_fragment_block(
