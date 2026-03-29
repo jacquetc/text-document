@@ -261,6 +261,16 @@ impl TextCursor {
     // ── Movement ─────────────────────────────────────────────
 
     /// Set the cursor to an absolute position.
+    ///
+    /// When extending a selection (`KeepAnchor`) across a table boundary,
+    /// the position is snapped to the adjacent block outside the table so
+    /// the entire table is "trapped" inside the selection range. This
+    /// mirrors LibreOffice's behaviour: partial table selections from
+    /// outside are not allowed; the table is always fully enclosed.
+    ///
+    /// The snap is skipped when:
+    /// - `mode` is `MoveAnchor` (plain click / move without selection)
+    /// - No adjacent block exists (table is first or last in the document)
     pub fn set_position(&self, position: usize, mode: MoveMode) {
         // Clamp to max document position (includes block separators)
         let end = {
@@ -269,7 +279,35 @@ impl TextCursor {
                 .map(|s| max_cursor_position(&s))
                 .unwrap_or(0)
         };
-        let pos = position.min(end);
+        let mut pos = position.min(end);
+
+        // Table-trap snap: when extending a selection, if one endpoint is
+        // inside a table and the other is outside, relocate the inside
+        // endpoint to the boundary of the adjacent block.
+        if mode == MoveMode::KeepAnchor {
+            let anchor = self.data.lock().anchor;
+            let pos_cell = self.table_cell_at(pos);
+            let anchor_cell = self.table_cell_at(anchor);
+            match (&pos_cell, &anchor_cell) {
+                (Some(tc), None) => {
+                    // Position is inside a table, anchor is outside.
+                    let before = anchor < pos;
+                    if let Some(boundary) = self.table_boundary_position(tc.table.id(), !before) {
+                        pos = boundary;
+                    }
+                }
+                (None, Some(tc)) => {
+                    // Anchor is inside a table, position is outside.
+                    // Snap the position so the table is enclosed.
+                    let before = pos < anchor;
+                    if let Some(boundary) = self.table_boundary_position(tc.table.id(), !before) {
+                        pos = boundary;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let mut d = self.data.lock();
         d.position = pos;
         if mode == MoveMode::MoveAnchor {
@@ -1406,6 +1444,45 @@ impl TextCursor {
         };
         drop(inner);
         block.table_cell()
+    }
+
+    /// Find the document position at the boundary of the block adjacent to a
+    /// table. Used by the table-trap logic in [`set_position`](Self::set_position).
+    ///
+    /// - `before == true`: returns the last position of the block immediately
+    ///   before the table (i.e. `block.position() + block.length()`).
+    /// - `before == false`: returns the first position of the block immediately
+    ///   after the table.
+    ///
+    /// Returns `None` when no adjacent block exists (table is first or last
+    /// element in the flow).
+    fn table_boundary_position(&self, table_id: usize, before: bool) -> Option<usize> {
+        let inner = self.doc.lock();
+        let main_frame_id = get_main_frame_id(&inner);
+        let flow = crate::text_frame::build_flow_elements(&inner, &self.doc, main_frame_id);
+        drop(inner);
+
+        // Find the table in the flow and peek at the adjacent element.
+        let idx = flow
+            .iter()
+            .position(|e| matches!(e, FlowElement::Table(t) if t.id() == table_id))?;
+
+        if before {
+            // Walk backwards to find the nearest Block.
+            for i in (0..idx).rev() {
+                if let FlowElement::Block(b) = &flow[i] {
+                    return Some(b.position() + b.length());
+                }
+            }
+        } else {
+            // Walk forwards to find the nearest Block.
+            for item in flow.iter().skip(idx + 1) {
+                if let FlowElement::Block(b) = item {
+                    return Some(b.position());
+                }
+            }
+        }
+        None
     }
 
     /// Find the first table whose cell blocks fall within the range `(start, end)`.
