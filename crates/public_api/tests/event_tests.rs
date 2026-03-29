@@ -413,11 +413,11 @@ fn undo_contents_changed_reports_affected_region() {
     });
     assert!(content_event.is_some(), "should have ContentsChanged event");
     let (pos, removed, added, affected) = content_event.unwrap();
-    // The insertion of " world" (6 chars) at position 5 was undone,
-    // so we expect the affected region to cover position 5 or earlier.
+    // The undo restores from a full snapshot, so position may be 0 (entire
+    // document) and removed/added report the full old/new char counts rather
+    // than the fine-grained delta.
     assert!(pos <= 5, "position should be at or before the edit point");
     assert!(affected >= 1, "at least one block should be affected");
-    // After undo, content went from "Hello world" (11 chars) back to "Hello" (5 chars)
     assert!(
         removed > 0 || added > 0,
         "should report non-zero chars_removed or chars_added"

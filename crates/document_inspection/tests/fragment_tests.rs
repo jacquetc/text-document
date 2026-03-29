@@ -249,10 +249,10 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
             }
         }
     }
-    // Should have at least 2 bold elements (original + inserted copy)
-    assert!(
-        bold_count >= 2,
-        "Should have at least 2 bold elements (original + copy), got {}",
+    // Exactly 2 bold elements: original from markdown import + inserted copy
+    assert_eq!(
+        bold_count, 2,
+        "Should have exactly 2 bold elements (original + copy), got {}",
         bold_count
     );
 
@@ -333,9 +333,11 @@ fn test_extract_insert_with_list() -> Result<()> {
             list_block_positions.push((block.document_position, block.text_length));
         }
     }
-    assert!(
-        list_block_positions.len() >= 2,
-        "Should have at least 2 list blocks"
+    // "- item1\n- item2" produces exactly 2 list blocks
+    assert_eq!(
+        list_block_positions.len(),
+        2,
+        "Should have exactly 2 list blocks"
     );
 
     // Extract the range covering the list items.
@@ -567,8 +569,9 @@ fn test_extract_fragment_multiple_formats() -> Result<()> {
         .filter(|e| e.fmt_font_italic == Some(true))
         .count();
 
-    assert!(bold_count >= 1, "Should have at least one bold element");
-    assert!(italic_count >= 1, "Should have at least one italic element");
+    // "Hel" is bold (1 element), "lo" is italic (1 element)
+    assert_eq!(bold_count, 1, "Should have exactly one bold element");
+    assert_eq!(italic_count, 1, "Should have exactly one italic element");
 
     // Roundtrip: insert elsewhere and verify formats preserved
     let (db2, eh2, mut urm2) = setup_with_text("Target")?;
