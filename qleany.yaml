@@ -985,6 +985,40 @@ features:
                 - NoMarker
                 - Unchecked
                 - Checked
+            - name: line_height
+              type: integer
+              optional: true
+            - name: non_breakable_lines
+              type: boolean
+              optional: true
+            - name: direction
+              type: enum
+              enum_name: TextDirection
+              optional: true
+              enum_values:
+                - LeftToRight
+                - RightToLeft
+            - name: background_color
+              type: string
+              optional: true
+            - name: is_code_block
+              type: boolean
+              optional: true
+            - name: code_language
+              type: string
+              optional: true
+            - name: top_margin
+              type: integer
+              optional: true
+            - name: bottom_margin
+              type: integer
+              optional: true
+            - name: left_margin
+              type: integer
+              optional: true
+            - name: right_margin
+              type: integer
+              optional: true
 
       - name: set_frame_format
         undoable: true
@@ -1021,6 +1055,9 @@ features:
               optional: true
             - name: border
               type: integer
+              optional: true
+            - name: is_blockquote
+              type: boolean
               optional: true
 
       - name: set_table_format
