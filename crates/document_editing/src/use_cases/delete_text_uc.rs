@@ -52,6 +52,7 @@ pub trait DeleteTextUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 #[macros::uow_action(entity = "TableCell", action = "Remove")]
 #[macros::uow_action(entity = "Frame", action = "Remove")]
+#[macros::uow_action(entity = "List", action = "Remove")]
 pub trait DeleteTextUnitOfWorkTrait: CommandUnitOfWork {}
 
 pub struct DeleteTextUseCase {
@@ -347,7 +348,6 @@ fn execute_delete(
         // In mixed (cross-cell) delete, non-cell blocks that overlap the
         // selection are fully removed.  Partial truncation at the edges
         // uses the FIRST and LAST non-cell blocks only.
-        let mut non_cell_blocks_removed: i64 = 0;
         let mut non_cell_blocks_to_remove: Vec<EntityId> = Vec::new();
         let mut first_non_cell: Option<&Block> = None;
         let mut last_non_cell: Option<&Block> = None;
@@ -472,37 +472,109 @@ fn execute_delete(
                 }
                 uow.remove_block(&block.id)?;
                 non_cell_blocks_to_remove.push(block.id);
-                non_cell_blocks_removed += 1;
             }
         }
 
-        // Update owning frames' child_order for removed non-cell blocks
+        // Update ALL frames' child_order for removed non-cell blocks.
+        // This must cover sub-frames (not just root + cell frames), since
+        // blocks inside sub-frames are also removed as non-cell blocks.
         if !non_cell_blocks_to_remove.is_empty() {
-            // Determine which frames own the removed blocks
-            let mut frames_to_update: std::collections::HashSet<EntityId> =
-                std::collections::HashSet::new();
-            frames_to_update.insert(frame_id); // root frame always
-            for block in &blocks {
-                if non_cell_blocks_to_remove.contains(&block.id)
-                    && let Some(&cf) = block_to_cell_frame.get(&block.id)
-                {
-                    frames_to_update.insert(cf);
-                }
-            }
-            for &fid in &frames_to_update {
+            let all_frame_ids =
+                uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+            for &fid in &all_frame_ids {
                 if let Some(f) = uow.get_frame(&fid)? {
+                    let old_len = f.child_order.len();
                     let mut updated = f.clone();
                     updated
                         .child_order
                         .retain(|id| !non_cell_blocks_to_remove.contains(&(*id as EntityId)));
-                    updated.updated_at = now;
-                    uow.update_frame(&updated)?;
+                    if updated.child_order.len() != old_len {
+                        updated.updated_at = now;
+                        uow.update_frame(&updated)?;
+                    }
                 }
             }
         }
 
-        // Ensure at least one empty block remains (document can't be fully empty)
-        let remaining_blocks = {
+        // Remove empty non-table sub-frames (frames with no remaining content
+        // after the delete).  Table-related frames are handled above; this
+        // cleans up regular sub-frames whose blocks were all deleted.
+        {
+            let root_frame = uow
+                .get_frame(&frame_id)?
+                .ok_or_else(|| anyhow!("Root frame not found"))?;
+            let mut sub_frames_to_remove: Vec<EntityId> = Vec::new();
+            for &entry in &root_frame.child_order {
+                if entry < 0 {
+                    let sf_id = (-entry) as EntityId;
+                    if let Some(sf) = uow.get_frame(&sf_id)? {
+                        // Skip table anchor frames (handled by table removal)
+                        if sf.table.is_some() {
+                            continue;
+                        }
+                        // Check if sub-frame has any remaining content
+                        let blk_ids =
+                            uow.get_frame_relationship(&sf_id, &FrameRelationshipField::Blocks)?;
+                        if blk_ids.is_empty() {
+                            sub_frames_to_remove.push(sf_id);
+                        }
+                    }
+                }
+            }
+            if !sub_frames_to_remove.is_empty() {
+                for &sf_id in &sub_frames_to_remove {
+                    uow.remove_frame(&sf_id)?;
+                }
+                let mut updated_root = uow
+                    .get_frame(&frame_id)?
+                    .ok_or_else(|| anyhow!("Root frame not found"))?;
+                updated_root.child_order.retain(|entry| {
+                    if *entry < 0 {
+                        let sf_id = (-entry) as EntityId;
+                        !sub_frames_to_remove.contains(&sf_id)
+                    } else {
+                        true
+                    }
+                });
+                updated_root.updated_at = now;
+                uow.update_frame(&updated_root)?;
+            }
+        }
+
+        // Remove orphaned lists — lists whose blocks have all been deleted.
+        {
+            let list_ids =
+                uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Lists)?;
+            let mut lists_to_remove: Vec<EntityId> = Vec::new();
+            // Collect all remaining block IDs across all frames
+            let remaining_frame_ids =
+                uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+            let mut all_remaining_block_ids: Vec<EntityId> = Vec::new();
+            for &fid in &remaining_frame_ids {
+                let blk_ids = uow.get_frame_relationship(&fid, &FrameRelationshipField::Blocks)?;
+                all_remaining_block_ids.extend(blk_ids);
+            }
+            let remaining_blocks_opt = uow.get_block_multi(&all_remaining_block_ids)?;
+            let remaining_list_refs: std::collections::HashSet<EntityId> = remaining_blocks_opt
+                .into_iter()
+                .flatten()
+                .filter_map(|b| b.list)
+                .collect();
+            for &lid in &list_ids {
+                if !remaining_list_refs.contains(&lid) {
+                    lists_to_remove.push(lid);
+                }
+            }
+            for &lid in &lists_to_remove {
+                uow.remove_list(&lid)?;
+            }
+        }
+
+        // Ensure at least one empty block remains (document can't be fully empty).
+        // Validate that block IDs from child_order actually exist, since blocks
+        // may have been removed without their owning frame's child_order being
+        // fully in sync.
+        let remaining_block_count = {
             let get_tcf = |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
                 let cids = uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
                 let cs = uow.get_table_cell_multi(&cids)?;
@@ -510,14 +582,17 @@ fn execute_delete(
                 s.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
                 Ok(s.into_iter().filter_map(|c| c.cell_frame).collect())
             };
-            collect_block_ids_recursive(
+            let candidate_ids = collect_block_ids_recursive(
                 &|id| uow.get_frame(id),
                 &|id, field| uow.get_frame_relationship(id, field),
                 &get_tcf,
                 &frame_id,
-            )?
+            )?;
+            // Validate existence
+            let opts = uow.get_block_multi(&candidate_ids)?;
+            opts.into_iter().flatten().count()
         };
-        if remaining_blocks.is_empty() {
+        if remaining_block_count == 0 {
             let empty_block = Block {
                 document_position: 0,
                 ..Block::default()
@@ -535,16 +610,26 @@ fn execute_delete(
             uf.child_order.push(created.id as i64);
             uf.updated_at = now;
             uow.update_frame(&uf)?;
-            non_cell_blocks_removed -= 1; // net: we added one back
         }
 
-        // Update document stats
+        // Update document stats — recount blocks from actual remaining state
+        // instead of relying on arithmetic that can drift.
+        let actual_block_count = {
+            let all_fids =
+                uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+            let mut count = 0i64;
+            for &fid in &all_fids {
+                let blk_ids = uow.get_frame_relationship(&fid, &FrameRelationshipField::Blocks)?;
+                count += blk_ids.len() as i64;
+            }
+            count
+        };
         let mut updated_doc = document.clone();
         updated_doc.character_count -= total_chars_removed;
         if updated_doc.character_count < 0 {
             updated_doc.character_count = 0;
         }
-        updated_doc.block_count -= non_cell_blocks_removed;
+        updated_doc.block_count = actual_block_count;
         updated_doc.updated_at = now;
         uow.update_document(&updated_doc)?;
 

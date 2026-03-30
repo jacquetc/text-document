@@ -6,16 +6,18 @@ use anyhow::Result;
 
 use document_editing::document_editing_controller;
 use document_editing::{
-    AddBlockToListDto, CreateListDto, InsertBlockDto, InsertFrameDto, InsertMarkdownAtPositionDto,
-    InsertTableColumnDto, InsertTableDto, InsertTableRowDto, InsertTextDto, ListStyle,
-    MergeTableCellsDto, RemoveBlockFromListDto, RemoveTableColumnDto, RemoveTableDto,
-    RemoveTableRowDto, SplitTableCellDto,
+    AddBlockToListDto, CreateListDto, DeleteTextDto, InsertBlockDto, InsertFrameDto,
+    InsertImageDto, InsertListDto, InsertMarkdownAtPositionDto, InsertTableColumnDto,
+    InsertTableDto, InsertTableRowDto, InsertTextDto, ListStyle, MergeTableCellsDto,
+    RemoveBlockFromListDto, RemoveTableColumnDto, RemoveTableDto, RemoveTableRowDto,
+    SplitTableCellDto,
 };
 
 use test_harness::{
     DocumentRelationshipField, RootRelationshipField, block_controller, document_controller,
     export_text, frame_controller, get_all_block_ids, get_block_ids, get_document_stats,
-    get_sorted_cells, get_table_ids, root_controller, setup_with_text, table_controller,
+    get_sorted_cells, get_table_ids, inline_element_controller, root_controller, setup_with_text,
+    table_controller,
 };
 
 use test_harness::list_controller;
@@ -1111,6 +1113,177 @@ fn test_insert_table_preserves_frame_relationships() -> Result<()> {
     // Sub-frame parent relationship should be preserved
     let sub_frame = frame_controller::get(&db, &(frame_result.frame_id as u64))?.unwrap();
     assert_eq!(sub_frame.parent_frame, Some(parent_id));
+
+    Ok(())
+}
+
+/// Build a complex document with every entity type (table, frame, sub-frame,
+/// lists, blocks, image), select the entire range, delete, and verify that
+/// nothing is left.
+#[test]
+fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
+    // 3 blocks: "Line one" (pos 0), "Line two" (pos 9), "Line three" (pos 18)
+    let (db, hub, mut urm) = setup_with_text("Line one\nLine two\nLine three")?;
+
+    // 1. Insert a 2x2 table at the end
+    let text = export_text(&db, &hub)?;
+    let end = text.len() as i64;
+    let _table_result = document_editing_controller::insert_table(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertTableDto {
+            position: end,
+            anchor: end,
+            rows: 2,
+            columns: 2,
+        },
+    )?;
+
+    // 2. Insert a sub-frame at position 0
+    let _frame_result = document_editing_controller::insert_frame(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertFrameDto {
+            position: 0,
+            anchor: 0,
+        },
+    )?;
+
+    // 3. Create a bullet list on "Line one"
+    let _list1 = document_editing_controller::create_list(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &CreateListDto {
+            position: 0,
+            anchor: 8,
+            style: ListStyle::Disc,
+        },
+    )?;
+
+    // 4. Insert a numbered list after "Line two" (creates a new block + list)
+    let _list2 = document_editing_controller::insert_list(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertListDto {
+            position: 17,
+            anchor: 17,
+            style: ListStyle::Decimal,
+        },
+    )?;
+
+    // 5. Insert an image in "Line one"
+    let _image = document_editing_controller::insert_image(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &InsertImageDto {
+            position: 4,
+            anchor: 4,
+            image_name: "photo.png".to_string(),
+            width: 200,
+            height: 150,
+        },
+    )?;
+
+    // --- Pre-delete: verify all entity types exist ---
+    let doc_id = root_controller::get_relationship(&db, &1, &RootRelationshipField::Document)?[0];
+
+    let table_ids =
+        document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Tables)?;
+    assert_eq!(table_ids.len(), 1, "Should have 1 table");
+
+    let frame_ids =
+        document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Frames)?;
+    assert!(frame_ids.len() > 1, "Should have multiple frames");
+
+    let list_ids =
+        document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Lists)?;
+    assert_eq!(list_ids.len(), 2, "Should have 2 lists");
+
+    let stats = get_document_stats(&db)?;
+    assert!(stats.character_count > 0, "Should have content");
+    assert!(
+        stats.block_count > 3,
+        "Should have more than initial 3 blocks"
+    );
+
+    // --- Compute document end position across all frames ---
+    let all_bids = get_all_block_ids(&db)?;
+    let mut max_pos = 0i64;
+    for bid in &all_bids {
+        if let Some(b) = block_controller::get(&db, bid)? {
+            let block_end = b.document_position + b.text_length;
+            if block_end > max_pos {
+                max_pos = block_end;
+            }
+        }
+    }
+    assert!(max_pos > 0, "Document should have content before delete");
+
+    // --- Select all and delete ---
+    document_editing_controller::delete_text(
+        &db,
+        &hub,
+        &mut urm,
+        None,
+        &DeleteTextDto {
+            position: 0,
+            anchor: max_pos,
+        },
+    )?;
+
+    // --- Post-delete: verify nothing is left ---
+    let stats = get_document_stats(&db)?;
+    assert_eq!(stats.character_count, 0, "All text should be deleted");
+    assert_eq!(stats.block_count, 1, "Only one empty block should remain");
+
+    // Tables must be removed
+    let table_ids =
+        document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Tables)?;
+    assert_eq!(table_ids.len(), 0, "All tables should be removed");
+
+    // Only root frame should remain
+    let frame_ids =
+        document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Frames)?;
+    assert_eq!(frame_ids.len(), 1, "Only root frame should remain");
+
+    // Lists should be cleaned up
+    let list_ids =
+        document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Lists)?;
+    assert_eq!(list_ids.len(), 0, "All lists should be removed");
+
+    // No image inline elements should remain
+    let remaining_bids = get_all_block_ids(&db)?;
+    for bid in &remaining_bids {
+        let elem_ids = block_controller::get_relationship(
+            &db,
+            bid,
+            &test_harness::BlockRelationshipField::Elements,
+        )?;
+        for eid in &elem_ids {
+            let elem = inline_element_controller::get(&db, eid)?.expect("Element should exist");
+            assert!(
+                !matches!(elem.content, common::entities::InlineContent::Image { .. }),
+                "No image elements should remain"
+            );
+        }
+    }
+
+    // Remaining block should be empty
+    for bid in &remaining_bids {
+        let b = block_controller::get(&db, bid)?.expect("Block should exist");
+        assert_eq!(b.text_length, 0, "Remaining block should be empty");
+        assert_eq!(b.plain_text, "", "Remaining block should have no text");
+    }
 
     Ok(())
 }

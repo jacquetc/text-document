@@ -104,6 +104,7 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
     let lines: Vec<&str> = normalized.split('\n').collect();
     let mut document_position: i64 = 0;
     let mut total_chars: i64 = 0;
+    let mut child_order: Vec<i64> = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
         let line_len = line.chars().count() as i64;
@@ -124,6 +125,8 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
             frame.id,
             i as i32,
         )?;
+
+        child_order.push(block.id as i64);
 
         let elem_dto = CreateInlineElementDto {
             content: InlineContent::Text(line.to_string()),
@@ -146,6 +149,18 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
             document_position += 1; // block separator
         }
     }
+
+    // Update frame child_order to include all blocks
+    let mut updated_frame = frame_controller::get(&db_context, &frame.id)?
+        .ok_or_else(|| anyhow::anyhow!("Frame not found"))?;
+    updated_frame.child_order = child_order;
+    frame_controller::update(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &updated_frame.into(),
+    )?;
 
     // Update document cached fields
     let mut doc = document_controller::get(&db_context, &doc_id)?
