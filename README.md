@@ -8,7 +8,7 @@
 
 A rich text document model for Rust, inspired by Qt's QTextDocument/QTextCursor API.
 
-Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architecture with redb (embedded ACID database), full undo/redo, and multi-cursor support.
+Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architecture, full undo/redo, and multi-cursor support.
 
 ## Features
 

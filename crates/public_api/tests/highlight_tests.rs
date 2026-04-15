@@ -362,6 +362,7 @@ fn highlight_partial_splits_fragment() {
             format,
             offset,
             length,
+            ..
         } => {
             assert_eq!(text, "He");
             assert_eq!(*offset, 0);
@@ -376,6 +377,7 @@ fn highlight_partial_splits_fragment() {
             format,
             offset,
             length,
+            ..
         } => {
             assert_eq!(text, "llo w");
             assert_eq!(*offset, 2);
@@ -390,6 +392,7 @@ fn highlight_partial_splits_fragment() {
             format,
             offset,
             length,
+            ..
         } => {
             assert_eq!(text, "orld");
             assert_eq!(*offset, 7);

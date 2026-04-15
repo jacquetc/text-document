@@ -64,6 +64,17 @@ pub enum FragmentContent {
         offset: usize,
         /// Character count.
         length: usize,
+        /// Stable entity id of the underlying `InlineElement`. Survives
+        /// edits that don't delete the element (character insertions
+        /// inside the run keep the same id). Used by accessibility
+        /// layers to build stable `NodeId`s for AccessKit `TextRun`
+        /// children.
+        element_id: u64,
+        /// Unicode word starts within `text`, expressed as character
+        /// indices (not byte offsets). Computed per UAX #29 via
+        /// `unicode-segmentation`. Fed directly into AccessKit's
+        /// `set_word_starts` on the corresponding `Role::TextRun`.
+        word_starts: Vec<u8>,
     },
     /// An inline image. The layout engine reserves space for it.
     ///
@@ -77,6 +88,8 @@ pub enum FragmentContent {
         format: TextFormat,
         /// Character offset within the block (block-relative).
         offset: usize,
+        /// Stable entity id of the underlying `InlineElement`.
+        element_id: u64,
     },
 }
 

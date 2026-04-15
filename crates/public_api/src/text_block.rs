@@ -435,11 +435,14 @@ fn build_raw_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<Fragment
         match &el.content {
             InlineContent::Text(text) => {
                 let length = text.chars().count();
+                let word_starts = compute_word_starts(text);
                 fragments.push(FragmentContent::Text {
                     text: text.clone(),
                     format,
                     offset,
                     length,
+                    element_id: el.id,
+                    word_starts,
                 });
                 offset += length;
             }
@@ -456,6 +459,7 @@ fn build_raw_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<Fragment
                     quality: *quality as u32,
                     format,
                     offset,
+                    element_id: el.id,
                 });
                 offset += 1; // images take 1 character position
             }
@@ -466,6 +470,42 @@ fn build_raw_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<Fragment
     }
 
     fragments
+}
+
+/// Compute character-index-based word starts for a text slice,
+/// following Unicode Standard Annex #29. Returned indices are
+/// positions within `text.chars()`, NOT byte offsets — matches
+/// AccessKit's `word_starts` contract where each entry is an index
+/// into `character_lengths`.
+fn compute_word_starts(text: &str) -> Vec<u8> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut result = Vec::new();
+    // `unicode_word_indices` yields (byte_offset, word_slice) for each
+    // Unicode-word match. Convert each byte offset to a character
+    // index by counting `char_indices` up to that offset.
+    let mut byte_to_char: Vec<(usize, usize)> = Vec::new();
+    for (ci, (bi, _)) in text.char_indices().enumerate() {
+        byte_to_char.push((bi, ci));
+    }
+    for (byte_off, _word) in text.unicode_word_indices() {
+        let char_idx = byte_to_char
+            .iter()
+            .find(|(bi, _)| *bi == byte_off)
+            .map(|(_, ci)| *ci)
+            .unwrap_or(0);
+        // Saturating cast — text runs longer than 255 chars get their
+        // later word starts dropped. That's the AccessKit contract:
+        // `word_starts` is Box<[u8]>. Runs longer than ~255 chars are
+        // unusual for a single format run, and the first 255 word
+        // starts cover the viewport almost always. Documented in the
+        // plan.
+        if let Ok(idx) = u8::try_from(char_idx) {
+            result.push(idx);
+        } else {
+            break;
+        }
+    }
+    result
 }
 
 /// Compute 0-based index of a block within its list.

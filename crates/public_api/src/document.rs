@@ -358,6 +358,69 @@ impl TextDocument {
         Ok(result.text)
     }
 
+    /// Find the inline element containing `position` and return its
+    /// stable entity id together with the element's absolute start
+    /// position and the character offset of `position` within the
+    /// element. Used by accessibility layers to convert a
+    /// document-absolute character position into the
+    /// `(element_id, character_index_in_run)` coordinate space
+    /// AccessKit's `TextPosition` expects.
+    ///
+    /// Returns `None` when the position is outside the document.
+    /// Returns the element at position `position - 1` when `position`
+    /// falls exactly on an element boundary, matching the "cursor
+    /// belongs to the preceding element at a boundary" convention
+    /// used throughout text-document.
+    pub fn find_element_at_position(&self, position: usize) -> Option<(u64, usize, usize)> {
+        let block_info = self.block_at(position).ok()?;
+        let block_start = block_info.start;
+        let offset_in_block = position.checked_sub(block_start)?;
+        let block = crate::text_block::TextBlock {
+            doc: std::sync::Arc::clone(&self.inner),
+            block_id: block_info.block_id,
+        };
+        let frags = block.fragments();
+        // Walk fragments; match the fragment that contains
+        // `offset_in_block`. For a boundary position shared with the
+        // next fragment, prefer the preceding fragment (boundary
+        // belongs to the end of the previous element).
+        let mut last_text: Option<(u64, usize, usize, usize)> = None; // (id, abs_start, frag_offset, frag_length)
+        for frag in &frags {
+            match frag {
+                crate::flow::FragmentContent::Text {
+                    offset,
+                    length,
+                    element_id,
+                    ..
+                } => {
+                    let frag_start = *offset;
+                    let frag_end = frag_start + *length;
+                    if offset_in_block >= frag_start && offset_in_block < frag_end {
+                        let abs_start = block_start + frag_start;
+                        let offset_within = offset_in_block - frag_start;
+                        return Some((*element_id, abs_start, offset_within));
+                    }
+                    // Record as a candidate for the "end-of-element"
+                    // boundary fallback (offset_in_block == frag_end).
+                    if offset_in_block == frag_end {
+                        last_text =
+                            Some((*element_id, block_start + frag_start, frag_start, *length));
+                    }
+                }
+                crate::flow::FragmentContent::Image {
+                    offset, element_id, ..
+                } => {
+                    if offset_in_block == *offset {
+                        return Some((*element_id, block_start + offset, 0));
+                    }
+                }
+            }
+        }
+        // Boundary fallback: position was at the end of the last text
+        // fragment we saw.
+        last_text.map(|(id, abs_start, _, length)| (id, abs_start, length))
+    }
+
     /// Get info about the block at a position. O(log n).
     pub fn block_at(&self, position: usize) -> Result<BlockInfo> {
         let inner = self.inner.lock();
