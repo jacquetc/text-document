@@ -2,11 +2,12 @@
 [![API](https://docs.rs/text-document/badge.svg)](https://docs.rs/text-document)
 ![quality](https://img.shields.io/github/actions/workflow/status/jacquetc/text-document/ci.yml)
 [![codecov](https://codecov.io/gh/jacquetc/text-document/branch/main/graph/badge.svg?token=S4M513A2XR)](https://codecov.io/gh/jacquetc/text-document)
-[![license](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue?style=flat-square)](#license)
+[![license](https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square)](#license)
+
 
 # text-document
 
-A rich text document model for Rust, inspired by Qt's QTextDocument/QTextCursor API.
+A rich text document model for Rust, inspired by Qt's QTextDocument/QTextCursor API. Companion crate is text-typeset, which render a document to GPU quads.
 
 Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architecture, full undo/redo, and multi-cursor support.
 
@@ -280,14 +281,7 @@ Data flow: `TextDocument / TextCursor -> frontend::commands -> controllers -> us
 
 ## License
 
-Licensed under either of
-
- * Apache License, Version 2.0
-   ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license
-   ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
+Licensed under [Mozilla Public License 2.0}(https://www.mozilla.org/en-US/MPL/2.0/)
 
 ## Contribution
 
