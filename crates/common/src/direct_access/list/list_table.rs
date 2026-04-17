@@ -7,8 +7,6 @@
 use super::list_repository::ListTable;
 use super::list_repository::ListTableRO;
 use crate::entities::List;
-use crate::error::RepositoryError;
-use crate::types::EntityId;
 
 crate::impl_leaf_entity_table!(
     entity: List,

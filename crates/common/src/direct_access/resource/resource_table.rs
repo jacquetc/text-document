@@ -7,8 +7,6 @@
 use super::resource_repository::ResourceTable;
 use super::resource_repository::ResourceTableRO;
 use crate::entities::Resource;
-use crate::error::RepositoryError;
-use crate::types::EntityId;
 
 crate::impl_leaf_entity_table!(
     entity: Resource,

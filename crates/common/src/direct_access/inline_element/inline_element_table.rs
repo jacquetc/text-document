@@ -7,8 +7,6 @@
 use super::inline_element_repository::InlineElementTable;
 use super::inline_element_repository::InlineElementTableRO;
 use crate::entities::InlineElement;
-use crate::error::RepositoryError;
-use crate::types::EntityId;
 
 crate::impl_leaf_entity_table!(
     entity: InlineElement,

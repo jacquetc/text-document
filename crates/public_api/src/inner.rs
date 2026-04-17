@@ -27,8 +27,8 @@ pub(crate) type QueuedEvents = Vec<(
 use anyhow::Result;
 use frontend::AppContext;
 use frontend::EventHubClient;
-use frontend::event_hub_client::SubscriptionToken;
 use frontend::common::types::EntityId;
+use frontend::event_hub_client::SubscriptionToken;
 
 use crate::DocumentEvent;
 use crate::highlight::HighlightData;
