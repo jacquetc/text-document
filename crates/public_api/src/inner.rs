@@ -27,6 +27,7 @@ pub(crate) type QueuedEvents = Vec<(
 use anyhow::Result;
 use frontend::AppContext;
 use frontend::EventHubClient;
+use frontend::event_hub_client::SubscriptionToken;
 use frontend::common::types::EntityId;
 
 use crate::DocumentEvent;
@@ -95,6 +96,10 @@ pub(crate) struct TextDocumentInner {
 
     // Syntax highlighting state (shadow formatting layer).
     pub highlight: Option<HighlightData>,
+
+    // Holds SubscriptionTokens for LongOperation event bridges. Dropping a
+    // token unsubscribes the callback, so these must outlive the document.
+    pub long_op_subscriptions: Vec<SubscriptionToken>,
 }
 
 impl TextDocumentInner {
@@ -386,6 +391,7 @@ impl TextDocumentInner {
             last_block_count: 1, // new document starts with one block
             last_child_order: vec![block.id as i64],
             highlight: None,
+            long_op_subscriptions: Vec::new(),
         })
     }
 }

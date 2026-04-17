@@ -68,74 +68,81 @@ impl TextDocument {
         use frontend::common::event::{LongOperationEvent as LOE, Origin};
 
         let weak = Arc::downgrade(inner);
-        {
-            let locked = inner.lock();
-            // Progress
-            let w = weak.clone();
-            locked
-                .event_client
-                .subscribe(Origin::LongOperation(LOE::Progress), move |event| {
-                    if let Some(inner) = w.upgrade() {
-                        let (op_id, percent, message) = parse_progress_data(&event.data);
-                        let mut inner = inner.lock();
-                        inner.queue_event(DocumentEvent::LongOperationProgress {
-                            operation_id: op_id,
-                            percent,
-                            message,
-                        });
-                    }
-                });
+        let mut locked = inner.lock();
 
-            // Completed
-            let w = weak.clone();
-            locked
-                .event_client
-                .subscribe(Origin::LongOperation(LOE::Completed), move |event| {
-                    if let Some(inner) = w.upgrade() {
-                        let op_id = parse_id_data(&event.data);
-                        let mut inner = inner.lock();
-                        inner.queue_event(DocumentEvent::DocumentReset);
-                        inner.check_block_count_changed();
-                        inner.reset_cached_child_order();
-                        inner.queue_event(DocumentEvent::LongOperationFinished {
-                            operation_id: op_id,
-                            success: true,
-                            error: None,
-                        });
-                    }
-                });
+        // Progress
+        let w = weak.clone();
+        let progress_tok = locked.event_client.subscribe(
+            Origin::LongOperation(LOE::Progress),
+            move |event| {
+                if let Some(inner) = w.upgrade() {
+                    let (op_id, percent, message) = parse_progress_data(&event.data);
+                    let mut inner = inner.lock();
+                    inner.queue_event(DocumentEvent::LongOperationProgress {
+                        operation_id: op_id,
+                        percent,
+                        message,
+                    });
+                }
+            },
+        );
 
-            // Cancelled
-            let w = weak.clone();
-            locked
-                .event_client
-                .subscribe(Origin::LongOperation(LOE::Cancelled), move |event| {
-                    if let Some(inner) = w.upgrade() {
-                        let op_id = parse_id_data(&event.data);
-                        let mut inner = inner.lock();
-                        inner.queue_event(DocumentEvent::LongOperationFinished {
-                            operation_id: op_id,
-                            success: false,
-                            error: Some("cancelled".into()),
-                        });
-                    }
-                });
+        // Completed
+        let w = weak.clone();
+        let completed_tok = locked.event_client.subscribe(
+            Origin::LongOperation(LOE::Completed),
+            move |event| {
+                if let Some(inner) = w.upgrade() {
+                    let op_id = parse_id_data(&event.data);
+                    let mut inner = inner.lock();
+                    inner.queue_event(DocumentEvent::DocumentReset);
+                    inner.check_block_count_changed();
+                    inner.reset_cached_child_order();
+                    inner.queue_event(DocumentEvent::LongOperationFinished {
+                        operation_id: op_id,
+                        success: true,
+                        error: None,
+                    });
+                }
+            },
+        );
 
-            // Failed
-            locked
-                .event_client
-                .subscribe(Origin::LongOperation(LOE::Failed), move |event| {
-                    if let Some(inner) = weak.upgrade() {
-                        let (op_id, error) = parse_failed_data(&event.data);
-                        let mut inner = inner.lock();
-                        inner.queue_event(DocumentEvent::LongOperationFinished {
-                            operation_id: op_id,
-                            success: false,
-                            error: Some(error),
-                        });
-                    }
-                });
-        }
+        // Cancelled
+        let w = weak.clone();
+        let cancelled_tok = locked.event_client.subscribe(
+            Origin::LongOperation(LOE::Cancelled),
+            move |event| {
+                if let Some(inner) = w.upgrade() {
+                    let op_id = parse_id_data(&event.data);
+                    let mut inner = inner.lock();
+                    inner.queue_event(DocumentEvent::LongOperationFinished {
+                        operation_id: op_id,
+                        success: false,
+                        error: Some("cancelled".into()),
+                    });
+                }
+            },
+        );
+
+        // Failed
+        let failed_tok = locked.event_client.subscribe(
+            Origin::LongOperation(LOE::Failed),
+            move |event| {
+                if let Some(inner) = weak.upgrade() {
+                    let (op_id, error) = parse_failed_data(&event.data);
+                    let mut inner = inner.lock();
+                    inner.queue_event(DocumentEvent::LongOperationFinished {
+                        operation_id: op_id,
+                        success: false,
+                        error: Some(error),
+                    });
+                }
+            },
+        );
+
+        locked
+            .long_op_subscriptions
+            .extend([progress_tok, completed_tok, cancelled_tok, failed_tok]);
     }
 
     // ── Whole-document content ────────────────────────────────

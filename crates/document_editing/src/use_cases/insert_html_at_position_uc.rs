@@ -406,7 +406,7 @@ macro_rules! impl_content_insert {
                     updated_current.fmt_background_color = first_parsed.background_color.clone();
                     updated_current.elements = Vec::new();
                     updated_current.updated_at = now;
-                    uow.update_with_relationships_block(&updated_current)?;
+                    uow.update_block_with_relationships(&updated_current)?;
                     create_span_elements!(uow, &first_parsed.spans, current_block.id, now);
                     if first_parsed.spans.is_empty()
                         || first_parsed.spans.iter().all(|s| s.text.is_empty())
@@ -751,7 +751,7 @@ macro_rules! impl_content_insert {
                     updated_current.fmt_background_color = parsed.background_color.clone();
                     updated_current.elements = Vec::new();
                     updated_current.updated_at = now;
-                    uow.update_with_relationships_block(&updated_current)?;
+                    uow.update_block_with_relationships(&updated_current)?;
                     create_span_elements!(uow, &parsed.spans, current_block.id, now);
                     if parsed.spans.is_empty() || parsed.spans.iter().all(|s| s.text.is_empty()) {
                         let elem = InlineElement {
