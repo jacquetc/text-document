@@ -784,7 +784,7 @@ fn insert_mixed_fragment(
         updated_current.fmt_code_language = fb.code_language.clone();
         updated_current.elements = Vec::new();
         updated_current.updated_at = now;
-        uow.update_with_relationships_block(&updated_current)?;
+        uow.update_block_with_relationships(&updated_current)?;
         create_frag_elements_mixed(uow, &fb.elements, current_block.id)?;
         if fb.elements.is_empty() {
             let elem = InlineElement {
@@ -1636,7 +1636,7 @@ fn execute_insert_fragment(
             };
             updated_current.list = head_list_id;
             updated_current.elements = Vec::new();
-            uow.update_with_relationships_block(&updated_current)?;
+            uow.update_block_with_relationships(&updated_current)?;
             create_frag_elements(uow, &head_frag.elements, current_block.id)?;
             if head_frag.elements.is_empty() {
                 let elem = InlineElement {
@@ -1973,7 +1973,7 @@ fn execute_insert_fragment(
             updated_current.fmt_code_language = frag_block.code_language.clone();
             updated_current.elements = Vec::new();
             updated_current.updated_at = now;
-            uow.update_with_relationships_block(&updated_current)?;
+            uow.update_block_with_relationships(&updated_current)?;
 
             create_frag_elements(uow, &frag_block.elements, current_block.id)?;
             if frag_block.elements.is_empty() {
