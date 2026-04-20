@@ -270,6 +270,31 @@ proptest! {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Property: stats.character_count matches to_plain_text().chars().count()
+// minus block separators — a non-tautological cross-check of the
+// cached document character_count against actual content.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+proptest! {
+    #[test]
+    fn stats_char_count_matches_plain_text(text in arb_multiline_text()) {
+        let doc = new_doc(&text);
+        let stats = doc.stats();
+        let plain = doc.to_plain_text().unwrap();
+
+        // to_plain_text joins blocks with '\n'; character_count does not
+        // include those separators. With N blocks there are N-1 separators.
+        let plain_chars = plain.chars().count();
+        let sep_count = stats.block_count.saturating_sub(1);
+        let content_chars = plain_chars - sep_count;
+
+        prop_assert_eq!(stats.character_count, content_chars,
+            "stats.character_count ({}) != plain_text char count minus {} separators ({})",
+            stats.character_count, sep_count, content_chars);
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Property: random insert/delete edits maintain character_count consistency
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
