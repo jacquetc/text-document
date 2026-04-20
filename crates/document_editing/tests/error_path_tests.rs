@@ -36,7 +36,8 @@ fn test_insert_text_empty_string_is_noop() -> Result<()> {
 fn test_insert_text_at_beyond_document_end_clamps() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("Hello")?;
 
-    // Position way beyond document end (doc has 5 chars)
+    // Position way beyond document end (doc has 5 chars). Backend
+    // contract is to clamp to the end and append.
     let result = document_editing_controller::insert_text(
         &db,
         &hub,
@@ -47,14 +48,15 @@ fn test_insert_text_at_beyond_document_end_clamps() -> Result<()> {
             anchor: 999,
             text: "!".to_string(),
         },
-    );
+    )?;
 
-    // Should either clamp to end or error — but not crash
-    if let Ok(_r) = &result {
-        let text = export_text(&db, &hub)?;
-        assert!(text.contains("!"), "Text should contain appended '!'");
-    }
-    // An error is also acceptable (out of range)
+    // Text must be appended at the real end, not stored at a virtual offset.
+    assert_eq!(export_text(&db, &hub)?, "Hello!");
+    let stats = get_document_stats(&db)?;
+    assert_eq!(stats.character_count, 6);
+    // new_position must reflect the clamped insertion location (right
+    // after the appended "!"), not `999 + 1`.
+    assert_eq!(result.new_position, 6);
 
     Ok(())
 }

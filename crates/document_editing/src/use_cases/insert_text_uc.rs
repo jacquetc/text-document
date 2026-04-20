@@ -282,7 +282,7 @@ fn execute_insert_with_selection(
 
     Ok((
         InsertTextResultDto {
-            new_position: position + text_len,
+            new_position: block.document_position + offset + text_len,
             blocks_affected: 1,
         },
         InsertTextUndo::SelectionReplacement(snapshot),
@@ -336,7 +336,10 @@ fn execute_insert_simple(
     // Find block at position by computing positions on the fly
     let (block, _block_idx, block_pos) =
         find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
-    let offset = position - block_pos;
+    // Clamp the intra-block offset so positions beyond the document end
+    // insert at the end of the last block (matching the fallback in
+    // find_block_at_position_sequential). The raw position may be OOB.
+    let offset = (position - block_pos).clamp(0, block.text_length);
 
     // Save originals for undo (cheap clones, no serialization)
     let original_block = block.clone();
@@ -403,7 +406,7 @@ fn execute_insert_simple(
 
     Ok((
         InsertTextResultDto {
-            new_position: position + text_len,
+            new_position: block_pos + offset + text_len,
             blocks_affected: 1,
         },
         InsertTextUndo::Simple(Box::new(undo_data)),

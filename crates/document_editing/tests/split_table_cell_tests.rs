@@ -419,7 +419,7 @@ fn test_split_cell_2x2_grid() -> Result<()> {
 }
 
 #[test]
-fn test_split_1x1_cell_is_noop_or_error() -> Result<()> {
+fn test_split_1x1_cell_errors() -> Result<()> {
     let (db, hub, mut urm) = setup_with_text("")?;
 
     let insert_result = document_editing_controller::insert_table(
@@ -442,8 +442,9 @@ fn test_split_1x1_cell_is_noop_or_error() -> Result<()> {
     assert_eq!(cell.row_span, 1);
     assert_eq!(cell.column_span, 1);
 
-    // Splitting a 1x1 cell into 1x1 should either be a no-op or error
-    let result = document_editing_controller::split_table_cell(
+    // Splitting a 1x1 cell into 1x1 has nothing to split — backend
+    // contract is to return an error (see split_table_cell_uc.rs:86).
+    let err = document_editing_controller::split_table_cell(
         &db,
         &hub,
         &mut urm,
@@ -453,19 +454,15 @@ fn test_split_1x1_cell_is_noop_or_error() -> Result<()> {
             split_rows: 1,
             split_columns: 1,
         },
+    )
+    .expect_err("splitting a 1x1 cell into 1x1 must error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Nothing to split"),
+        "unexpected error message: {msg}"
     );
 
-    // Either it errors or produces 1 cell (the same one)
-    if let Ok(split_result) = result {
-        assert_eq!(
-            split_result.new_cell_ids.len(),
-            1,
-            "Splitting 1x1 into 1x1 should produce 1 cell"
-        );
-    }
-    // If it errors, that's also acceptable behavior
-
-    // Table should still have 4 cells
+    // Table must be unchanged — the failed split must not mutate state.
     let cells_after = get_sorted_cells(&db, &(table_id as u64))?;
     assert_eq!(cells_after.len(), 4);
 

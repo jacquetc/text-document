@@ -15,14 +15,14 @@ fn new_doc(text: &str) -> TextDocument {
 fn block_format_at_position() {
     let doc = new_doc("Hello\nWorld");
     let fmt = doc.block_format_at(0).unwrap();
-    let _ = fmt.alignment;
+    assert_eq!(fmt, text_document::BlockFormat::default());
 }
 
 #[test]
 fn block_format_at_second_block() {
     let doc = new_doc("First\nSecond");
     let fmt = doc.block_format_at(6).unwrap();
-    let _ = fmt.alignment;
+    assert_eq!(fmt, text_document::BlockFormat::default());
 }
 
 // ── Resources ───────────────────────────────────────────────────

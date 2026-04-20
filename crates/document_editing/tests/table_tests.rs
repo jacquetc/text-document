@@ -983,7 +983,7 @@ fn test_split_unmerged_cell_fails() -> Result<()> {
     let cell_id = cells[0].id as i64;
 
     // Try to split a 1x1 cell into 1x1 — should fail
-    let result = document_editing_controller::split_table_cell(
+    let err = document_editing_controller::split_table_cell(
         &db,
         &hub,
         &mut urm,
@@ -993,9 +993,12 @@ fn test_split_unmerged_cell_fails() -> Result<()> {
             split_rows: 1,
             split_columns: 1,
         },
+    )
+    .expect_err("splitting an unmerged (1x1) cell must error");
+    assert!(
+        err.to_string().contains("Nothing to split"),
+        "unexpected error: {err}"
     );
-
-    assert!(result.is_err());
 
     Ok(())
 }
