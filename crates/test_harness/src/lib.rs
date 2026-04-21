@@ -407,13 +407,11 @@ pub fn insert_table(
     }
 
     // Assign document_positions to cell blocks
-    let mut current_pos = position;
-    for &bid in &cell_blocks {
+    for (current_pos, &bid) in (position..).zip(cell_blocks.iter()) {
         let mut b = block_controller::get(db_context, &bid)?
             .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
         b.document_position = current_pos;
         block_controller::update(db_context, event_hub, undo_redo_manager, None, &b.into())?;
-        current_pos += 1;
     }
 
     // Shift existing blocks (not cell blocks) that are at or after position

@@ -889,16 +889,14 @@ fn execute_delete(
                             }
                         }
                     }
-                    InlineContent::Image { .. } => {
-                        if local_start == 0 {
-                            // Image after delete boundary — keep
-                            end_surviving_images += 1;
-                            let mut new_elem = elem.clone();
-                            new_elem.id = 0;
-                            new_elem.created_at = now;
-                            new_elem.updated_at = now;
-                            uow.create_inline_element(&new_elem, start_block.id, -1)?;
-                        }
+                    InlineContent::Image { .. } if local_start == 0 => {
+                        // Image after delete boundary — keep
+                        end_surviving_images += 1;
+                        let mut new_elem = elem.clone();
+                        new_elem.id = 0;
+                        new_elem.created_at = now;
+                        new_elem.updated_at = now;
+                        uow.create_inline_element(&new_elem, start_block.id, -1)?;
                     }
                     _ => {}
                 }

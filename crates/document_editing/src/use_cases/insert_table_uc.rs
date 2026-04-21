@@ -203,15 +203,12 @@ fn execute_insert_table(
     // 4. Assign document_position to all cell blocks in row-major order
     // The table's blocks start at insert_pos, each cell block gets 1 position
     // (the separator character between blocks, like a newline)
-    let mut current_pos = insert_pos;
     let mut blocks_to_update: Vec<Block> = Vec::new();
-    for cell_block in &cell_blocks {
+    for (current_pos, cell_block) in (insert_pos..).zip(cell_blocks.iter()) {
         let mut updated_block = cell_block.clone();
         updated_block.document_position = current_pos;
         updated_block.updated_at = now;
         blocks_to_update.push(updated_block);
-        // Each empty block takes 1 position (the block separator)
-        current_pos += 1;
     }
     if !blocks_to_update.is_empty() {
         uow.update_block_multi(&blocks_to_update)?;

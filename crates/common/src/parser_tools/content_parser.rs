@@ -319,11 +319,9 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedElement> {
             Event::Start(Tag::TableRow) => {
                 current_row_cells.clear();
             }
-            Event::End(TagEnd::TableRow) => {
+            Event::End(TagEnd::TableRow) if !in_table_head => {
                 // Body rows only — header row is flushed in End(TableHead)
-                if !in_table_head {
-                    table_rows.push(std::mem::take(&mut current_row_cells));
-                }
+                table_rows.push(std::mem::take(&mut current_row_cells));
             }
             Event::Start(Tag::TableCell) => {
                 current_cell_spans.clear();
@@ -412,23 +410,21 @@ pub fn parse_markdown(markdown: &str) -> Vec<ParsedElement> {
                     current_spans.push(span);
                 }
             }
-            Event::HardBreak => {
+            Event::HardBreak if !current_spans.is_empty() || in_block => {
                 // Finalize current block
-                if !current_spans.is_empty() || in_block {
-                    elements.push(ParsedElement::Block(ParsedBlock {
-                        spans: std::mem::take(&mut current_spans),
-                        heading_level: current_heading.take(),
-                        list_style: current_list_style.clone(),
-                        list_indent: current_list_indent,
-                        is_code_block,
-                        code_language: code_language.clone(),
-                        blockquote_depth,
-                        line_height: None,
-                        non_breakable_lines: None,
-                        direction: None,
-                        background_color: None,
-                    }));
-                }
+                elements.push(ParsedElement::Block(ParsedBlock {
+                    spans: std::mem::take(&mut current_spans),
+                    heading_level: current_heading.take(),
+                    list_style: current_list_style.clone(),
+                    list_indent: current_list_indent,
+                    is_code_block,
+                    code_language: code_language.clone(),
+                    blockquote_depth,
+                    line_height: None,
+                    non_breakable_lines: None,
+                    direction: None,
+                    background_color: None,
+                }));
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 blockquote_depth += 1;
@@ -521,10 +517,8 @@ fn parse_block_styles(style: &str) -> BlockStyles {
                         result.line_height = Some((v * 1000.0) as i64);
                     }
                 }
-                "white-space" => {
-                    if val == "pre" || val == "nowrap" || val == "pre-wrap" {
-                        result.non_breakable_lines = Some(true);
-                    }
+                "white-space" if val == "pre" || val == "nowrap" || val == "pre-wrap" => {
+                    result.non_breakable_lines = Some(true);
                 }
                 "direction" => {
                     if val.eq_ignore_ascii_case("rtl") {

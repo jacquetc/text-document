@@ -1,7 +1,7 @@
 //! Tests for the SyntaxHighlighter trait system.
 
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use text_document::{
     Color, FlowElement, FlowElementSnapshot, FragmentContent, HighlightContext, HighlightFormat,
