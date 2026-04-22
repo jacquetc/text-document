@@ -320,10 +320,16 @@ proptest! {
         seed in "[a-zA-Z ]{1,30}",
         requested in 0usize..10_000,
     ) {
-        // Non-empty seed: `delete_char` on an empty document panics
-        // via `to_usize(-1)` (documented known backend bug at
-        // fuzz_tests.rs:335). Ruling that out keeps this test focused
-        // on the intended invariant — out-of-range *position* safety.
+        // Non-empty seed still required: proptest under the broader
+        // `{0,30}` strategy reproducibly panics even though my
+        // standalone probe of `set_plain_text("") + cursor_at(1) +
+        // delete_char + delete_prev` is safe. The triggering state
+        // depends on something the harness sets up across iterations
+        // — unclear whether the panic path is fully gone or just
+        // unreachable through direct replay. Tracked as a known
+        // issue: `known_bugs::empty_document_out_of_range_delete_ops
+        // _are_safe` verifies the one concrete input I can reproduce
+        // without the proptest harness.
         let doc = new_doc(&seed);
         let c = doc.cursor_at(requested);
         let before = doc.to_plain_text().unwrap();

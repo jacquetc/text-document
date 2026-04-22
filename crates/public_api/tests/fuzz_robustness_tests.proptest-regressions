@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 645a9669903fe6a51532fe7d208e0b38823d6658bb430498e1ad259faf95f80c # shrinks to input = ""
+cc f8dc321800d2c7ed90107db351f8d163fb561876b40eb164f2188bb5e0e9b4fe # shrinks to seed = "", ops = [InsertText(""), InsertBlock, MovePrev(1), InsertText("a"), MoveNext(1), InsertText("a"), DeletePrev]
