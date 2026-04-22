@@ -129,24 +129,25 @@ proptest! {
 
 // ── Invariant 5 ─────────────────────────────────────────────────────
 // Arrow-right then arrow-left returns to the starting position for
-// any cursor position **at a grapheme cluster boundary**. Restricted
-// to ASCII so every integer position is trivially a boundary — the
-// grapheme-specific round-trip is covered by the targeted tests in
-// grapheme_cursor_tests.rs. A programmatic cursor placed *mid-
-// cluster* does not satisfy this invariant (NextCharacter advances
-// to the end of the cluster, PreviousCharacter retreats to its
-// start), which is the documented semantics.
+// any cursor. `cursor_at` snaps to a grapheme cluster boundary, so
+// every starting position is trivially round-trippable. Includes
+// mid-cluster targets (combining marks, skin-tone, ZWJ, flags) to
+// exercise the snap.
 
 proptest! {
     #[test]
     fn next_then_prev_character_is_identity(
-        text in "[a-zA-Z0-9 ]{1,40}",
+        text in r"[a-zA-Z0-9 \u{0301}\u{1F44B}\u{1F3FB}]{1,40}",
         pos_frac in 0.0f64..=1.0,
     ) {
         let doc = new_doc(&text);
         let max_pos = doc.character_count() + doc.block_count().saturating_sub(1);
-        let start = ((pos_frac * max_pos as f64).floor() as usize).min(max_pos);
-        let c = doc.cursor_at(start);
+        let requested = ((pos_frac * max_pos as f64).floor() as usize).min(max_pos);
+        let c = doc.cursor_at(requested);
+        // cursor_at snaps to the nearest grapheme boundary; the
+        // round-trip invariant is against the snapped start, not the
+        // raw requested index.
+        let start = c.position();
         let moved = c.move_position(MoveOperation::NextCharacter, MoveMode::MoveAnchor, 1);
         if !moved { return Ok(()); } // Already at end: no move to reverse.
         c.move_position(MoveOperation::PreviousCharacter, MoveMode::MoveAnchor, 1);
@@ -331,12 +332,12 @@ proptest! {
         // _are_safe` verifies the one concrete input I can reproduce
         // without the proptest harness.
         let doc = new_doc(&seed);
+        let max = doc.character_count() + doc.block_count().saturating_sub(1);
         let c = doc.cursor_at(requested);
         let before = doc.to_plain_text().unwrap();
         let _ = c.delete_char();
         let _ = c.delete_previous_char();
         let after = doc.to_plain_text().unwrap();
-        let max = doc.character_count() + doc.block_count().saturating_sub(1);
         if requested > max {
             prop_assert_eq!(
                 before, after,

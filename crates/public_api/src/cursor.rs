@@ -308,12 +308,19 @@ impl TextCursor {
             }
         }
 
-        let mut d = self.data.lock();
-        d.position = pos;
-        if mode == MoveMode::MoveAnchor {
-            d.anchor = pos;
+        {
+            let mut d = self.data.lock();
+            d.position = pos;
+            if mode == MoveMode::MoveAnchor {
+                d.anchor = pos;
+            }
+            d.cell_selection_override = None;
         }
-        d.cell_selection_override = None;
+        // Snap forward to the nearest grapheme cluster boundary so
+        // a caller passing an arbitrary scalar index (e.g. computed
+        // from a hit-test or a plain-text search) never leaves the
+        // cursor inside a multi-scalar grapheme cluster.
+        self.snap_position_to_grapheme_boundary();
     }
 
     /// Move the cursor by a semantic operation.
@@ -2154,6 +2161,85 @@ impl TextCursor {
                 }
             }
         }
+    }
+
+    /// Snap the cursor's current position to the nearest grapheme
+    /// cluster boundary, moving forward if currently mid-cluster.
+    /// No-op when already at a boundary.
+    ///
+    /// Applied automatically by `cursor_at` and `set_position` so a
+    /// caller passing an arbitrary scalar index never lands inside a
+    /// cluster — without this, a round-trip such as
+    /// `NextCharacter → PreviousCharacter` would stop at the cluster
+    /// start rather than the start position, because the pre-advance
+    /// state wasn't a boundary to begin with.
+    pub(crate) fn snap_position_to_grapheme_boundary(&self) {
+        let pos = {
+            let data = self.data.lock();
+            data.position
+        };
+        let snapped = self.forward_grapheme_boundary_at_or_after(pos);
+        if snapped != pos {
+            let mut data = self.data.lock();
+            data.position = snapped;
+            if data.anchor == pos {
+                data.anchor = snapped;
+            }
+        }
+    }
+
+    /// Return `pos` if it sits at a grapheme cluster boundary within
+    /// its block; otherwise return the end position of the containing
+    /// cluster (snap forward). Block separators are always treated as
+    /// boundaries.
+    ///
+    /// Leaves out-of-range positions (`pos > max_cursor_position`)
+    /// unchanged — the snap must never silently upgrade an out-of-
+    /// range cursor to a valid one, because edit ops rely on the
+    /// out-of-range check to stay no-ops.
+    fn forward_grapheme_boundary_at_or_after(&self, pos: usize) -> usize {
+        let inner = self.doc.lock();
+        let end = document_inspection_commands::get_document_stats(&inner.ctx)
+            .map(|s| max_cursor_position(&s))
+            .unwrap_or(pos);
+        if pos >= end {
+            return pos;
+        }
+        let block_dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos),
+        };
+        let Ok(block_info) =
+            document_inspection_commands::get_block_at_position(&inner.ctx, &block_dto)
+        else {
+            return pos;
+        };
+        let block_start = to_usize(block_info.block_start);
+        let block_length = to_usize(block_info.block_length);
+        let offset_in_block = pos.saturating_sub(block_start);
+        // Block boundaries (start / end) are always cluster boundaries.
+        if offset_in_block == 0 || offset_in_block >= block_length {
+            return pos;
+        }
+        let text_dto = frontend::document_inspection::GetTextAtPositionDto {
+            position: to_i64(block_start),
+            length: to_i64(block_length),
+        };
+        let Ok(r) = document_inspection_commands::get_text_at_position(&inner.ctx, &text_dto)
+        else {
+            return pos;
+        };
+        let text = r.text;
+        drop(inner);
+        // Walk grapheme clusters, accumulating char counts. The first
+        // boundary >= offset_in_block is the snap target.
+        let mut acc = 0usize;
+        for g in text.graphemes(true) {
+            if acc >= offset_in_block {
+                return block_start + acc;
+            }
+            acc += g.chars().count();
+        }
+        block_start + acc
     }
 
     /// Return the cursor position after advancing one extended grapheme

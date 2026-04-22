@@ -314,16 +314,22 @@ impl TextDocument {
         self.cursor_at(0)
     }
 
-    /// Create a cursor at the given position.
+    /// Create a cursor at the given position. If `position` falls
+    /// inside an extended grapheme cluster (decomposed accents, ZWJ
+    /// emoji, skin-tone sequences, flag pairs), the cursor snaps
+    /// forward to the end of the containing cluster so subsequent
+    /// `NextCharacter`/`PreviousCharacter` round-trips remain identity.
     pub fn cursor_at(&self, position: usize) -> TextCursor {
         let data = {
             let mut inner = self.inner.lock();
             inner.register_cursor(position)
         };
-        TextCursor {
+        let cursor = TextCursor {
             doc: self.inner.clone(),
             data,
-        }
+        };
+        cursor.snap_position_to_grapheme_boundary();
+        cursor
     }
 
     // ── Document queries ─────────────────────────────────────

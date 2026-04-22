@@ -63,19 +63,28 @@ fn empty_document_out_of_range_delete_ops_are_safe() {
 // the unhandled one.
 
 #[test]
-#[ignore = "FIXME: mid-cluster cursor_at + next/prev round-trip asymmetric"]
 fn mid_cluster_next_then_prev_returns_to_start() {
+    // After the cursor_at snap fix: any requested position inside a
+    // grapheme cluster snaps forward to the cluster end. The
+    // round-trip identity is therefore trivially satisfied — every
+    // cursor starts at a boundary where `next` then `prev` returns
+    // to the same place.
     let doc = TextDocument::new();
     doc.set_plain_text("e\u{0301}X").unwrap();
-    // Mid-cluster position (between "e" and the combining acute).
     let c = doc.cursor_at(1);
-    assert_eq!(c.position(), 1);
+    let start = c.position();
+    assert!(
+        start == 0 || start == 2,
+        "expected snap to cluster boundary, got {}",
+        start
+    );
     c.move_position(MoveOperation::NextCharacter, MoveMode::MoveAnchor, 1);
     c.move_position(MoveOperation::PreviousCharacter, MoveMode::MoveAnchor, 1);
-    // Currently fails: c.position() == 0 (jumped to cluster start).
-    // Expected: either 1 (true round-trip) or cursor_at(1) should
-    // have clamped to 0 or 2 up front.
-    assert_eq!(c.position(), 1, "mid-cluster round-trip must return to start");
+    assert_eq!(
+        c.position(),
+        start,
+        "round-trip from a snapped boundary must return to start"
+    );
 }
 
 // ── Bug 3 ───────────────────────────────────────────────────────────
@@ -129,7 +138,6 @@ fn delete_previous_char_after_crossblock_edit_keeps_invariant() {
 }
 
 #[test]
-#[ignore = "FIXME: cursor_at does not clamp to grapheme boundaries"]
 fn cursor_at_should_snap_to_grapheme_boundary() {
     let doc = TextDocument::new();
     doc.set_plain_text("e\u{0301}X").unwrap();
