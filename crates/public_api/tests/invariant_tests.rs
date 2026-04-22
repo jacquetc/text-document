@@ -318,19 +318,13 @@ proptest! {
 proptest! {
     #[test]
     fn cursor_at_out_of_range_is_safe(
-        seed in "[a-zA-Z ]{1,30}",
+        seed in "[a-zA-Z ]{0,30}",
         requested in 0usize..10_000,
     ) {
-        // Non-empty seed still required: proptest under the broader
-        // `{0,30}` strategy reproducibly panics even though my
-        // standalone probe of `set_plain_text("") + cursor_at(1) +
-        // delete_char + delete_prev` is safe. The triggering state
-        // depends on something the harness sets up across iterations
-        // — unclear whether the panic path is fully gone or just
-        // unreachable through direct replay. Tracked as a known
-        // issue: `known_bugs::empty_document_out_of_range_delete_ops
-        // _are_safe` verifies the one concrete input I can reproduce
-        // without the proptest harness.
+        // Empty seed now accepted — the grapheme-cursor snap
+        // (commit e6eb374) and the delete_text position refresh
+        // (commit d648b52) together eliminated the panics that
+        // used to force this strategy to `{1,30}`.
         let doc = new_doc(&seed);
         let max = doc.character_count() + doc.block_count().saturating_sub(1);
         let c = doc.cursor_at(requested);
