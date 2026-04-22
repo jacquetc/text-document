@@ -1556,7 +1556,14 @@ impl TextCursor {
             if pos >= end {
                 return Ok(());
             }
-            (pos, pos + 1)
+            // Delete the whole grapheme cluster after the cursor so a
+            // single Delete on `👋🏻` or `e\u{0301}` removes the
+            // user-perceived character, not just its first scalar.
+            let to = self.next_grapheme_boundary(pos);
+            if to == pos {
+                return Ok(());
+            }
+            (pos, to)
         };
         self.do_delete(del_pos, del_anchor)
     }
@@ -1567,7 +1574,11 @@ impl TextCursor {
         let (del_pos, del_anchor) = if pos != anchor {
             (pos, anchor)
         } else if pos > 0 {
-            (pos - 1, pos)
+            let from = self.prev_grapheme_boundary(pos);
+            if from == pos {
+                return Ok(());
+            }
+            (from, pos)
         } else {
             return Ok(());
         };
@@ -2001,8 +2012,28 @@ impl TextCursor {
                     .map(|s| max_cursor_position(&s))
                     .unwrap_or(pos)
             }
-            MoveOperation::NextCharacter | MoveOperation::Right => pos + n,
-            MoveOperation::PreviousCharacter | MoveOperation::Left => pos.saturating_sub(n),
+            MoveOperation::NextCharacter | MoveOperation::Right => {
+                let mut cur = pos;
+                for _ in 0..n {
+                    let next = self.next_grapheme_boundary(cur);
+                    if next == cur {
+                        break;
+                    }
+                    cur = next;
+                }
+                cur
+            }
+            MoveOperation::PreviousCharacter | MoveOperation::Left => {
+                let mut cur = pos;
+                for _ in 0..n {
+                    let prev = self.prev_grapheme_boundary(cur);
+                    if prev == cur {
+                        break;
+                    }
+                    cur = prev;
+                }
+                cur
+            }
             MoveOperation::StartOfBlock | MoveOperation::StartOfLine => {
                 let inner = self.doc.lock();
                 let dto = frontend::document_inspection::GetBlockAtPositionDto {
@@ -2122,6 +2153,101 @@ impl TextCursor {
                     self.resolve_move(MoveOperation::NextBlock, 1)
                 }
             }
+        }
+    }
+
+    /// Return the cursor position after advancing one extended grapheme
+    /// cluster from `pos`. A grapheme cluster is what a user perceives
+    /// as a single character — decomposed accents (`e` + `U+0301`),
+    /// skin-tone emoji, ZWJ sequences, and regional-indicator flags
+    /// are all single clusters even though they contain multiple
+    /// Unicode scalars.
+    ///
+    /// Block separators (the single scalar between blocks in the
+    /// cursor-position space) are treated as their own unit: advancing
+    /// from the end of a block goes to the start of the next block
+    /// (one scalar forward) without touching the grapheme path.
+    /// Returns `pos` unchanged when already at the document end.
+    fn next_grapheme_boundary(&self, pos: usize) -> usize {
+        let inner = self.doc.lock();
+        let end = document_inspection_commands::get_document_stats(&inner.ctx)
+            .map(|s| max_cursor_position(&s))
+            .unwrap_or(pos);
+        if pos >= end {
+            return pos;
+        }
+        let block_dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos),
+        };
+        let block_info =
+            match document_inspection_commands::get_block_at_position(&inner.ctx, &block_dto) {
+                Ok(info) => info,
+                Err(_) => return pos + 1,
+            };
+        let block_start = to_usize(block_info.block_start);
+        let block_length = to_usize(block_info.block_length);
+        let offset_in_block = pos.saturating_sub(block_start);
+        if offset_in_block >= block_length {
+            // At block end — advance across the separator into the
+            // next block.
+            return (pos + 1).min(end);
+        }
+        let text_dto = frontend::document_inspection::GetTextAtPositionDto {
+            position: to_i64(pos),
+            length: to_i64(block_length - offset_in_block),
+        };
+        let text = match document_inspection_commands::get_text_at_position(&inner.ctx, &text_dto) {
+            Ok(r) => r.text,
+            Err(_) => return pos + 1,
+        };
+        drop(inner);
+        match text.graphemes(true).next() {
+            Some(g) if !g.is_empty() => (pos + g.chars().count()).min(end),
+            _ => (pos + 1).min(end),
+        }
+    }
+
+    /// Return the cursor position before the extended grapheme cluster
+    /// that ends at `pos`. Counterpart to [`next_grapheme_boundary`].
+    /// Crosses block separators one scalar at a time.
+    fn prev_grapheme_boundary(&self, pos: usize) -> usize {
+        if pos == 0 {
+            return 0;
+        }
+        let inner = self.doc.lock();
+        let block_dto = frontend::document_inspection::GetBlockAtPositionDto {
+            position: to_i64(pos.saturating_sub(1)),
+        };
+        let block_info =
+            match document_inspection_commands::get_block_at_position(&inner.ctx, &block_dto) {
+                Ok(info) => info,
+                Err(_) => return pos - 1,
+            };
+        let block_start = to_usize(block_info.block_start);
+        let block_length = to_usize(block_info.block_length);
+        let block_end = block_start + block_length;
+        // If `pos` sits past the block text (on a separator), step back
+        // one scalar rather than running grapheme analysis across a
+        // boundary.
+        if pos > block_end {
+            return pos - 1;
+        }
+        if block_length == 0 || pos <= block_start {
+            return pos.saturating_sub(1);
+        }
+        let scan_len = pos - block_start;
+        let text_dto = frontend::document_inspection::GetTextAtPositionDto {
+            position: to_i64(block_start),
+            length: to_i64(scan_len),
+        };
+        let text = match document_inspection_commands::get_text_at_position(&inner.ctx, &text_dto) {
+            Ok(r) => r.text,
+            Err(_) => return pos - 1,
+        };
+        drop(inner);
+        match text.graphemes(true).next_back() {
+            Some(g) if !g.is_empty() => pos - g.chars().count(),
+            _ => pos - 1,
         }
     }
 
