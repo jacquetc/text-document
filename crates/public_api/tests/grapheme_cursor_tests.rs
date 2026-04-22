@@ -160,6 +160,78 @@ fn ascii_backspace_unchanged() {
     assert_eq!(doc.to_plain_text().unwrap(), "abde");
 }
 
+// ── Table select-all/copy/paste probe (known-issue investigation) ───
+
+#[test]
+fn probe_table_select_all_copy_paste_roundtrip() {
+    use text_document::MoveMode;
+    let doc = new_doc("");
+    doc.set_markdown("Before\n\n| A | B |\n|---|---|\n| c | d |\n\nAfter")
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let c = doc.cursor_at(0);
+    c.move_position(
+        text_document::MoveOperation::End,
+        MoveMode::KeepAnchor,
+        1,
+    );
+    let frag = c.selection();
+    eprintln!("fragment html = {:?}", frag.to_html());
+
+    // Replace entire doc with the fragment.
+    let c2 = doc.cursor_at(0);
+    c2.move_position(
+        text_document::MoveOperation::End,
+        MoveMode::KeepAnchor,
+        1,
+    );
+    c2.insert_fragment(&frag).unwrap();
+
+    let plain_after = doc.to_plain_text().unwrap();
+    let block_after = doc.block_count();
+    eprintln!("AFTER paste: plain={plain_after:?}, blocks={block_after}");
+
+    // Regression guard: round-trip must preserve the table + both
+    // paragraphs. Previously flagged as known-broken in
+    // copy_paste_tests.rs:952.
+    let snap = doc.snapshot_flow();
+    assert_eq!(snap.elements.len(), 3, "top-level elements preserved");
+    let mut n_tables = 0;
+    for el in &snap.elements {
+        if let text_document::FlowElementSnapshot::Table(t) = el {
+            n_tables += 1;
+            assert_eq!(t.rows, 2);
+            assert_eq!(t.columns, 2);
+            assert_eq!(t.cells.len(), 4);
+        }
+    }
+    assert_eq!(n_tables, 1, "exactly one table preserved");
+}
+
+// ── Table character-count invariant check (probe) ───────────────────
+
+#[test]
+fn probe_character_count_vs_end_with_table() {
+    let doc = new_doc("");
+    doc.set_markdown("Before\n\n| AAA | BBB |\n|-----|-----|\n| ccc | ddd |\n\nAfter")
+        .unwrap()
+        .wait()
+        .unwrap();
+    let cc = doc.character_count();
+    let bc = doc.block_count();
+    let plain = doc.to_plain_text().unwrap();
+    eprintln!("character_count={cc}, block_count={bc}, plain={plain:?}");
+    eprintln!("plain chars = {}", plain.chars().count());
+    // character_count by design excludes the N-1 block separators;
+    // `max_cursor_position = character_count + block_count - 1` is
+    // the true maximum.
+    // to_plain_text renders block separators as '\n' so its char
+    // count equals max_cursor_position.
+    assert_eq!(cc + bc - 1, plain.chars().count());
+}
+
 // ── Block-boundary crossing ─────────────────────────────────────────
 
 #[test]
