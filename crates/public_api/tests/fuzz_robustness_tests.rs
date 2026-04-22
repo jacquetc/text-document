@@ -191,13 +191,12 @@ proptest! {
 
             // Core invariants after every op.
             prop_assert!(doc.block_count() >= 1);
-            let _plain = doc.to_plain_text().unwrap();
-            // `character_count + (block_count - 1) == plain.chars()`
-            // is asserted statically by `known_bugs.rs` — it's
-            // violated today by a specific `delete_previous_char`
-            // path (see `delete_previous_char_after_crossblock_edit
-            // _keeps_invariant`). Re-enable here after that bug is
-            // fixed; until then, only assert "plain text succeeds".
+            let plain = doc.to_plain_text().unwrap();
+            prop_assert_eq!(
+                doc.character_count() + doc.block_count() - 1,
+                plain.chars().count(),
+                "character_count + (block_count - 1) == plain.chars().count()"
+            );
             // Cursor position never exceeds max.
             let cc = doc.character_count();
             let bc = doc.block_count();

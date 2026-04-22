@@ -112,7 +112,6 @@ fn mid_cluster_next_then_prev_returns_to_start() {
 // the invariant assertion can be re-enabled.
 
 #[test]
-#[ignore = "FIXME: delete_previous_char at end of second block desyncs character_count from plain text"]
 fn delete_previous_char_after_crossblock_edit_keeps_invariant() {
     use text_document::{MoveMode, MoveOperation};
     let doc = TextDocument::new();

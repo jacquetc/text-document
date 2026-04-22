@@ -130,6 +130,40 @@ fn execute_delete(
     // Get all blocks
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+
+    // `insert_text`'s fast path leaves subsequent blocks' stored
+    // `document_position` stale (see insert_text_uc.rs:389) and
+    // expects structural ops like this one to recompute on the fly.
+    // Walk the root frame's `child_order` to refresh top-level
+    // blocks' positions from the running sum of text_length + 1
+    // (block separator). Nested sub-frames and table cells are
+    // skipped here; their positions live in a cell-local space and
+    // remain whatever they were.
+    let root_frame = uow
+        .get_frame(&frame_id)?
+        .ok_or_else(|| anyhow!("Root frame not found"))?;
+    let mut running: i64 = 0;
+    let mut blocks_to_refresh: Vec<Block> = Vec::new();
+    for &entry in &root_frame.child_order {
+        if entry <= 0 {
+            // Sub-frame / table anchor — leave its child positions
+            // untouched; they're in a separate position space.
+            continue;
+        }
+        let id = entry as EntityId;
+        if let Some(b) = blocks.iter_mut().find(|b| b.id == id) {
+            if b.document_position != running {
+                b.document_position = running;
+                blocks_to_refresh.push(b.clone());
+            }
+            running += b.text_length + 1; // +1 for block separator
+        }
+    }
+    // Persist the refreshed positions so the subsequent delete pass
+    // reads the same values it's using in memory.
+    if !blocks_to_refresh.is_empty() {
+        uow.update_block_multi(&blocks_to_refresh)?;
+    }
     blocks.sort_by_key(|b| b.document_position);
 
     // Find start and end blocks (used for cell detection, then re-used by the normal path)
