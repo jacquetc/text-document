@@ -1,0 +1,38 @@
+---
+source: crates/public_api/tests/snapshot_tests.rs
+expression: "&snap.elements"
+---
+[
+    Block(
+        BlockSnapshot {
+            block_id: 1,
+            position: 0,
+            length: 0,
+            text: "",
+            fragments: [],
+            block_format: BlockFormat {
+                alignment: None,
+                top_margin: None,
+                bottom_margin: None,
+                left_margin: None,
+                right_margin: None,
+                heading_level: None,
+                indent: None,
+                text_indent: None,
+                marker: None,
+                tab_positions: [],
+                line_height: None,
+                non_breakable_lines: None,
+                direction: None,
+                background_color: None,
+                is_code_block: None,
+                code_language: None,
+            },
+            list_info: None,
+            parent_frame_id: Some(
+                1,
+            ),
+            table_cell: None,
+        },
+    ),
+]
