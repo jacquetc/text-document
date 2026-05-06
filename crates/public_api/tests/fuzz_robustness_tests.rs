@@ -212,8 +212,18 @@ proptest! {
 proptest! {
     #[test]
     fn html_roundtrip_stabilises(seed in arb_html_like()) {
+        // `set_html` is a long operation: it returns immediately with a
+        // handle while the import runs on a background thread. Querying
+        // the document before `wait()` races with the import and can see
+        // a still-empty doc — which is what made this property flaky on
+        // CI (commit transient: html1 had content, html2 raced and was
+        // empty, false-positive idempotency failure).
         let doc1 = TextDocument::new();
-        if doc1.set_html(&seed).is_err() {
+        let op1 = match doc1.set_html(&seed) {
+            Ok(o) => o,
+            Err(_) => return Ok(()),
+        };
+        if op1.wait().is_err() {
             return Ok(());
         }
         let c = doc1.cursor_at(0);
@@ -224,7 +234,11 @@ proptest! {
         // the same string. If the serialiser is idempotent (which it
         // should be for internally-produced HTML), html1 == html2.
         let doc2 = TextDocument::new();
-        if doc2.set_html(&html1).is_err() {
+        let op2 = match doc2.set_html(&html1) {
+            Ok(o) => o,
+            Err(_) => return Ok(()),
+        };
+        if op2.wait().is_err() {
             return Ok(());
         }
         let c2 = doc2.cursor_at(0);
