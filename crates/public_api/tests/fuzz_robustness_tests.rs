@@ -31,17 +31,11 @@ use text_document::{MoveMode, MoveOperation, TextDocument};
 // Uniform random bytes would almost never produce valid HTML; this
 // strategy skews toward "interesting" inputs.
 fn arb_html_like() -> impl Strategy<Value = String> {
-    proptest::string::string_regex(
-        r#"[a-zA-Z0-9 <>/&;!?.,\n\t\-="'#\[\]\(\)éà🌍]{0,200}"#,
-    )
-    .unwrap()
+    proptest::string::string_regex(r#"[a-zA-Z0-9 <>/&;!?.,\n\t\-="'#\[\]\(\)éà🌍]{0,200}"#).unwrap()
 }
 
 fn arb_markdown_like() -> impl Strategy<Value = String> {
-    proptest::string::string_regex(
-        r"[a-zA-Z0-9 #*_`|\-\[\]\(\)!\n\t.,>:;éà🌍]{0,200}",
-    )
-    .unwrap()
+    proptest::string::string_regex(r"[a-zA-Z0-9 #*_`|\-\[\]\(\)!\n\t.,>:;éà🌍]{0,200}").unwrap()
 }
 
 // Small alphabet for edit-op sequences that drive the cursor API.

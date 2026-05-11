@@ -132,7 +132,9 @@ fn delete_previous_char_after_crossblock_edit_keeps_invariant() {
         plain.chars().count(),
         "character_count + (block_count - 1) must equal plain.chars().count() \
          — got cc={}, bc={}, plain={:?}",
-        cc, bc, plain
+        cc,
+        bc,
+        plain
     );
 }
 

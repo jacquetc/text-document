@@ -2294,7 +2294,7 @@ impl TextCursor {
     }
 
     /// Return the cursor position before the extended grapheme cluster
-    /// that ends at `pos`. Counterpart to [`next_grapheme_boundary`].
+    /// that ends at `pos`. Counterpart to [`Self::next_grapheme_boundary`].
     /// Crosses block separators one scalar at a time.
     fn prev_grapheme_boundary(&self, pos: usize) -> usize {
         if pos == 0 {

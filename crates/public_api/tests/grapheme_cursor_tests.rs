@@ -172,21 +172,13 @@ fn probe_table_select_all_copy_paste_roundtrip() {
         .unwrap();
 
     let c = doc.cursor_at(0);
-    c.move_position(
-        text_document::MoveOperation::End,
-        MoveMode::KeepAnchor,
-        1,
-    );
+    c.move_position(text_document::MoveOperation::End, MoveMode::KeepAnchor, 1);
     let frag = c.selection();
     eprintln!("fragment html = {:?}", frag.to_html());
 
     // Replace entire doc with the fragment.
     let c2 = doc.cursor_at(0);
-    c2.move_position(
-        text_document::MoveOperation::End,
-        MoveMode::KeepAnchor,
-        1,
-    );
+    c2.move_position(text_document::MoveOperation::End, MoveMode::KeepAnchor, 1);
     c2.insert_fragment(&frag).unwrap();
 
     let plain_after = doc.to_plain_text().unwrap();
