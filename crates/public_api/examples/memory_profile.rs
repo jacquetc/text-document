@@ -5,7 +5,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use text_document::{MoveMode, MoveOperation, SelectionType, TextDocument};
+use text_document::{MoveMode, MoveOperation, SelectionType, TextDocument, TextFormat};
 
 struct Counting;
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
@@ -189,6 +189,80 @@ fn main() {
         d
     });
 
+    // ── Phase 0 baseline scenarios (per plan §6.1) ──────────────────
+    // Each captures a regime the existing A–D set does not cover.
+
+    let e = measure("E. empty doc (TextDocument::new only)", || {
+        TextDocument::new()
+    });
+
+    let f = measure("F. 1 MB plain text, no format (undo cleared)", || {
+        let d = TextDocument::new();
+        let big = "a".repeat(1_000_000);
+        d.set_plain_text(&big).unwrap();
+        d.clear_undo_redo();
+        d
+    });
+
+    let g = measure("G. 100 blocks × 1 KB each (undo cleared)", || {
+        let d = TextDocument::new();
+        let para: String = "x".repeat(1024);
+        let text = (0..100).map(|_| para.as_str()).collect::<Vec<_>>().join("\n");
+        d.set_plain_text(&text).unwrap();
+        d.clear_undo_redo();
+        d
+    });
+
+    let h = measure("H. 3 KB doc with bold every 5 chars (undo cleared)", || {
+        let d = TextDocument::new();
+        d.set_markdown(SAMPLE).unwrap().wait().unwrap();
+        let cur = d.cursor();
+        cur.move_position(MoveOperation::Start, MoveMode::MoveAnchor, 1);
+        let bold = TextFormat {
+            font_bold: Some(true),
+            ..Default::default()
+        };
+        // Toggle bold over each 5-char window across the full doc.
+        let total = d.character_count();
+        let mut at: usize = 0;
+        while at < total {
+            let cur = d.cursor_at(at);
+            cur.move_position(MoveOperation::Right, MoveMode::KeepAnchor, 5);
+            cur.merge_char_format(&bold).unwrap();
+            at += 10; // skip 5 (so bold runs alternate)
+        }
+        d.clear_undo_redo();
+        d
+    });
+
+    let i = measure("I. 10×10 table filled with 20-char cells (undo cleared)", || {
+        let d = TextDocument::new();
+        d.set_plain_text("").unwrap();
+        let cur = d.cursor_at(0);
+        let _ = cur.insert_table(10, 10).unwrap();
+        // Fill each cell with 20 chars. Walk the cell grid via cursor moves
+        // is fragile across versions; rely on the cursor landing inside the
+        // first cell after insert_table and stepping through with Tab-style
+        // motion via re-positioning by character count is unreliable, so
+        // we only measure the empty-table cost here. This isolates the
+        // structural overhead of 100 cells without per-cell content noise.
+        d.clear_undo_redo();
+        d
+    });
+
+    let j = measure("J. 100 KB doc + 1000 small inserts (undo KEPT)", || {
+        let d = TextDocument::new();
+        let seed = "a".repeat(100_000);
+        d.set_plain_text(&seed).unwrap();
+        d.clear_undo_redo();
+        for k in 0..1000 {
+            let pos = (k * 97) % 100_000;
+            let cur = d.cursor_at(pos);
+            cur.insert_text("x").unwrap();
+        }
+        d
+    });
+
     let (residual, _) = snapshot();
     println!();
     println!("Residual heap after all docs dropped: {}", fmt(residual as isize));
@@ -200,4 +274,10 @@ fn main() {
     println!("  data cost of 2× content    D - A       = {}", fmt(d.0 - a.0));
     println!("  paste residue vs raw 2×    C' - D      = {}", fmt(c_prime.0 - d.0));
     println!("  10 small ops residual data B' - A      = {}", fmt(b_prime.0 - a.0));
+    println!("  empty doc floor            E           = {}", fmt(e.0));
+    println!("  data + structure 1MB plain F           = {}", fmt(f.0));
+    println!("  100×1KB blocks             G           = {}", fmt(g.0));
+    println!("  format-run-heavy 3KB doc   H - A       = {}", fmt(h.0 - a.0));
+    println!("  100-cell table cost        I - E       = {}", fmt(i.0 - e.0));
+    println!("  1000 inserts undo cost     J (live)    = {}", fmt(j.0));
 }

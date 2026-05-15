@@ -340,3 +340,118 @@ proptest! {
         }
     }
 }
+
+// ── Invariant 11 ────────────────────────────────────────────────────
+// The entity-ID counter is monotone across undo. After undo rolls
+// back a block-creating edit, the next block-creating edit must
+// receive an ID strictly greater than the rolled-back one.
+//
+// This guards the contract of `HashMapStore::restore_without_counters`
+// (counters are NOT restored on undo). The same contract will hold
+// after the rope backend migration — `RopeStore::restore_without_counters`
+// is required to preserve it. A regression here means entity IDs can
+// collide across undo/redo cycles, corrupting any reference held by
+// a still-open handle.
+
+proptest! {
+    #[test]
+    fn undo_does_not_reset_id_counter(seed in "[a-zA-Z ]{1,40}") {
+        let doc = new_doc(&seed);
+
+        // Move to end and create a fresh block. `insert_block` is the
+        // public block-creating API (unlike `insert_text("\n")`, which
+        // inserts a literal newline inside the current block).
+        let pos1 = doc.character_count() + doc.block_count().saturating_sub(1);
+        let c1 = doc.cursor_at(pos1);
+        c1.insert_block().unwrap();
+        let max_first = doc
+            .blocks()
+            .iter()
+            .map(|b| b.id())
+            .max()
+            .unwrap_or(0);
+
+        // Undo: the newly-created block disappears from the document,
+        // but its ID is gone forever (the counter is not rewound).
+        doc.undo().unwrap();
+
+        // Insert again: this MUST allocate a new id strictly greater
+        // than max_first. If the counter had reset, max_second could
+        // equal max_first and a stale handle to the rolled-back block
+        // would now silently refer to a different block.
+        let pos2 = doc.character_count() + doc.block_count().saturating_sub(1);
+        let c2 = doc.cursor_at(pos2);
+        c2.insert_block().unwrap();
+        let max_second = doc
+            .blocks()
+            .iter()
+            .map(|b| b.id())
+            .max()
+            .unwrap_or(0);
+
+        prop_assert!(
+            max_second > max_first,
+            "id counter must not rewind on undo: max_first={}, max_second={}",
+            max_first,
+            max_second
+        );
+    }
+}
+
+// ── Invariant 12 ────────────────────────────────────────────────────
+// A composite edit block undoes and redoes as a single unit. Wrapping
+// N edits in `begin_edit_block`/`end_edit_block` must produce exactly
+// one undo step, not N. One `undo()` call returns the document to the
+// pre-composite state; one `redo()` call restores the post-composite
+// state; a second `undo()` reverts again to pre-composite.
+//
+// This guards the composite-command atomicity contract in
+// `undo_redo.rs:296-372`. The contract must survive the rope backend
+// migration unchanged.
+
+proptest! {
+    #[test]
+    fn composite_undoes_as_one_unit(
+        seed in "[a-zA-Z ]{1,30}",
+        edits in proptest::collection::vec("[a-z]{1,3}", 2..6),
+    ) {
+        let doc = new_doc(&seed);
+        let before = doc.to_plain_text().unwrap();
+        let pos = doc.character_count() + doc.block_count().saturating_sub(1);
+        let c = doc.cursor_at(pos);
+
+        c.begin_edit_block();
+        for chunk in &edits {
+            c.insert_text(chunk).unwrap();
+        }
+        c.end_edit_block();
+
+        let after = doc.to_plain_text().unwrap();
+        // If the composite produced no net change, there's nothing to test.
+        prop_assume!(before != after);
+
+        doc.undo().unwrap();
+        let after_undo = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            &before,
+            &after_undo,
+            "one undo of a composite must revert ALL inner edits"
+        );
+
+        doc.redo().unwrap();
+        let after_redo = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            &after,
+            &after_redo,
+            "one redo of a composite must restore the post-composite state"
+        );
+
+        doc.undo().unwrap();
+        let after_undo2 = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            before,
+            after_undo2,
+            "second undo of a composite must also revert ALL inner edits"
+        );
+    }
+}
