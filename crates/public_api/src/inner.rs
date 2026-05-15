@@ -329,7 +329,7 @@ impl TextDocumentInner {
         use frontend::root::dtos::CreateRootDto;
 
         let event_client = EventHubClient::new(&ctx.event_hub);
-        event_client.start(ctx.quit_signal.clone());
+        event_client.start(ctx.shutdown_rx.clone());
 
         let stack_id = undo_redo_commands::create_new_stack(&ctx);
 
