@@ -52,12 +52,35 @@ switch to byte-range deltas, since InlineElement won't exist).
   synthesized via `synthesize_block_inline_elements`. After Phase
   1.14 the `from_entity`/`to_entity` methods are rewritten to map
   directly to/from `FormatRun`+`ImageAnchor`.
-- Phase 1.13e (writer migration): NOT STARTED — every editing /
-  formatting / import use case currently mutates `InlineElement`
-  entities. Rewriting them to splice `format_runs` and
-  `block_images` directly is the largest remaining piece of Phase
-  1 (~13 use cases, several hundred LOC each). After this is done,
-  the inline_elements table can be deleted in Phase 1.14.
+- Phase 1.13e (writer migration): IN PROGRESS — 3 of 13 use cases
+  migrated:
+  * `insert_image_uc` — writes `block_images` directly, drops 4
+    InlineElement decorators.
+  * `set_text_format_uc` — replaces inline_element fmt_* updates with
+    `format_runs` splice (per-run merge of dto Optional fields).
+  * `merge_text_format_uc` — same splice shape, drops 8 decorators
+    total across the two formatting use cases.
+  Test surface migrated alongside: editing_extended_tests +
+  complex_format_tests + formatting_tests + text_format_tests +
+  merge_text_format_tests now read post-mutation state via
+  `test_harness::synth_block_elements` (which materialises the view
+  from format_runs / block_images).
+
+  The remaining 10 writers share `block.plain_text` as their content
+  source-of-truth and must be migrated as a coupled group:
+  `insert_text_uc`, `delete_text_uc`, `insert_block_uc`,
+  `insert_formatted_text_uc`, `insert_fragment_uc`,
+  `insert_html_at_position_uc`, `insert_markdown_at_position_uc`,
+  `import_{plain_text,html,markdown}_uc`, `replace_text_uc`.
+
+  Why coupled: each one mutates `block.plain_text` and
+  `block.text_length`. If only insert_text migrates (stops touching
+  inline_elements), a later delete_text rebuilds plain_text from the
+  now-stale inline_elements and silently drops the inserted chars.
+  Attempted in this session, reverted after `random_edit_sequence_
+  preserves_invariants` proptest caught the mismatch on
+  `[InsertText("aa"), DeletePrev]`. They migrate together or not at
+  all.
 - Phase 1.14 (deletion): NOT STARTED — depends on 1.13e. Memory
   wins materialize here.
 - Phase 1.17 (bench compare): N/A until 1.14 done.
