@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::ListStyle;
 use frontend::commands::{
     document_editing_commands, document_formatting_commands, document_inspection_commands,
-    inline_element_commands, undo_redo_commands,
+    undo_redo_commands,
 };
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -1819,19 +1819,62 @@ impl TextCursor {
 
     // ── Format queries ───────────────────────────────────────
 
-    /// Get the character format at the cursor position.
+    /// Get the character format at the cursor position. Reads the
+    /// covering `FormatRun` (or image anchor) from the store rather
+    /// than fetching an `InlineElement` — the InlineElement table is
+    /// scheduled for removal in Phase 1.14.
     pub fn char_format(&self) -> Result<TextFormat> {
         let pos = self.position();
         let inner = self.doc.lock();
-        let dto = frontend::document_inspection::GetTextAtPositionDto {
+
+        // Locate the block containing the cursor.
+        let dto = frontend::document_inspection::GetBlockAtPositionDto {
             position: to_i64(pos),
-            length: 1,
         };
-        let text_info = document_inspection_commands::get_text_at_position(&inner.ctx, &dto)?;
-        let element_id = text_info.element_id as u64;
-        let element = inline_element_commands::get_inline_element(&inner.ctx, &element_id)?
-            .ok_or_else(|| anyhow::anyhow!("element not found at position"))?;
-        Ok(TextFormat::from(&element))
+        let block_info = document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
+        let block_id = block_info.block_id as u64;
+        let block_dto = frontend::commands::block_commands::get_block(&inner.ctx, &block_id)?
+            .ok_or_else(|| anyhow::anyhow!("block not found at position"))?;
+
+        // Convert document-wide char position to a byte offset within
+        // the block's plain_text.
+        let local_char = pos.saturating_sub(block_dto.document_position as usize);
+        let plain: &str = &block_dto.plain_text;
+        let byte_offset: u32 = plain
+            .char_indices()
+            .nth(local_char)
+            .map(|(b, _)| b as u32)
+            .unwrap_or(plain.len() as u32);
+
+        let store = inner.ctx.db_context.get_store();
+
+        // If there's an image anchor at this exact byte position, use
+        // its format.
+        let images = store
+            .block_images
+            .read()
+            .unwrap()
+            .get(&block_id)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(img) = images.iter().find(|i| i.byte_offset == byte_offset) {
+            return Ok(TextFormat::from(&img.format));
+        }
+
+        // Otherwise find the FormatRun covering the byte position.
+        let runs = store
+            .format_runs
+            .read()
+            .unwrap()
+            .get(&block_id)
+            .cloned()
+            .unwrap_or_default();
+        let fmt = runs
+            .iter()
+            .find(|r| r.byte_start <= byte_offset && byte_offset < r.byte_end)
+            .map(|r| TextFormat::from(&r.format))
+            .unwrap_or_default();
+        Ok(fmt)
     }
 
     /// Get the block format of the block containing the cursor.
