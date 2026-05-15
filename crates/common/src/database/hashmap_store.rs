@@ -8,6 +8,7 @@
 //! allowing `&HashMapStore` to be shared across threads via `Arc`.
 
 use crate::entities::*;
+use crate::format_runs::{FormatRun, ImageAnchor};
 use crate::snapshot::{StoreSnapshot, StoreSnapshotTrait};
 use crate::types::EntityId;
 use im::HashMap;
@@ -29,6 +30,15 @@ pub struct HashMapStore {
     pub resources: RwLock<HashMap<EntityId, Resource>>,
     pub tables: RwLock<HashMap<EntityId, Table>>,
     pub table_cells: RwLock<HashMap<EntityId, TableCell>>,
+
+    // ── Format runs and image anchors (rope-migration Phase 1) ──────────
+    // Per-block character formatting (sorted, non-overlapping byte spans).
+    // Will replace `inline_elements` + `jn_inline_element_from_block_elements`
+    // entirely at the end of Phase 1. During the migration, both models
+    // coexist; use cases gradually move from writing InlineElements to
+    // writing format_runs.
+    pub format_runs: RwLock<HashMap<EntityId, Vec<FormatRun>>>,
+    pub block_images: RwLock<HashMap<EntityId, Vec<ImageAnchor>>>,
 
     // ── Junction tables (one per forward relationship, shared for backward cleanup) ─
     pub jn_document_from_root_document: RwLock<HashMap<EntityId, Vec<EntityId>>>,
@@ -113,6 +123,8 @@ impl HashMapStore {
                 .read()
                 .unwrap()
                 .clone(),
+            format_runs: self.format_runs.read().unwrap().clone(),
+            block_images: self.block_images.read().unwrap().clone(),
             counters: self.counters.read().unwrap().clone(),
         }
     }
@@ -149,6 +161,8 @@ impl HashMapStore {
             snap.jn_table_cell_from_table_cells.clone();
         *self.jn_frame_from_table_cell_cell_frame.write().unwrap() =
             snap.jn_frame_from_table_cell_cell_frame.clone();
+        *self.format_runs.write().unwrap() = snap.format_runs.clone();
+        *self.block_images.write().unwrap() = snap.block_images.clone();
         *self.counters.write().unwrap() = snap.counters.clone();
     }
 
@@ -222,6 +236,8 @@ impl HashMapStore {
             snap.jn_table_cell_from_table_cells.clone();
         *self.jn_frame_from_table_cell_cell_frame.write().unwrap() =
             snap.jn_frame_from_table_cell_cell_frame.clone();
+        *self.format_runs.write().unwrap() = snap.format_runs.clone();
+        *self.block_images.write().unwrap() = snap.block_images.clone();
         // counters intentionally NOT restored — IDs must remain monotonically increasing
     }
 
@@ -263,6 +279,8 @@ pub struct HashMapStoreSnapshot {
     jn_list_from_block_list: HashMap<EntityId, Vec<EntityId>>,
     jn_table_cell_from_table_cells: HashMap<EntityId, Vec<EntityId>>,
     jn_frame_from_table_cell_cell_frame: HashMap<EntityId, Vec<EntityId>>,
+    format_runs: HashMap<EntityId, Vec<FormatRun>>,
+    block_images: HashMap<EntityId, Vec<ImageAnchor>>,
     counters: std::collections::HashMap<String, EntityId>,
 }
 
