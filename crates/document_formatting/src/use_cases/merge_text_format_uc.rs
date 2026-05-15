@@ -1,11 +1,13 @@
 use crate::MergeTextFormatDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
+use common::entities::{Block, Document, Frame, Root};
+use common::format_runs::{
+    CharacterFormat, FormatRun, debug_assert_well_formed, splice_range,
+};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -26,50 +28,83 @@ pub trait MergeTextFormatUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "Get")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Update")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 pub trait MergeTextFormatUnitOfWorkTrait: CommandUnitOfWork {}
 
-/// Get the character length of an inline element.
-fn element_char_len(elem: &InlineElement) -> i64 {
-    match &elem.content {
-        InlineContent::Text(s) => s.chars().count() as i64,
-        InlineContent::Image { .. } => 1,
-        InlineContent::Empty => 0,
-    }
-}
-
-/// Apply merge format fields to an inline element.
-/// Only overwrites fields that are `Some(...)` in the DTO.
-/// `None` fields are left unchanged — this is the "merge" semantics.
-fn apply_merge_format(elem: &mut InlineElement, dto: &MergeTextFormatDto) {
+/// Apply the merge dto onto a CharacterFormat, overwriting only fields the
+/// dto sets to `Some(_)`. Non-empty `font_family` follows the original
+/// semantic (empty string was treated as "no change" by the legacy code).
+fn merge_dto(base: &CharacterFormat, dto: &MergeTextFormatDto) -> CharacterFormat {
+    let mut out = base.clone();
     if let Some(ref family) = dto.font_family
         && !family.is_empty()
     {
-        elem.fmt_font_family = Some(family.clone());
+        out.font_family = Some(family.clone());
     }
-    if let Some(bold) = dto.font_bold {
-        elem.fmt_font_bold = Some(bold);
+    if let Some(v) = dto.font_bold {
+        out.font_bold = Some(v);
     }
-    if let Some(italic) = dto.font_italic {
-        elem.fmt_font_italic = Some(italic);
+    if let Some(v) = dto.font_italic {
+        out.font_italic = Some(v);
     }
-    if let Some(underline) = dto.font_underline {
-        elem.fmt_font_underline = Some(underline);
+    if let Some(v) = dto.font_underline {
+        out.font_underline = Some(v);
     }
-    if let Some(strikeout) = dto.font_strikeout {
-        elem.fmt_font_strikeout = Some(strikeout);
+    if let Some(v) = dto.font_strikeout {
+        out.font_strikeout = Some(v);
     }
-    elem.updated_at = chrono::Utc::now();
+    out
+}
+
+fn char_to_byte(plain_text: &str, char_offset: usize) -> u32 {
+    plain_text
+        .char_indices()
+        .nth(char_offset)
+        .map(|(b, _)| b as u32)
+        .unwrap_or(plain_text.len() as u32)
+}
+
+fn build_replacement_runs(
+    existing_runs: &[FormatRun],
+    byte_start: u32,
+    byte_end: u32,
+    dto: &MergeTextFormatDto,
+) -> Vec<FormatRun> {
+    let mut out: Vec<FormatRun> = Vec::new();
+    let mut cursor = byte_start;
+    for run in existing_runs {
+        if run.byte_end <= byte_start || run.byte_start >= byte_end {
+            continue;
+        }
+        let overlap_start = std::cmp::max(run.byte_start, byte_start);
+        let overlap_end = std::cmp::min(run.byte_end, byte_end);
+        if overlap_start > cursor {
+            out.push(FormatRun {
+                byte_start: cursor,
+                byte_end: overlap_start,
+                format: merge_dto(&CharacterFormat::default(), dto),
+            });
+        }
+        out.push(FormatRun {
+            byte_start: overlap_start,
+            byte_end: overlap_end,
+            format: merge_dto(&run.format, dto),
+        });
+        cursor = overlap_end;
+    }
+    if cursor < byte_end {
+        out.push(FormatRun {
+            byte_start: cursor,
+            byte_end,
+            format: merge_dto(&CharacterFormat::default(), dto),
+        });
+    }
+    out
 }
 
 fn execute_merge_text_format(
     uow: &mut Box<dyn MergeTextFormatUnitOfWorkTrait>,
     dto: &MergeTextFormatDto,
 ) -> Result<EntityTreeSnapshot> {
-    // Get Root -> Document
     let root = uow
         .get_root(&ROOT_ENTITY_ID)?
         .ok_or_else(|| anyhow!("Root entity not found"))?;
@@ -82,25 +117,20 @@ fn execute_merge_text_format(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    // Snapshot for undo before mutation
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
-    // Get frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
-    // Get block IDs from all frames
     let mut all_block_ids = Vec::new();
     for fid in &frame_ids {
         let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
         all_block_ids.extend(block_ids);
     }
 
-    // Get all blocks
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    // Determine the range
     let range_start = std::cmp::min(dto.position, dto.anchor);
     let range_end = std::cmp::max(dto.position, dto.anchor);
 
@@ -108,106 +138,45 @@ fn execute_merge_text_format(
         return Ok(snapshot);
     }
 
-    // Process each block that overlaps the range
     for block in &blocks {
         let block_start = block.document_position;
         let block_end = block_start + block.text_length;
 
-        // Skip blocks outside the range
         if block_end <= range_start || block_start >= range_end {
             continue;
         }
 
-        // Get elements for this block
-        let element_ids =
-            uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let local_char_start =
+            std::cmp::max(0, range_start - block_start) as usize;
+        let local_char_end =
+            std::cmp::min(block.text_length, range_end - block_start) as usize;
 
-        let mut elem_doc_pos = block_start;
+        let plain_text_len = block.plain_text.chars().count();
+        let text_char_start = std::cmp::min(local_char_start, plain_text_len);
+        let text_char_end = std::cmp::min(local_char_end, plain_text_len);
+        let byte_start = char_to_byte(&block.plain_text, text_char_start);
+        let byte_end = char_to_byte(&block.plain_text, text_char_end);
 
-        for elem in &elements {
-            let elem_len = element_char_len(elem);
-            let elem_start = elem_doc_pos;
-            let elem_end = elem_start + elem_len;
+        let store = uow.store();
 
-            // Skip elements outside the range
-            if elem_end <= range_start || elem_start >= range_end {
-                elem_doc_pos += elem_len;
-                continue;
-            }
+        if byte_start < byte_end {
+            let mut runs_map = store.format_runs.write().unwrap();
+            let runs = runs_map.entry(block.id).or_default();
+            let replacement = build_replacement_runs(runs, byte_start, byte_end, dto);
+            splice_range(runs, byte_start..byte_end, replacement);
+            debug_assert_well_formed(runs, block.plain_text.len());
+        }
 
-            // Element is fully within range
-            if elem_start >= range_start && elem_end <= range_end {
-                let mut updated = elem.clone();
-                apply_merge_format(&mut updated, dto);
-                uow.update_inline_element(&updated)?;
-            }
-            // Element needs splitting
-            else if let InlineContent::Text(ref text) = elem.content {
-                let local_start = std::cmp::max(0, range_start - elem_start) as usize;
-                let local_end = std::cmp::min(elem_len, range_end - elem_start) as usize;
-                let chars: Vec<char> = text.chars().collect();
-
-                if local_start > 0 && local_end < chars.len() {
-                    // Split into three parts: before, middle (merge formatted), after
-                    let before_text: String = chars[..local_start].iter().collect();
-                    let middle_text: String = chars[local_start..local_end].iter().collect();
-                    let after_text: String = chars[local_end..].iter().collect();
-
-                    // Update original to keep only "before" text
-                    let mut updated_orig = elem.clone();
-                    updated_orig.content = InlineContent::Text(before_text);
-                    updated_orig.updated_at = chrono::Utc::now();
-                    uow.update_inline_element(&updated_orig)?;
-
-                    // Create middle element with merge formatting
-                    let mut middle_elem = elem.clone();
-                    middle_elem.id = 0;
-                    middle_elem.content = InlineContent::Text(middle_text);
-                    apply_merge_format(&mut middle_elem, dto);
-                    uow.create_inline_element(&middle_elem, block.id, -1)?;
-
-                    // Create after element (same formatting as original)
-                    let mut after_elem = elem.clone();
-                    after_elem.id = 0;
-                    after_elem.content = InlineContent::Text(after_text);
-                    after_elem.updated_at = chrono::Utc::now();
-                    uow.create_inline_element(&after_elem, block.id, -1)?;
-                } else if local_start > 0 {
-                    // Split into two: before (unchanged), rest (merge formatted)
-                    let before_text: String = chars[..local_start].iter().collect();
-                    let rest_text: String = chars[local_start..].iter().collect();
-
-                    let mut updated_orig = elem.clone();
-                    updated_orig.content = InlineContent::Text(before_text);
-                    updated_orig.updated_at = chrono::Utc::now();
-                    uow.update_inline_element(&updated_orig)?;
-
-                    let mut new_elem = elem.clone();
-                    new_elem.id = 0;
-                    new_elem.content = InlineContent::Text(rest_text);
-                    apply_merge_format(&mut new_elem, dto);
-                    uow.create_inline_element(&new_elem, block.id, -1)?;
-                } else {
-                    // local_start == 0, split into: merge formatted part, rest
-                    let formatted_text: String = chars[..local_end].iter().collect();
-                    let rest_text: String = chars[local_end..].iter().collect();
-
-                    let mut updated_orig = elem.clone();
-                    updated_orig.content = InlineContent::Text(formatted_text);
-                    apply_merge_format(&mut updated_orig, dto);
-                    uow.update_inline_element(&updated_orig)?;
-
-                    let mut new_elem = elem.clone();
-                    new_elem.id = 0;
-                    new_elem.content = InlineContent::Text(rest_text);
-                    new_elem.updated_at = chrono::Utc::now();
-                    uow.create_inline_element(&new_elem, block.id, -1)?;
+        // Update image anchor formats inside the selected byte range.
+        {
+            let mut images_map = store.block_images.write().unwrap();
+            if let Some(images) = images_map.get_mut(&block.id) {
+                for img in images.iter_mut() {
+                    if img.byte_offset >= byte_start && img.byte_offset < byte_end {
+                        img.format = merge_dto(&img.format, dto);
+                    }
                 }
             }
-
-            elem_doc_pos += elem_len;
         }
     }
 

@@ -11,10 +11,7 @@ use document_formatting::{
     CharVerticalAlignment, MergeTextFormatDto, SetTextFormatDto, UnderlineStyle,
 };
 
-use test_harness::{
-    BlockRelationshipField, block_controller, create_list, get_block_ids,
-    inline_element_controller, setup_with_text,
-};
+use test_harness::{create_list, get_block_ids, setup_with_text};
 
 #[test]
 fn test_merge_text_format_empty_family_preserves_existing() -> Result<()> {
@@ -51,9 +48,8 @@ fn test_merge_text_format_empty_family_preserves_existing() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    let elem = inline_element_controller::get(&db, &elem_ids[0])?.unwrap();
+    let elements = test_harness::synth_block_elements(&db, block_ids[0])?;
+    let elem = &elements[0];
 
     assert_eq!(
         elem.fmt_font_family,
@@ -115,17 +111,15 @@ fn test_merge_text_format_on_list_blocks() -> Result<()> {
     let block_ids = get_block_ids(&db)?;
 
     // First block "Alpha" should be bold but keep Georgia family
-    let elem_ids_0 =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    let elem0 = inline_element_controller::get(&db, &elem_ids_0[0])?.unwrap();
+    let elements_0 = test_harness::synth_block_elements(&db, block_ids[0])?;
+    let elem0 = &elements_0[0];
     assert_eq!(elem0.fmt_font_bold, Some(true));
     assert_eq!(elem0.fmt_font_family, Some("Georgia".into()));
     assert_eq!(elem0.fmt_font_point_size, Some(14));
 
     // Third block "Gamma" should NOT be bold
-    let elem_ids_2 =
-        block_controller::get_relationship(&db, &block_ids[2], &BlockRelationshipField::Elements)?;
-    let elem2 = inline_element_controller::get(&db, &elem_ids_2[0])?.unwrap();
+    let elements_2 = test_harness::synth_block_elements(&db, block_ids[2])?;
+    let elem2 = &elements_2[0];
     assert_eq!(elem2.fmt_font_bold, Some(false), "Gamma should not be bold");
     Ok(())
 }
@@ -176,13 +170,11 @@ fn test_merge_text_format_partial_split_preserves_fields() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
+    let elements = test_harness::synth_block_elements(&db, block_ids[0])?;
 
     // Find the "CD" element
     let mut found_cd = false;
-    for eid in &elem_ids {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    for elem in &elements {
         if let InlineContent::Text(ref t) = elem.content
             && t == "CD"
         {
@@ -237,13 +229,8 @@ fn test_merge_text_format_undo_redo() -> Result<()> {
 
     let block_ids = get_block_ids(&db)?;
     let get_bold = |db: &DbContext| -> anyhow::Result<Option<bool>> {
-        let eids = block_controller::get_relationship(
-            db,
-            &block_ids[0],
-            &BlockRelationshipField::Elements,
-        )?;
-        let elem = inline_element_controller::get(db, &eids[0])?.unwrap();
-        Ok(elem.fmt_font_bold)
+        let elements = test_harness::synth_block_elements(db, block_ids[0])?;
+        Ok(elements[0].fmt_font_bold)
     };
 
     assert_eq!(get_bold(&db)?, Some(true));

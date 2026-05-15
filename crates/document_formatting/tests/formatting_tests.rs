@@ -4,8 +4,7 @@ use common::database::db_context::DbContext;
 use common::types::EntityId;
 
 use test_harness::{
-    BlockRelationshipField, block_controller, frame_controller, get_block_ids, get_frame_id,
-    inline_element_controller, setup_with_text,
+    block_controller, frame_controller, get_block_ids, get_frame_id, setup_with_text,
 };
 
 use document_formatting::document_formatting_controller;
@@ -273,14 +272,10 @@ fn test_set_text_format_whole_element() -> Result<()> {
 
     // Get the first block's elements
     let block_id = get_first_block_id(&db_context)?;
-    let element_ids = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
+    let elements = test_harness::synth_block_elements(&db_context, block_id)?;
 
     // Check the first element has formatting
-    let elem = inline_element_controller::get(&db_context, &element_ids[0])?.unwrap();
+    let elem = &elements[0];
     assert_eq!(elem.fmt_font_family, Some("Arial".to_string()));
     assert_eq!(elem.fmt_font_point_size, Some(14));
     assert_eq!(elem.fmt_font_weight, Some(700));
@@ -324,25 +319,20 @@ fn test_set_text_format_partial() -> Result<()> {
         },
     )?;
 
-    // Get the block's elements - should have been split
+    // Get the block's synthesized elements - should appear split by format runs.
     let block_id = get_first_block_id(&db_context)?;
-    let element_ids = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
+    let elements = test_harness::synth_block_elements(&db_context, block_id)?;
 
     // Should have 3 elements after splitting: "He", "lloWo", "rld"
     assert!(
-        element_ids.len() >= 3,
+        elements.len() >= 3,
         "Expected at least 3 elements after split, got {}",
-        element_ids.len()
+        elements.len()
     );
 
     // Check that at least one element has the bold+italic formatting
     let mut found_formatted = false;
-    for elem_id in &element_ids {
-        let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
+    for elem in &elements {
         if elem.fmt_font_bold == Some(true) && elem.fmt_font_italic == Some(true) {
             assert_eq!(elem.fmt_font_family, Some("Courier".to_string()));
             found_formatted = true;
@@ -405,13 +395,8 @@ fn test_merge_text_format_preserves_other_fields() -> Result<()> {
 
     // Verify the merge results
     let block_id = get_first_block_id(&db_context)?;
-    let element_ids = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
-
-    let elem = inline_element_controller::get(&db_context, &element_ids[0])?.unwrap();
+    let elements = test_harness::synth_block_elements(&db_context, block_id)?;
+    let elem = &elements[0];
 
     // Merged fields should be updated
     assert_eq!(elem.fmt_font_bold, Some(false));
@@ -487,12 +472,8 @@ fn test_merge_text_format_undo() -> Result<()> {
 
     // Verify merge was applied
     let block_id = get_first_block_id(&db_context)?;
-    let element_ids = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
-    let elem = inline_element_controller::get(&db_context, &element_ids[0])?.unwrap();
+    let elements = test_harness::synth_block_elements(&db_context, block_id)?;
+    let elem = &elements[0];
     assert_eq!(elem.fmt_font_bold, Some(true));
     assert_eq!(elem.fmt_font_italic, Some(true));
 
@@ -500,12 +481,8 @@ fn test_merge_text_format_undo() -> Result<()> {
     undo_redo_manager.undo(None)?;
 
     // Verify merge was reverted (back to set_text_format state)
-    let element_ids_after = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
-    let elem_after = inline_element_controller::get(&db_context, &element_ids_after[0])?.unwrap();
+    let elements_after = test_harness::synth_block_elements(&db_context, block_id)?;
+    let elem_after = &elements_after[0];
     assert_eq!(elem_after.fmt_font_bold, Some(false));
     assert_eq!(elem_after.fmt_font_italic, Some(false));
     // Font family should still be from the set_text_format call
@@ -519,12 +496,8 @@ fn test_set_text_format_undo() -> Result<()> {
     let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hello")?;
 
     let block_id = get_first_block_id(&db_context)?;
-    let elem_ids_before = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
-    let elem_before = inline_element_controller::get(&db_context, &elem_ids_before[0])?.unwrap();
+    let elements_before = test_harness::synth_block_elements(&db_context, block_id)?;
+    let elem_before = &elements_before[0];
     assert_eq!(elem_before.fmt_font_bold, None);
 
     document_formatting_controller::set_text_format(
@@ -550,22 +523,14 @@ fn test_set_text_format_undo() -> Result<()> {
         },
     )?;
 
-    let elem_ids = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
-    let elem = inline_element_controller::get(&db_context, &elem_ids[0])?.unwrap();
+    let elements = test_harness::synth_block_elements(&db_context, block_id)?;
+    let elem = &elements[0];
     assert_eq!(elem.fmt_font_bold, Some(true));
 
     undo_redo_manager.undo(None)?;
 
-    let elem_ids_after = block_controller::get_relationship(
-        &db_context,
-        &block_id,
-        &BlockRelationshipField::Elements,
-    )?;
-    let elem_after = inline_element_controller::get(&db_context, &elem_ids_after[0])?.unwrap();
+    let elements_after = test_harness::synth_block_elements(&db_context, block_id)?;
+    let elem_after = &elements_after[0];
     assert_eq!(elem_after.fmt_font_bold, None);
 
     Ok(())
@@ -601,13 +566,8 @@ fn test_set_text_format_cross_block() -> Result<()> {
 
     let block_ids = get_all_block_ids(&db_context)?;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db_context,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
-        for elem_id in &elem_ids {
-            let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
+        let elements = test_harness::synth_block_elements(&db_context, *block_id)?;
+        for elem in &elements {
             if let common::entities::InlineContent::Text(ref t) = elem.content
                 && !t.is_empty()
             {
