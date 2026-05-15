@@ -3,12 +3,12 @@ use crate::ImportHtmlDto;
 use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{
-    Block, Document, Frame, FramePosition, InlineContent, InlineElement, List, Resource, Root,
-    Table, TableCell,
-};
+use common::entities::{Block, Document, Frame, FramePosition, List, Resource, Root, Table, TableCell};
+use common::format_runs_query::rebuild_block_inline_elements;
 use common::long_operation::LongOperation;
-use common::parser_tools::content_parser::{ParsedElement, ParsedSpan, parse_html_elements};
+use common::parser_tools::content_parser::{
+    ParsedElement, format_runs_from_spans, parse_html_elements,
+};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::sync::Arc;
@@ -29,7 +29,6 @@ pub trait ImportHtmlUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationship", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "SetRelationship", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Resource", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "Create", thread_safe = true)]
@@ -50,28 +49,6 @@ impl ImportHtmlUseCase {
             uow_factory,
             dto: dto.clone(),
         }
-    }
-}
-
-fn create_inline_element_from_span(span: &ParsedSpan, is_code_block: bool) -> InlineElement {
-    InlineElement {
-        content: InlineContent::Text(span.text.clone()),
-        fmt_font_bold: if span.bold { Some(true) } else { None },
-        fmt_font_italic: if span.italic { Some(true) } else { None },
-        fmt_font_underline: if span.underline { Some(true) } else { None },
-        fmt_font_strikeout: if span.strikeout { Some(true) } else { None },
-        fmt_font_family: if span.code || is_code_block {
-            Some("monospace".to_string())
-        } else {
-            None
-        },
-        fmt_anchor_href: span.link_href.clone(),
-        fmt_is_anchor: if span.link_href.is_some() {
-            Some(true)
-        } else {
-            None
-        },
-        ..InlineElement::default()
     }
 }
 
@@ -201,13 +178,13 @@ impl LongOperation for ImportHtmlUseCase {
                         list_grouper.reset();
                     }
 
-                    let plain_text: String =
-                        parsed_block.spans.iter().map(|s| s.text.as_str()).collect();
+                    let (plain_text, format_runs) =
+                        format_runs_from_spans(&parsed_block.spans, parsed_block.is_code_block);
                     let line_len = plain_text.chars().count() as i64;
 
                     let current_frame_id = frame_stack.last().unwrap().frame_id;
                     let block = Block {
-                        plain_text,
+                        plain_text: plain_text.clone(),
                         text_length: line_len,
                         document_position,
                         fmt_heading_level: parsed_block.heading_level,
@@ -226,11 +203,18 @@ impl LongOperation for ImportHtmlUseCase {
 
                     let created_block = uow.create_block(&block, current_frame_id, -1)?;
 
-                    for span in &parsed_block.spans {
-                        let element =
-                            create_inline_element_from_span(span, parsed_block.is_code_block);
-                        uow.create_inline_element(&element, created_block.id, -1)?;
+                    // Write format_runs directly; block_images stays empty for
+                    // HTML import (parser does not surface inline images today).
+                    {
+                        let store = uow.store();
+                        let mut runs_map = store.format_runs.write().unwrap();
+                        if !format_runs.is_empty() {
+                            runs_map.insert(created_block.id, format_runs);
+                        } else {
+                            runs_map.remove(&created_block.id);
+                        }
                     }
+                    rebuild_block_inline_elements(uow.store().as_ref(), created_block.id, &plain_text);
 
                     // Handle list items
                     if let Some(ref list_style) = parsed_block.list_style {
@@ -303,12 +287,12 @@ impl LongOperation for ImportHtmlUseCase {
                             let cell_frame = Frame::default();
                             let created_cell_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
 
-                            let plain_text: String =
-                                cell.spans.iter().map(|s| s.text.as_str()).collect();
+                            let (plain_text, format_runs) =
+                                format_runs_from_spans(&cell.spans, false);
                             let text_length = plain_text.chars().count() as i64;
 
                             let block = Block {
-                                plain_text,
+                                plain_text: plain_text.clone(),
                                 text_length,
                                 document_position,
                                 ..Block::default()
@@ -316,19 +300,20 @@ impl LongOperation for ImportHtmlUseCase {
                             let created_block =
                                 uow.create_block(&block, created_cell_frame.id, -1)?;
 
-                            if cell.spans.is_empty() || cell.spans.iter().all(|s| s.text.is_empty())
                             {
-                                let elem = InlineElement {
-                                    content: InlineContent::Empty,
-                                    ..InlineElement::default()
-                                };
-                                uow.create_inline_element(&elem, created_block.id, -1)?;
-                            } else {
-                                for span in &cell.spans {
-                                    let element = create_inline_element_from_span(span, false);
-                                    uow.create_inline_element(&element, created_block.id, -1)?;
+                                let store = uow.store();
+                                let mut runs_map = store.format_runs.write().unwrap();
+                                if !format_runs.is_empty() {
+                                    runs_map.insert(created_block.id, format_runs);
+                                } else {
+                                    runs_map.remove(&created_block.id);
                                 }
                             }
+                            rebuild_block_inline_elements(
+                                uow.store().as_ref(),
+                                created_block.id,
+                                &plain_text,
+                            );
 
                             let mut updated_cell_frame = created_cell_frame.clone();
                             updated_cell_frame.child_order = vec![created_block.id as i64];

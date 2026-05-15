@@ -1089,6 +1089,76 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
     elements
 }
 
+/// Convert a `ParsedSpan` (parser output) into the `CharacterFormat` used by
+/// `FormatRun`. `is_code_block` forces `monospace` as the font family for
+/// every span inside a code block, matching the legacy
+/// `create_inline_element_from_span` behavior.
+pub fn character_format_from_span(
+    span: &ParsedSpan,
+    is_code_block: bool,
+) -> crate::format_runs::CharacterFormat {
+    crate::format_runs::CharacterFormat {
+        font_bold: if span.bold { Some(true) } else { None },
+        font_italic: if span.italic { Some(true) } else { None },
+        font_underline: if span.underline { Some(true) } else { None },
+        font_strikeout: if span.strikeout { Some(true) } else { None },
+        font_family: if span.code || is_code_block {
+            Some("monospace".to_string())
+        } else {
+            None
+        },
+        anchor_href: span.link_href.clone(),
+        is_anchor: if span.link_href.is_some() {
+            Some(true)
+        } else {
+            None
+        },
+        ..Default::default()
+    }
+}
+
+/// Translate a slice of parsed spans into `(plain_text, format_runs)`.
+///
+/// One non-default span yields one `FormatRun`; spans with empty
+/// `CharacterFormat` (no decoration, no link, no code) emit no run, since an
+/// absent run means "inherit default formatting" in the new model. Adjacent
+/// runs with identical formats are coalesced via `coalesce_in_place` so the
+/// resulting vector satisfies `debug_assert_well_formed`.
+///
+/// Returns the concatenated `plain_text` of all spans and a sorted,
+/// non-overlapping, coalesced `Vec<FormatRun>`. Both safe to feed straight
+/// into the store under the dual-write bridge.
+pub fn format_runs_from_spans(
+    spans: &[ParsedSpan],
+    is_code_block: bool,
+) -> (String, Vec<crate::format_runs::FormatRun>) {
+    use crate::format_runs::{CharacterFormat, FormatRun, coalesce_in_place};
+
+    let mut plain_text = String::new();
+    let mut runs: Vec<FormatRun> = Vec::new();
+    let default = CharacterFormat::default();
+
+    for span in spans {
+        let byte_start = plain_text.len() as u32;
+        plain_text.push_str(&span.text);
+        let byte_end = plain_text.len() as u32;
+        if byte_start == byte_end {
+            continue;
+        }
+        let format = character_format_from_span(span, is_code_block);
+        if format == default {
+            continue;
+        }
+        runs.push(FormatRun {
+            byte_start,
+            byte_end,
+            format,
+        });
+    }
+    coalesce_in_place(&mut runs);
+    (plain_text, runs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
