@@ -3,12 +3,15 @@ use crate::InsertBlockDto;
 use crate::InsertBlockResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, TableCell};
+use common::entities::{Block, Document, Frame, Root, TableCell};
+use common::format_runs::{
+    debug_assert_well_formed, logical_offset_to_byte, split_images_at, split_runs_at,
+};
+use common::format_runs_query::rebuild_block_inline_elements;
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -34,10 +37,6 @@ pub trait InsertBlockUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Update")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "Table", action = "GetRelationship")]
 #[macros::uow_action(entity = "TableCell", action = "GetMulti")]
 pub trait InsertBlockUnitOfWorkTrait: CommandUnitOfWork {}
@@ -54,7 +53,6 @@ fn execute_insert_block(
 ) -> Result<(InsertBlockResultDto, EntityTreeSnapshot)> {
     let position = dto.position;
 
-    // Get Root -> Document
     let root = uow
         .get_root(&ROOT_ENTITY_ID)?
         .ok_or_else(|| anyhow!("Root entity not found"))?;
@@ -67,10 +65,8 @@ fn execute_insert_block(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    // Snapshot for undo before mutation
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
-    // Get all block IDs in document order, traversing into nested frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
     let frame_id = *frame_ids
         .first()
@@ -79,7 +75,7 @@ fn execute_insert_block(
     let get_table_cell_frames = |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
         let cell_ids = uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
         let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
-        let mut cells: Vec<_> = cells_opt.into_iter().flatten().collect();
+        let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
         cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
         Ok(cells.into_iter().filter_map(|c| c.cell_frame).collect())
     };
@@ -90,134 +86,63 @@ fn execute_insert_block(
         &frame_id,
     )?;
 
-    // Get all blocks in document order (from child_order traversal).
-    // Do NOT sort by stored document_position — it may be stale after insert_text
-    // which intentionally skips position updates for performance. The child_order
-    // traversal order ensures inner-frame blocks are checked before subsequent
-    // outer-frame blocks, so "first match wins" finds the correct block.
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
 
-    // Find block at position
     let (current_block, block_idx, offset) = find_block_at_position(&blocks, position)?;
 
-    // Get elements for the current block
-    let element_ids =
-        uow.get_block_relationship(&current_block.id, &BlockRelationshipField::Elements)?;
-    let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+    // Split byte offset inside current_block.plain_text accounting for images.
+    let store = uow.store();
+    let current_runs = store
+        .format_runs
+        .read()
+        .unwrap()
+        .get(&current_block.id)
+        .cloned()
+        .unwrap_or_default();
+    let current_images = store
+        .block_images
+        .read()
+        .unwrap()
+        .get(&current_block.id)
+        .cloned()
+        .unwrap_or_default();
 
-    // Split the block at the offset
-    let plain_chars: Vec<char> = current_block.plain_text.chars().collect();
-    let split_pos = (offset as usize).min(plain_chars.len());
-    let text_before: String = plain_chars[..split_pos].iter().collect();
-    let text_after: String = plain_chars[split_pos..].iter().collect();
+    let byte_split = logical_offset_to_byte(&current_block.plain_text, &current_images, offset);
+    let text_before = current_block.plain_text[..byte_split as usize].to_string();
+    let text_after = current_block.plain_text[byte_split as usize..].to_string();
+    let text_before_chars = text_before.chars().count() as i64;
+    let text_after_chars = text_after.chars().count() as i64;
 
-    // Walk elements to find which element contains the split point, preserving formatting.
-    // Elements before the split point stay in current block.
-    // The element at the split point is truncated (keeping chars before the split).
-    // Elements after the split point are cleared in the current block and will be
-    // recreated in the new block.
+    // Split format_runs and block_images at the byte boundary.
+    let (left_runs, right_runs) = split_runs_at(&current_runs, byte_split);
+    let (left_images, right_images) = split_images_at(&current_images, byte_split);
+
+    let left_image_count = left_images.len() as i64;
+    let right_image_count = right_images.len() as i64;
+
     let now = chrono::Utc::now();
-    let mut after_elements: Vec<InlineElement> = Vec::new(); // elements for the new block
-    let mut char_cursor: usize = 0;
-    let mut split_found = false;
 
-    for elem in &elements {
-        let elem_char_len = match &elem.content {
-            InlineContent::Text(s) => s.chars().count(),
-            InlineContent::Image { .. } => 1,
-            InlineContent::Empty => 0,
-        };
-
-        if !split_found {
-            if char_cursor + elem_char_len <= split_pos {
-                // Entire element is before split — keep unchanged
-                char_cursor += elem_char_len;
-                continue;
-            }
-            // This element contains the split point
-            split_found = true;
-            let local_split = split_pos - char_cursor;
-
-            match &elem.content {
-                InlineContent::Text(s) => {
-                    let chars: Vec<char> = s.chars().collect();
-                    let before_text: String = chars[..local_split].iter().collect();
-                    let after_text: String = chars[local_split..].iter().collect();
-
-                    // Truncate this element to before_text
-                    let mut updated = elem.clone();
-                    updated.content = InlineContent::Text(before_text);
-                    updated.updated_at = now;
-                    uow.update_inline_element(&updated)?;
-
-                    // Save the after portion as a new element (with same formatting)
-                    if !after_text.is_empty() {
-                        let mut new_elem = elem.clone();
-                        new_elem.id = 0;
-                        new_elem.content = InlineContent::Text(after_text);
-                        new_elem.created_at = now;
-                        new_elem.updated_at = now;
-                        after_elements.push(new_elem);
-                    }
-                }
-                InlineContent::Image { .. } => {
-                    if local_split == 0 {
-                        // Image goes to the new block
-                        let mut new_elem = elem.clone();
-                        new_elem.id = 0;
-                        new_elem.created_at = now;
-                        new_elem.updated_at = now;
-                        after_elements.push(new_elem);
-                        // Clear this element in current block
-                        let mut cleared = elem.clone();
-                        cleared.content = InlineContent::Empty;
-                        cleared.updated_at = now;
-                        uow.update_inline_element(&cleared)?;
-                    }
-                    // else image stays in current block (split is after image)
-                }
-                InlineContent::Empty => {}
-            }
-            char_cursor += elem_char_len;
-        } else {
-            // Element is entirely after the split — move to new block
-            let mut new_elem = elem.clone();
-            new_elem.id = 0;
-            new_elem.created_at = now;
-            new_elem.updated_at = now;
-            after_elements.push(new_elem);
-
-            // Clear in current block
-            let mut cleared = elem.clone();
-            cleared.content = InlineContent::Text(String::new());
-            cleared.updated_at = now;
-            uow.update_inline_element(&cleared)?;
-
-            char_cursor += elem_char_len;
-        }
-    }
-
-    // If no elements were split (split at very end), create an empty element for new block
-    if after_elements.is_empty() {
-        after_elements.push(InlineElement {
-            id: 0,
-            created_at: now,
-            updated_at: now,
-            content: InlineContent::Text(text_after.clone()),
-            ..Default::default()
-        });
-    }
-
-    // Update the current block cached fields
+    // Update current block (now the "before" block).
     let mut updated_current = current_block.clone();
     updated_current.plain_text = text_before.clone();
-    updated_current.text_length = text_before.chars().count() as i64;
+    updated_current.text_length = text_before_chars + left_image_count;
     updated_current.updated_at = now;
     uow.update_block(&updated_current)?;
+    debug_assert_well_formed(&left_runs, updated_current.plain_text.len());
+    store
+        .format_runs
+        .write()
+        .unwrap()
+        .insert(current_block.id, left_runs);
+    store
+        .block_images
+        .write()
+        .unwrap()
+        .insert(current_block.id, left_images);
+    rebuild_block_inline_elements(&store, current_block.id, &text_before);
 
-    // Create a new block with text_after
+    // Create the "after" block.
     let new_block_position = current_block.document_position + updated_current.text_length + 1;
     let new_block = Block {
         id: 0,
@@ -225,7 +150,7 @@ fn execute_insert_block(
         updated_at: now,
         elements: vec![],
         list: current_block.list,
-        text_length: text_after.chars().count() as i64,
+        text_length: text_after_chars + right_image_count,
         document_position: new_block_position,
         plain_text: text_after,
         fmt_alignment: current_block.fmt_alignment.clone(),
@@ -246,7 +171,6 @@ fn execute_insert_block(
         fmt_code_language: current_block.fmt_code_language.clone(),
     };
 
-    // Find the frame that owns the current block (may be a nested sub-frame)
     fn find_owner_frame(
         uow: &dyn InsertBlockUnitOfWorkTrait,
         fid: &EntityId,
@@ -271,21 +195,30 @@ fn execute_insert_block(
         }
         Ok(None)
     }
-    let owner_frame_id = find_owner_frame(&**uow, &frame_id, current_block.id)?.unwrap_or(frame_id);
+    let owner_frame_id =
+        find_owner_frame(&**uow, &frame_id, current_block.id)?.unwrap_or(frame_id);
 
     let created_block = uow.create_block(&new_block, owner_frame_id, -1)?;
 
-    // Create inline elements for the new block, preserving formatting
-    for after_elem in &after_elements {
-        uow.create_inline_element(after_elem, created_block.id, -1)?;
-    }
+    // Place the split format_runs / block_images on the new block.
+    debug_assert_well_formed(&right_runs, created_block.plain_text.len());
+    store
+        .format_runs
+        .write()
+        .unwrap()
+        .insert(created_block.id, right_runs);
+    store
+        .block_images
+        .write()
+        .unwrap()
+        .insert(created_block.id, right_images);
+    let created_plain = created_block.plain_text.clone();
+    rebuild_block_inline_elements(&store, created_block.id, &created_plain);
 
-    // Update the owner frame's child_order to include the new block after the split point
     let frame = uow
         .get_frame(&owner_frame_id)?
         .ok_or_else(|| anyhow!("Owner frame not found"))?;
     let mut updated_frame = frame.clone();
-    // Find current_block's position in child_order and insert after it
     let co_idx = updated_frame
         .child_order
         .iter()
@@ -300,9 +233,6 @@ fn execute_insert_block(
         uow.get_frame_relationship(&owner_frame_id, &FrameRelationshipField::Blocks)?;
     uow.update_frame(&updated_frame)?;
 
-    // Update subsequent blocks' document_position (those after the new block)
-    // Splitting a block introduces one additional block separator, so all
-    // subsequent blocks shift forward by 1.
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for b in &blocks[(block_idx + 1)..] {
         let mut ub = b.clone();
@@ -314,7 +244,6 @@ fn execute_insert_block(
         uow.update_block_multi(&blocks_to_update)?;
     }
 
-    // Update Document.block_count
     let mut updated_doc = document.clone();
     updated_doc.block_count += 1;
     updated_doc.updated_at = now;

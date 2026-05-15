@@ -233,6 +233,185 @@ pub fn shift_images_after(images: &mut [ImageAnchor], threshold: u32, delta: i32
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Composite helpers used by writer use cases. These keep the per-block
+// run / image vectors well-formed under insert / delete / split.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Apply an "insert `inserted_bytes` of text at `byte_offset`" mutation
+/// to a block's runs in place. Runs strictly before the offset are
+/// unchanged; runs strictly after are shifted by +inserted_bytes; runs
+/// that straddle the offset are extended (the inserted text inherits
+/// the surrounding run's format — Qt / ProseMirror convention).
+pub fn shift_runs_for_insert(runs: &mut Vec<FormatRun>, byte_offset: u32, inserted_bytes: u32) {
+    if inserted_bytes == 0 {
+        return;
+    }
+    for run in runs.iter_mut() {
+        if run.byte_start >= byte_offset {
+            run.byte_start += inserted_bytes;
+            run.byte_end += inserted_bytes;
+        } else if run.byte_end >= byte_offset {
+            // Run straddles the insertion point, or its right edge sits
+            // exactly on it. In both cases the inserted text inherits
+            // this run's format (Qt convention).
+            run.byte_end += inserted_bytes;
+        }
+    }
+}
+
+/// Apply a "delete byte range `[byte_start..byte_end)`" mutation to a
+/// block's runs. Splices the range with empty replacement (clipping
+/// straddling runs) and shifts everything past `byte_end` back by the
+/// deleted length. Adjacent runs that end up equal-format are coalesced.
+pub fn shift_runs_for_delete(runs: &mut Vec<FormatRun>, byte_start: u32, byte_end: u32) {
+    if byte_end <= byte_start {
+        return;
+    }
+    splice_range(runs, byte_start..byte_end, Vec::new());
+    let delta = (byte_end - byte_start) as i32;
+    shift_after(runs, byte_end, -delta);
+    // The shift can make a left-clipped run abut a shifted trailing run
+    // with identical format; coalesce once more to restore the invariant.
+    coalesce_in_place(runs);
+}
+
+/// Apply an "insert" shift to a block's image anchors. Anchors at or
+/// past the offset move forward by `inserted_bytes`.
+pub fn shift_images_for_insert(
+    images: &mut [ImageAnchor],
+    byte_offset: u32,
+    inserted_bytes: u32,
+) {
+    if inserted_bytes == 0 {
+        return;
+    }
+    for img in images.iter_mut() {
+        if img.byte_offset >= byte_offset {
+            img.byte_offset += inserted_bytes;
+        }
+    }
+}
+
+/// Apply a "delete" mutation to a block's image anchors. Anchors whose
+/// `byte_offset` falls inside `[byte_start..byte_end)` are removed;
+/// anchors at or past `byte_end` shift back by the deleted length.
+/// Returns the number of anchors removed.
+pub fn shift_images_for_delete(
+    images: &mut Vec<ImageAnchor>,
+    byte_start: u32,
+    byte_end: u32,
+) -> usize {
+    if byte_end <= byte_start {
+        return 0;
+    }
+    let before = images.len();
+    images.retain(|i| !(i.byte_offset >= byte_start && i.byte_offset < byte_end));
+    let removed = before - images.len();
+    let delta = (byte_end - byte_start) as i32;
+    shift_images_after(images, byte_end, -delta);
+    removed
+}
+
+/// Translate a logical character offset (counting text characters AND
+/// image positions interleaved by their `byte_offset`) into a UTF-8
+/// byte offset within `plain_text`. Used by writer use cases to map a
+/// document-space char position to the byte position where text edits
+/// should land in `block.plain_text`.
+///
+/// Images contribute 1 logical character but 0 bytes in `plain_text`.
+/// Images at the same byte_offset are visited in their stored order.
+pub fn logical_offset_to_byte(
+    plain_text: &str,
+    images: &[ImageAnchor],
+    char_offset: i64,
+) -> u32 {
+    if char_offset <= 0 {
+        return 0;
+    }
+    let mut logical: i64 = 0;
+    let mut images_consumed = 0usize;
+    for (b, _) in plain_text.char_indices() {
+        while images_consumed < images.len()
+            && images[images_consumed].byte_offset <= b as u32
+        {
+            if logical == char_offset {
+                return b as u32;
+            }
+            logical += 1;
+            images_consumed += 1;
+        }
+        if logical == char_offset {
+            return b as u32;
+        }
+        logical += 1;
+    }
+    let plain_len = plain_text.len() as u32;
+    while images_consumed < images.len() {
+        if logical == char_offset {
+            return plain_len;
+        }
+        logical += 1;
+        images_consumed += 1;
+    }
+    plain_len
+}
+
+/// Split a block's format runs at `byte_offset`. The returned right-hand
+/// vector has its run offsets re-based so they start at byte 0 of the
+/// new (right) block. Straddling runs are split with their `format`
+/// cloned to both halves.
+pub fn split_runs_at(
+    runs: &[FormatRun],
+    byte_offset: u32,
+) -> (Vec<FormatRun>, Vec<FormatRun>) {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for run in runs {
+        if run.byte_end <= byte_offset {
+            left.push(run.clone());
+        } else if run.byte_start >= byte_offset {
+            right.push(FormatRun {
+                byte_start: run.byte_start - byte_offset,
+                byte_end: run.byte_end - byte_offset,
+                format: run.format.clone(),
+            });
+        } else {
+            left.push(FormatRun {
+                byte_start: run.byte_start,
+                byte_end: byte_offset,
+                format: run.format.clone(),
+            });
+            right.push(FormatRun {
+                byte_start: 0,
+                byte_end: run.byte_end - byte_offset,
+                format: run.format.clone(),
+            });
+        }
+    }
+    (left, right)
+}
+
+/// Split block image anchors at `byte_offset`. Anchors at exactly
+/// `byte_offset` go to the right half (rebased to offset 0).
+pub fn split_images_at(
+    images: &[ImageAnchor],
+    byte_offset: u32,
+) -> (Vec<ImageAnchor>, Vec<ImageAnchor>) {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for img in images {
+        if img.byte_offset < byte_offset {
+            left.push(img.clone());
+        } else {
+            let mut new = img.clone();
+            new.byte_offset -= byte_offset;
+            right.push(new);
+        }
+    }
+    (left, right)
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Bridge helpers between the legacy InlineElement model and the new
 // (FormatRun, ImageAnchor) model. Used during Phase 1 to mirror writes
 // from the inline_elements table into format_runs/block_images, and to
