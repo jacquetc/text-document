@@ -52,35 +52,45 @@ switch to byte-range deltas, since InlineElement won't exist).
   synthesized via `synthesize_block_inline_elements`. After Phase
   1.14 the `from_entity`/`to_entity` methods are rewritten to map
   directly to/from `FormatRun`+`ImageAnchor`.
-- Phase 1.13e (writer migration): IN PROGRESS — 3 of 13 use cases
+- Phase 1.13e (writer migration): IN PROGRESS — 7 of 13 use cases
   migrated:
-  * `insert_image_uc` — writes `block_images` directly, drops 4
-    InlineElement decorators.
+  * `insert_image_uc` — writes `block_images` directly.
   * `set_text_format_uc` — replaces inline_element fmt_* updates with
     `format_runs` splice (per-run merge of dto Optional fields).
-  * `merge_text_format_uc` — same splice shape, drops 8 decorators
-    total across the two formatting use cases.
-  Test surface migrated alongside: editing_extended_tests +
-  complex_format_tests + formatting_tests + text_format_tests +
-  merge_text_format_tests now read post-mutation state via
-  `test_harness::synth_block_elements` (which materialises the view
-  from format_runs / block_images).
+  * `merge_text_format_uc` — same splice shape; 8 decorators removed
+    across the two formatting use cases.
+  * `insert_text_uc` + `delete_text_uc` + `insert_block_uc` — the
+    text-content trio. They share `block.plain_text` as the content
+    source-of-truth, so they were migrated atomically together with
+    a `rebuild_block_inline_elements` reverse-sync helper that
+    materialises a consistent inline_elements view from the new
+    (plain_text + format_runs + block_images) representation.
+  * `import_plain_text_uc` — populates `block.plain_text` directly
+    and reverse-syncs an Empty / Text inline_element per block so
+    legacy writers reading inline_elements still see the right
+    content.
 
-  The remaining 10 writers share `block.plain_text` as their content
-  source-of-truth and must be migrated as a coupled group:
-  `insert_text_uc`, `delete_text_uc`, `insert_block_uc`,
+  Compatibility bridge: the auto-sync hook (inline_elements →
+  format_runs) stays enabled while writers migrate one-at-a-time;
+  the new reverse-sync (format_runs → inline_elements) closes the
+  loop the other way. Both representations stay consistent under
+  any mix of migrated and unmigrated writer calls. Two subtle bugs
+  surfaced and were fixed during this work:
+  * `shift_runs_for_delete` now coalesces post-shift (adjacent
+    identical default-format runs were appearing after delete).
+  * `rebuild_block_inline_elements` uses the store's snake_case
+    counter key `"inline_element"` (mismatched CamelCase caused
+    ID collisions with legacy creates).
+
+  The remaining 6 unmigrated writers continue to work via the
+  legacy path + auto-sync (they read/write inline_elements; format_
+  runs gets rebuilt from inline_elements automatically):
   `insert_formatted_text_uc`, `insert_fragment_uc`,
   `insert_html_at_position_uc`, `insert_markdown_at_position_uc`,
-  `import_{plain_text,html,markdown}_uc`, `replace_text_uc`.
-
-  Why coupled: each one mutates `block.plain_text` and
-  `block.text_length`. If only insert_text migrates (stops touching
-  inline_elements), a later delete_text rebuilds plain_text from the
-  now-stale inline_elements and silently drops the inserted chars.
-  Attempted in this session, reverted after `random_edit_sequence_
-  preserves_invariants` proptest caught the mismatch on
-  `[InsertText("aa"), DeletePrev]`. They migrate together or not at
-  all.
+  `import_html_uc`, `import_markdown_uc`, `replace_text_uc`.
+  They can now migrate one-at-a-time using the same dual-write
+  pattern (reverse-sync after writing format_runs/block_images);
+  no further atomic coupling remains.
 - Phase 1.14 (deletion): NOT STARTED — depends on 1.13e. Memory
   wins materialize here.
 - Phase 1.17 (bench compare): N/A until 1.14 done.
