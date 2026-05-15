@@ -202,6 +202,23 @@ pub fn shift_after(runs: &mut Vec<FormatRun>, threshold: u32, delta: i32) {
     }
 }
 
+/// Synthesize a stable per-fragment id from a block id and byte offset
+/// within that block. Used to preserve the `element_id` field in
+/// `FragmentContent::{Text, Image}` once the InlineElement entity is
+/// removed. Two fragments at the same (block_id, byte_start) always
+/// produce the same id; a fragment that moves to a new byte_start
+/// (e.g. due to an insert upstream) gets a new id.
+///
+/// Bit layout (u64): top bit = synth tag (always 1, so synthesized
+/// ids never collide with real entity ids issued by the store's
+/// counter, which start at 1 and grow upward). Next 31 bits = block id
+/// (2 billion blocks per document). Bottom 32 bits = byte offset
+/// (4 GB per block).
+pub fn synth_element_id(block_id: u64, byte_start: u32) -> u64 {
+    const SYNTH_TAG: u64 = 0x8000_0000_0000_0000;
+    SYNTH_TAG | ((block_id & 0x7FFF_FFFF) << 32) | (byte_start as u64)
+}
+
 /// Same as `shift_after` for image anchors. Anchors AT the threshold are
 /// shifted (treated as part of the inserted region's right side).
 pub fn shift_images_after(images: &mut [ImageAnchor], threshold: u32, delta: i32) {
