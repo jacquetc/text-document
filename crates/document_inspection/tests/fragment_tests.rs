@@ -229,9 +229,13 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
         },
     )?;
 
-    // Verify bold formatting is preserved in the newly inserted elements
+    // Verify bold formatting is preserved across the paste: count
+    // occurrences of "bold text" that sit inside a bold-formatted
+    // inline element. Under the format_runs model, adjacent equal-
+    // format spans coalesce into one run / one inline element, so we
+    // count substring occurrences rather than element count.
     let block_ids = get_block_ids(&db_context)?;
-    let mut bold_count = 0;
+    let mut bold_substring_count = 0;
     for block_id in &block_ids {
         let elem_ids = block_controller::get_relationship(
             &db_context,
@@ -242,18 +246,17 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
             if let Some(elem) = elem
                 && let common::entities::InlineContent::Text(ref t) = elem.content
-                && t.contains("bold")
                 && elem.fmt_font_bold == Some(true)
             {
-                bold_count += 1;
+                bold_substring_count += t.matches("bold text").count();
             }
         }
     }
-    // Exactly 2 bold elements: original from markdown import + inserted copy
     assert_eq!(
-        bold_count, 2,
-        "Should have exactly 2 bold elements (original + copy), got {}",
-        bold_count
+        bold_substring_count, 2,
+        "Should have 2 bold-formatted 'bold text' occurrences \
+         (original from markdown + pasted copy), got {}",
+        bold_substring_count
     );
 
     Ok(())
