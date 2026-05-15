@@ -325,13 +325,11 @@ impl ExportLatexUseCase {
         uow: &dyn ExportLatexUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
-
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let elements = common::format_runs_query::synthesize_block_inline_elements(
+            &uow.store(),
+            block.id,
+            &block.plain_text,
+        );
 
         let mut text = String::new();
         for elem in &elements {
@@ -350,13 +348,11 @@ impl ExportLatexUseCase {
         uow: &dyn ExportLatexUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
-
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let elements = common::format_runs_query::synthesize_block_inline_elements(
+            &uow.store(),
+            block.id,
+            &block.plain_text,
+        );
 
         let mut latex = String::new();
 

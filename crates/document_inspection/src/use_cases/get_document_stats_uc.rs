@@ -2,11 +2,11 @@
 use crate::DocumentStatsDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
+use common::entities::{Block, Document, Frame, Root};
+use common::format_runs_query::get_block_images;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait GetDocumentStatsUnitOfWorkFactoryTrait: Send + Sync {
@@ -21,7 +21,6 @@ pub trait GetDocumentStatsUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 pub trait GetDocumentStatsUnitOfWorkTrait: QueryUnitOfWork {}
 
 pub struct GetDocumentStatsUseCase {
@@ -91,20 +90,11 @@ impl GetDocumentStatsUseCase {
             word_count += block.plain_text.split_whitespace().count() as i64;
         }
 
-        // Image count: iterate all blocks -> get elements -> count Image variants
-        let mut all_element_ids: Vec<EntityId> = Vec::new();
-        for block in &blocks {
-            let element_ids =
-                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-            all_element_ids.extend(element_ids);
-        }
-
-        let elements_opt = uow.get_inline_element_multi(&all_element_ids)?;
+        // Image count: sum block_images entries across all blocks.
+        let store = uow.store();
         let mut image_count: i64 = 0;
-        for elem in elements_opt.iter().flatten() {
-            if matches!(elem.content, InlineContent::Image { .. }) {
-                image_count += 1;
-            }
+        for block in &blocks {
+            image_count += get_block_images(&store, block.id).len() as i64;
         }
 
         uow.end_transaction()?;

@@ -80,6 +80,10 @@ impl CommandUnitOfWork for RemoveTableUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+        self.context.get_store().clone()
+    }
 }
 
 // Macros must match exactly those in remove_table_uc.rs

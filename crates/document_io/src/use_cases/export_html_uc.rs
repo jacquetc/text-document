@@ -225,12 +225,11 @@ impl ExportHtmlUseCase {
 
             // --- Code block ---
             if block.fmt_is_code_block == Some(true) {
-                let element_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::Elements,
-                )?;
-                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+                let elements = common::format_runs_query::synthesize_block_inline_elements(
+                    &uow.store(),
+                    block.id,
+                    &block.plain_text,
+                );
 
                 // Concatenate raw text without inline formatting
                 let mut raw_text = String::new();
@@ -453,13 +452,11 @@ impl ExportHtmlUseCase {
         uow: &dyn ExportHtmlUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
-
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let elements = common::format_runs_query::synthesize_block_inline_elements(
+            &uow.store(),
+            block.id,
+            &block.plain_text,
+        );
 
         let mut html = String::new();
 

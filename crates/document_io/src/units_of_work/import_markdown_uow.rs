@@ -84,6 +84,10 @@ impl CommandUnitOfWork for ImportMarkdownUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+        self.context.get_store().clone()
+    }
 }
 #[macros::uow_action(entity = "Root", action = "Get", thread_safe = true)]
 #[macros::uow_action(entity = "Root", action = "GetRelationship", thread_safe = true)]

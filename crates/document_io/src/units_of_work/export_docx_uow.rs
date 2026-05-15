@@ -42,6 +42,10 @@ impl QueryUnitOfWork for ExportDocxUnitOfWork {
         transaction.take().unwrap().end_read_transaction()?;
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+        self.context.get_store().clone()
+    }
 }
 #[macros::uow_action(entity = "Root", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Root", action = "GetRelationshipRO", thread_safe = true)]

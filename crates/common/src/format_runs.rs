@@ -209,14 +209,15 @@ pub fn shift_after(runs: &mut Vec<FormatRun>, threshold: u32, delta: i32) {
 /// produce the same id; a fragment that moves to a new byte_start
 /// (e.g. due to an insert upstream) gets a new id.
 ///
-/// Bit layout (u64): top bit = synth tag (always 1, so synthesized
-/// ids never collide with real entity ids issued by the store's
-/// counter, which start at 1 and grow upward). Next 31 bits = block id
-/// (2 billion blocks per document). Bottom 32 bits = byte offset
-/// (4 GB per block).
+/// Bit layout (u64): bit 62 = synth tag (so synthesized ids never
+/// collide with real entity ids issued by the store's counter, which
+/// start at 1 and grow upward). Bits 32..62 = block id (1 billion
+/// blocks per document, 30 bits). Bottom 32 bits = byte offset (4 GB
+/// per block). The top bit stays zero so the value fits in positive
+/// i64 range — public DTOs expose element_id as i64.
 pub fn synth_element_id(block_id: u64, byte_start: u32) -> u64 {
-    const SYNTH_TAG: u64 = 0x8000_0000_0000_0000;
-    SYNTH_TAG | ((block_id & 0x7FFF_FFFF) << 32) | (byte_start as u64)
+    const SYNTH_TAG: u64 = 0x4000_0000_0000_0000;
+    SYNTH_TAG | ((block_id & 0x3FFF_FFFF) << 32) | (byte_start as u64)
 }
 
 /// Same as `shift_after` for image anchors. Anchors AT the threshold are
@@ -350,31 +351,47 @@ pub fn inline_elements_view(
     runs: &[FormatRun],
     images: &[ImageAnchor],
 ) -> Vec<InlineElement> {
+    inline_elements_view_with_block_id(plain_text, runs, images, 0)
+}
+
+/// Same as [`inline_elements_view`] but populates each synthesized
+/// `InlineElement.id` with [`synth_element_id`]`(block_id, byte_start)`.
+/// Pass `block_id = 0` (or use [`inline_elements_view`]) if you don't
+/// need stable ids.
+pub fn inline_elements_view_with_block_id(
+    plain_text: &str,
+    runs: &[FormatRun],
+    images: &[ImageAnchor],
+    block_id: u64,
+) -> Vec<InlineElement> {
     let mut out: Vec<InlineElement> = Vec::new();
     let bytes = plain_text.as_bytes();
 
-    // Merge runs and image anchors in byte-offset order. Image anchors
-    // sit between text runs. The text between runs (with no FormatRun
-    // covering it) gets a default-formatted Text element.
     let mut img_iter = images.iter().peekable();
     let mut cursor: u32 = 0;
 
-    let emit_text =
-        |out: &mut Vec<InlineElement>, bytes: &[u8], start: u32, end: u32, fmt: CharacterFormat| {
-            if start >= end {
-                return;
-            }
-            let slice = &bytes[start as usize..end as usize];
-            let s = std::str::from_utf8(slice)
-                .expect("block plain_text must be valid UTF-8")
-                .to_string();
-            let mut elem = InlineElement {
-                content: InlineContent::Text(s),
-                ..Default::default()
-            };
-            apply_character_format_to_inline_element(&mut elem, &fmt);
-            out.push(elem);
+    let emit_text = |out: &mut Vec<InlineElement>,
+                     bytes: &[u8],
+                     start: u32,
+                     end: u32,
+                     fmt: CharacterFormat| {
+        if start >= end {
+            return;
+        }
+        let slice = &bytes[start as usize..end as usize];
+        let s = std::str::from_utf8(slice)
+            .expect("block plain_text must be valid UTF-8")
+            .to_string();
+        let mut elem = InlineElement {
+            content: InlineContent::Text(s),
+            ..Default::default()
         };
+        apply_character_format_to_inline_element(&mut elem, &fmt);
+        if block_id != 0 {
+            elem.id = synth_element_id(block_id, start);
+        }
+        out.push(elem);
+    };
 
     let emit_image = |out: &mut Vec<InlineElement>, anchor: &ImageAnchor| {
         let mut elem = InlineElement {
@@ -387,14 +404,15 @@ pub fn inline_elements_view(
             ..Default::default()
         };
         apply_character_format_to_inline_element(&mut elem, &anchor.format);
+        if block_id != 0 {
+            elem.id = synth_element_id(block_id, anchor.byte_offset);
+        }
         out.push(elem);
     };
 
     for run in runs {
-        // Emit any image anchors that sit strictly before this run.
         while let Some(img) = img_iter.peek() {
             if img.byte_offset < run.byte_start {
-                // Emit any default-formatted text gap before the image.
                 emit_text(
                     &mut out,
                     bytes,
@@ -410,7 +428,6 @@ pub fn inline_elements_view(
             }
         }
 
-        // Default-formatted gap between cursor and run start.
         if cursor < run.byte_start {
             emit_text(
                 &mut out,
@@ -431,7 +448,6 @@ pub fn inline_elements_view(
         cursor = run.byte_end;
     }
 
-    // Remaining images at or after the last run.
     for img in img_iter {
         if img.byte_offset > cursor {
             emit_text(
@@ -446,7 +462,6 @@ pub fn inline_elements_view(
         emit_image(&mut out, img);
     }
 
-    // Trailing default-formatted text after the last run/image.
     if (cursor as usize) < bytes.len() {
         emit_text(
             &mut out,

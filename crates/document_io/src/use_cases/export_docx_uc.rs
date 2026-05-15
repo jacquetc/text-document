@@ -165,13 +165,11 @@ impl LongOperation for ExportDocxUseCase {
                     return Err(anyhow!("Operation was cancelled"));
                 }
 
-                let element_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::Elements,
-                )?;
-
-                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+                let elements = common::format_runs_query::synthesize_block_inline_elements(
+            &uow.store(),
+            block.id,
+            &block.plain_text,
+        );
 
                 let mut paragraph = Paragraph::new();
 
@@ -358,13 +356,11 @@ impl ExportDocxUseCase {
                         blocks.sort_by_key(|b| b.document_position);
 
                         for block in &blocks {
-                            let element_ids = uow.get_block_relationship(
-                                &block.id,
-                                &common::direct_access::block::BlockRelationshipField::Elements,
-                            )?;
-                            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                            let elements: Vec<InlineElement> =
-                                elements_opt.into_iter().flatten().collect();
+                            let elements = common::format_runs_query::synthesize_block_inline_elements(
+                                &uow.store(),
+                                block.id,
+                                &block.plain_text,
+                            );
 
                             let mut paragraph = Paragraph::new();
                             for elem in &elements {

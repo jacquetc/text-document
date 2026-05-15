@@ -80,6 +80,10 @@ impl CommandUnitOfWork for InsertMarkdownAtPositionUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+        self.context.get_store().clone()
+    }
 }
 
 //TODO: adapt entities and actions to real use :

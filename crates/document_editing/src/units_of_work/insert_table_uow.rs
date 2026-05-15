@@ -69,6 +69,10 @@ impl CommandUnitOfWork for InsertTableUnitOfWork {
         self.transaction = Some(transaction);
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+        self.context.get_store().clone()
+    }
 }
 
 // Macros must match exactly those in insert_table_uc.rs

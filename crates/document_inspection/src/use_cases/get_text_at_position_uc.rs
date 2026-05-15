@@ -3,12 +3,12 @@ use crate::GetTextAtPositionDto;
 use crate::TextAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, TableCell};
+use common::format_runs_query::synthesize_block_inline_elements;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait GetTextAtPositionUnitOfWorkFactoryTrait: Send + Sync {
@@ -122,12 +122,11 @@ impl GetTextAtPositionUseCase {
                 break;
             }
 
-            // Get this block's elements to find the first element ID and extract text
-            let element_ids =
-                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<&InlineElement> =
-                elements_opt.iter().filter_map(|e| e.as_ref()).collect();
+            // Synthesize this block's elements from format_runs to find the first
+            // element ID and extract text.
+            let owned_elements =
+                synthesize_block_inline_elements(&uow.store(), block.id, &block.plain_text);
+            let elements: Vec<&InlineElement> = owned_elements.iter().collect();
 
             let mut current_char_offset: usize = 0;
 

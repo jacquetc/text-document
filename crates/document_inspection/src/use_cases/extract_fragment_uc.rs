@@ -2,12 +2,12 @@ use crate::ExtractFragmentDto;
 use crate::ExtractFragmentResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Frame, InlineContent, InlineElement, List, Root, Table, TableCell};
+use common::format_runs_query::synthesize_block_inline_elements;
 use common::parser_tools::fragment_schema::{
     FragmentBlock, FragmentData, FragmentElement, FragmentList, FragmentTable, FragmentTableCell,
 };
@@ -229,10 +229,11 @@ impl ExtractFragmentUseCase {
                         block.text_length as usize
                     };
 
-                    let element_ids =
-                        uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-                    let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+                    let elements = synthesize_block_inline_elements(
+                        &uow.store(),
+                        block.id,
+                        &block.plain_text,
+                    );
 
                     let list = if let Some(list_id) = block.list {
                         uow.get_list(&list_id)?
@@ -306,10 +307,11 @@ impl ExtractFragmentUseCase {
                 block.text_length as usize
             };
 
-            let element_ids =
-                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+            let elements = synthesize_block_inline_elements(
+                &uow.store(),
+                block.id,
+                &block.plain_text,
+            );
 
             let list = if let Some(list_id) = block.list {
                 uow.get_list(&list_id)?
@@ -367,10 +369,7 @@ impl ExtractFragmentUseCase {
         uow: &dyn ExtractFragmentUnitOfWorkTrait,
         block: &Block,
     ) -> Result<(Vec<FragmentElement>, String)> {
-        let element_ids =
-            uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let elements = synthesize_block_inline_elements(&uow.store(), block.id, &block.plain_text);
         Ok(extract_elements_in_range(
             &elements,
             0,

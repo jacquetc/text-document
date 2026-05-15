@@ -92,6 +92,10 @@ impl CommandUnitOfWork for FrameWriteUoW {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+        self.context.get_store().clone()
+    }
 }
 
 impl use_cases::WriteUoW for FrameWriteUoW {
@@ -289,6 +293,10 @@ impl QueryUnitOfWork for FrameReadUoW {
             .ok_or_else(|| anyhow::anyhow!("No active transaction"))?
             .end_read_transaction()?;
         Ok(())
+    }
+
+    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+        self.context.get_store().clone()
     }
 }
 

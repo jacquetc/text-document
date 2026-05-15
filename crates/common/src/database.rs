@@ -4,6 +4,7 @@ pub mod db_context;
 pub mod hashmap_store;
 pub mod transactions;
 use anyhow::Result;
+use std::sync::Arc;
 
 pub trait CommandUnitOfWork {
     fn begin_transaction(&mut self) -> Result<()>;
@@ -11,11 +12,13 @@ pub trait CommandUnitOfWork {
     fn rollback(&mut self) -> Result<()>;
     fn create_savepoint(&self) -> Result<types::Savepoint>;
     fn restore_to_savepoint(&mut self, savepoint: types::Savepoint) -> Result<()>;
+    fn store(&self) -> Arc<hashmap_store::HashMapStore>;
 }
 
 pub trait QueryUnitOfWork {
     fn begin_transaction(&self) -> Result<()>;
     fn end_transaction(&self) -> Result<()>;
+    fn store(&self) -> Arc<hashmap_store::HashMapStore>;
 }
 
 use crate::types;

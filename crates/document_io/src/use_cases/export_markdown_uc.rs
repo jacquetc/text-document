@@ -259,12 +259,11 @@ impl ExportMarkdownUseCase {
         // Check if this is a code block
         if block.fmt_is_code_block == Some(true) {
             let lang = block.fmt_code_language.as_deref().unwrap_or("");
-            let element_ids = uow.get_block_relationship(
-                &block.id,
-                &common::direct_access::block::BlockRelationshipField::Elements,
-            )?;
-            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+            let elements = common::format_runs_query::synthesize_block_inline_elements(
+            &uow.store(),
+            block.id,
+            &block.plain_text,
+        );
 
             // Concatenate raw text from elements, no formatting
             let mut raw_text = String::new();
@@ -298,13 +297,11 @@ impl ExportMarkdownUseCase {
         }
 
         // Get inline elements
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
-
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let elements = common::format_runs_query::synthesize_block_inline_elements(
+            &uow.store(),
+            block.id,
+            &block.plain_text,
+        );
 
         // Check if block has a list
         let list_ids = uow.get_block_relationship(
@@ -493,13 +490,11 @@ impl ExportMarkdownUseCase {
         uow: &dyn ExportMarkdownUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
-
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let elements = common::format_runs_query::synthesize_block_inline_elements(
+            &uow.store(),
+            block.id,
+            &block.plain_text,
+        );
 
         self.render_inline_elements(&elements)
     }
