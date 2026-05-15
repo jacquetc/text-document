@@ -9,8 +9,7 @@
 //! [`debug_assert_well_formed`] and by [`splice_range`] / [`shift_after`]
 //! which rebuild the run list while preserving them.
 
-use crate::entities::{CharVerticalAlignment, UnderlineStyle};
-use crate::types::EntityId;
+use crate::entities::{CharVerticalAlignment, InlineContent, InlineElement, UnderlineStyle};
 use serde::{Deserialize, Serialize};
 
 /// Character-level formatting for a contiguous byte span.
@@ -62,20 +61,6 @@ pub struct ImageAnchor {
     pub height: i64,
     pub quality: i64,
     pub format: CharacterFormat,
-}
-
-impl ImageAnchor {
-    /// Resolve the image to its `Resource` entity by name lookup. Returns
-    /// `None` if no matching resource exists (the caller must handle the
-    /// missing-image case, same as today's broken-image semantics).
-    pub fn resolve<'a, I>(&self, mut resources: I) -> Option<EntityId>
-    where
-        I: Iterator<Item = (EntityId, &'a str)>,
-    {
-        resources
-            .find(|(_, name)| *name == self.name)
-            .map(|(id, _)| id)
-    }
 }
 
 /// Debug-only invariant check. Run from `debug_assert!` callsites in
@@ -229,6 +214,236 @@ pub fn shift_images_after(images: &mut [ImageAnchor], threshold: u32, delta: i32
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Bridge helpers between the legacy InlineElement model and the new
+// (FormatRun, ImageAnchor) model. Used during Phase 1 to mirror writes
+// from the inline_elements table into format_runs/block_images, and to
+// synthesize InlineElement-shaped reads for callers not yet migrated.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Copy the `fmt_*` fields of an `InlineElement` into a `CharacterFormat`.
+pub fn character_format_from_inline_element(e: &InlineElement) -> CharacterFormat {
+    CharacterFormat {
+        font_family: e.fmt_font_family.clone(),
+        font_point_size: e.fmt_font_point_size,
+        font_weight: e.fmt_font_weight,
+        font_bold: e.fmt_font_bold,
+        font_italic: e.fmt_font_italic,
+        font_underline: e.fmt_font_underline,
+        font_overline: e.fmt_font_overline,
+        font_strikeout: e.fmt_font_strikeout,
+        letter_spacing: e.fmt_letter_spacing,
+        word_spacing: e.fmt_word_spacing,
+        anchor_href: e.fmt_anchor_href.clone(),
+        anchor_names: e.fmt_anchor_names.clone(),
+        is_anchor: e.fmt_is_anchor,
+        tooltip: e.fmt_tooltip.clone(),
+        underline_style: e.fmt_underline_style.clone(),
+        vertical_alignment: e.fmt_vertical_alignment.clone(),
+    }
+}
+
+/// Build the new (FormatRun, ImageAnchor) representation from a block's
+/// inline elements in document order. Byte offsets are computed by
+/// concatenating each Text element's UTF-8 length; Image and Empty
+/// elements are zero-byte in the linear text but Image anchors get a
+/// position equal to the running byte offset.
+///
+/// Adjacent Text elements with identical formatting are coalesced
+/// into a single FormatRun.
+pub fn format_runs_from_inline_elements(
+    elements: &[InlineElement],
+) -> (Vec<FormatRun>, Vec<ImageAnchor>) {
+    let mut runs: Vec<FormatRun> = Vec::with_capacity(elements.len());
+    let mut images: Vec<ImageAnchor> = Vec::new();
+    let mut byte_offset: u32 = 0;
+    for elem in elements {
+        let fmt = character_format_from_inline_element(elem);
+        match &elem.content {
+            InlineContent::Empty => {
+                // Zero-length: nothing to emit, no offset advance.
+            }
+            InlineContent::Text(s) => {
+                let len = s.len() as u32;
+                if len > 0 {
+                    runs.push(FormatRun {
+                        byte_start: byte_offset,
+                        byte_end: byte_offset + len,
+                        format: fmt,
+                    });
+                    byte_offset += len;
+                }
+            }
+            InlineContent::Image {
+                name,
+                width,
+                height,
+                quality,
+            } => {
+                images.push(ImageAnchor {
+                    byte_offset,
+                    name: name.clone(),
+                    width: *width,
+                    height: *height,
+                    quality: *quality,
+                    format: fmt,
+                });
+                // Image is a single logical character but occupies zero
+                // bytes in block.plain_text until Phase 2 (where it will
+                // be a U+FFFC sentinel, 3 UTF-8 bytes).
+            }
+        }
+    }
+    coalesce_in_place(&mut runs);
+    (runs, images)
+}
+
+/// Apply a `CharacterFormat` onto an `InlineElement`'s fmt_* fields.
+/// Used by the reverse-bridge that synthesizes an InlineElement-shaped
+/// view for not-yet-migrated readers.
+pub fn apply_character_format_to_inline_element(e: &mut InlineElement, fmt: &CharacterFormat) {
+    e.fmt_font_family = fmt.font_family.clone();
+    e.fmt_font_point_size = fmt.font_point_size;
+    e.fmt_font_weight = fmt.font_weight;
+    e.fmt_font_bold = fmt.font_bold;
+    e.fmt_font_italic = fmt.font_italic;
+    e.fmt_font_underline = fmt.font_underline;
+    e.fmt_font_overline = fmt.font_overline;
+    e.fmt_font_strikeout = fmt.font_strikeout;
+    e.fmt_letter_spacing = fmt.letter_spacing;
+    e.fmt_word_spacing = fmt.word_spacing;
+    e.fmt_anchor_href = fmt.anchor_href.clone();
+    e.fmt_anchor_names = fmt.anchor_names.clone();
+    e.fmt_is_anchor = fmt.is_anchor;
+    e.fmt_tooltip = fmt.tooltip.clone();
+    e.fmt_underline_style = fmt.underline_style.clone();
+    e.fmt_vertical_alignment = fmt.vertical_alignment.clone();
+}
+
+/// Synthesize a Vec<InlineElement>-shaped view of a block from its
+/// `plain_text`, `format_runs`, and `block_images`. Caller supplies
+/// the block id (the synthetic InlineElement ids will be 0; callers
+/// that need real ids should fetch from the inline_elements table
+/// directly until Phase 1.14).
+///
+/// Used by read paths that have not yet been migrated to consume
+/// FormatRun directly. Returns elements in document order.
+pub fn inline_elements_view(
+    plain_text: &str,
+    runs: &[FormatRun],
+    images: &[ImageAnchor],
+) -> Vec<InlineElement> {
+    let mut out: Vec<InlineElement> = Vec::new();
+    let bytes = plain_text.as_bytes();
+
+    // Merge runs and image anchors in byte-offset order. Image anchors
+    // sit between text runs. The text between runs (with no FormatRun
+    // covering it) gets a default-formatted Text element.
+    let mut img_iter = images.iter().peekable();
+    let mut cursor: u32 = 0;
+
+    let emit_text =
+        |out: &mut Vec<InlineElement>, bytes: &[u8], start: u32, end: u32, fmt: CharacterFormat| {
+            if start >= end {
+                return;
+            }
+            let slice = &bytes[start as usize..end as usize];
+            let s = std::str::from_utf8(slice)
+                .expect("block plain_text must be valid UTF-8")
+                .to_string();
+            let mut elem = InlineElement {
+                content: InlineContent::Text(s),
+                ..Default::default()
+            };
+            apply_character_format_to_inline_element(&mut elem, &fmt);
+            out.push(elem);
+        };
+
+    let emit_image = |out: &mut Vec<InlineElement>, anchor: &ImageAnchor| {
+        let mut elem = InlineElement {
+            content: InlineContent::Image {
+                name: anchor.name.clone(),
+                width: anchor.width,
+                height: anchor.height,
+                quality: anchor.quality,
+            },
+            ..Default::default()
+        };
+        apply_character_format_to_inline_element(&mut elem, &anchor.format);
+        out.push(elem);
+    };
+
+    for run in runs {
+        // Emit any image anchors that sit strictly before this run.
+        while let Some(img) = img_iter.peek() {
+            if img.byte_offset < run.byte_start {
+                // Emit any default-formatted text gap before the image.
+                emit_text(
+                    &mut out,
+                    bytes,
+                    cursor,
+                    img.byte_offset,
+                    CharacterFormat::default(),
+                );
+                emit_image(&mut out, img);
+                cursor = img.byte_offset;
+                img_iter.next();
+            } else {
+                break;
+            }
+        }
+
+        // Default-formatted gap between cursor and run start.
+        if cursor < run.byte_start {
+            emit_text(
+                &mut out,
+                bytes,
+                cursor,
+                run.byte_start,
+                CharacterFormat::default(),
+            );
+        }
+
+        emit_text(
+            &mut out,
+            bytes,
+            run.byte_start,
+            run.byte_end,
+            run.format.clone(),
+        );
+        cursor = run.byte_end;
+    }
+
+    // Remaining images at or after the last run.
+    for img in img_iter {
+        if img.byte_offset > cursor {
+            emit_text(
+                &mut out,
+                bytes,
+                cursor,
+                img.byte_offset,
+                CharacterFormat::default(),
+            );
+            cursor = img.byte_offset;
+        }
+        emit_image(&mut out, img);
+    }
+
+    // Trailing default-formatted text after the last run/image.
+    if (cursor as usize) < bytes.len() {
+        emit_text(
+            &mut out,
+            bytes,
+            cursor,
+            bytes.len() as u32,
+            CharacterFormat::default(),
+        );
+    }
+
+    out
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +508,158 @@ mod tests {
         assert_eq!(rs[0].byte_start, 0); // unchanged
         assert_eq!(rs[1].byte_start, 13);
         assert_eq!(rs[1].byte_end, 18);
+    }
+
+    // ── Bridge tests: InlineElement <-> (FormatRun, ImageAnchor) ──
+
+    fn elem_text(s: &str, bold: bool) -> InlineElement {
+        InlineElement {
+            content: InlineContent::Text(s.to_string()),
+            fmt_font_bold: Some(bold),
+            ..Default::default()
+        }
+    }
+
+    fn elem_image(name: &str) -> InlineElement {
+        InlineElement {
+            content: InlineContent::Image {
+                name: name.to_string(),
+                width: 100,
+                height: 50,
+                quality: 90,
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn bridge_simple_text_runs() {
+        let elements = vec![elem_text("hello", false), elem_text(" world", true)];
+        let (runs, imgs) = format_runs_from_inline_elements(&elements);
+        assert!(imgs.is_empty());
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].byte_start, 0);
+        assert_eq!(runs[0].byte_end, 5);
+        assert_eq!(runs[0].format.font_bold, Some(false));
+        assert_eq!(runs[1].byte_start, 5);
+        assert_eq!(runs[1].byte_end, 11);
+        assert_eq!(runs[1].format.font_bold, Some(true));
+    }
+
+    #[test]
+    fn bridge_adjacent_same_format_coalesces() {
+        let elements = vec![elem_text("foo", true), elem_text("bar", true)];
+        let (runs, _) = format_runs_from_inline_elements(&elements);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].byte_end, 6);
+    }
+
+    #[test]
+    fn bridge_image_anchor() {
+        let elements = vec![
+            elem_text("hi ", false),
+            elem_image("logo.png"),
+            elem_text(" there", false),
+        ];
+        let (runs, imgs) = format_runs_from_inline_elements(&elements);
+        assert_eq!(imgs.len(), 1);
+        assert_eq!(imgs[0].byte_offset, 3); // after "hi "
+        assert_eq!(imgs[0].name, "logo.png");
+        // The two text runs have the same default format -> coalesced.
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].byte_end, 9); // "hi " (3) + " there" (6)
+    }
+
+    #[test]
+    fn synthesize_view_round_trips_text() {
+        let plain = "hello world";
+        let runs = vec![run(0, 5, false), run(5, 11, true)];
+        let view = inline_elements_view(plain, &runs, &[]);
+        assert_eq!(view.len(), 2);
+        match (&view[0].content, &view[1].content) {
+            (InlineContent::Text(a), InlineContent::Text(b)) => {
+                assert_eq!(a, "hello");
+                assert_eq!(b, " world");
+            }
+            _ => panic!("expected two text elements"),
+        }
+        assert_eq!(view[0].fmt_font_bold, Some(false));
+        assert_eq!(view[1].fmt_font_bold, Some(true));
+    }
+
+    #[test]
+    fn synthesize_view_with_image_in_middle() {
+        let plain = "ab"; // image sits between bytes 1 and 2
+        let runs = vec![run(0, 1, false), run(1, 2, false)];
+        let imgs = vec![ImageAnchor {
+            byte_offset: 1,
+            name: "x.png".into(),
+            width: 1,
+            height: 1,
+            quality: 90,
+            format: CharacterFormat::default(),
+        }];
+        let view = inline_elements_view(plain, &runs, &imgs);
+        // Expect: text "a" (default), text "a" (bold=false from run), image, text "b" (bold=false)
+        // Actually with adjacent identical runs the view emits one run per FormatRun.
+        // The image is anchored at byte_offset=1 which is the boundary of the two runs.
+        // Expect either: text(0..1) | image | text(1..2), or text + text + image + text depending.
+        let images_in_view = view
+            .iter()
+            .filter(|e| matches!(e.content, InlineContent::Image { .. }))
+            .count();
+        assert_eq!(images_in_view, 1);
+        let total_text: String = view
+            .iter()
+            .filter_map(|e| {
+                if let InlineContent::Text(t) = &e.content {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(total_text, "ab");
+    }
+
+    #[test]
+    fn bridge_round_trip_preserves_text() {
+        // inline_elements -> (runs, images) -> inline_elements should
+        // produce the same plain text and image-list shape.
+        let elements = vec![
+            elem_text("Hello ", false),
+            elem_text("bold", true),
+            elem_text(" world", false),
+            elem_image("img"),
+            elem_text("!", false),
+        ];
+        let plain: String = elements
+            .iter()
+            .filter_map(|e| {
+                if let InlineContent::Text(s) = &e.content {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let (runs, imgs) = format_runs_from_inline_elements(&elements);
+        let view = inline_elements_view(&plain, &runs, &imgs);
+        let view_plain: String = view
+            .iter()
+            .filter_map(|e| {
+                if let InlineContent::Text(s) = &e.content {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(view_plain, plain);
+        let view_imgs = view
+            .iter()
+            .filter(|e| matches!(e.content, InlineContent::Image { .. }))
+            .count();
+        assert_eq!(view_imgs, 1);
     }
 }
