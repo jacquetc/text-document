@@ -40,13 +40,26 @@ switch to byte-range deltas, since InlineElement won't exist).
 - Phase 1.1–1.12 (foundations + auto-sync): complete ✓
 - Phase 1.13a (text_block.fragments): complete ✓
 - Phase 1.13b (cursor.char_format): complete ✓
-- Phase 1.13c (use case readers): NOT STARTED — requires plumbing
-  (a `store()` method on CommandUnitOfWork + bulk-impl in ~32 UoW
-  files) before each of 8 use cases can be migrated.
-- Phase 1.13d (DocumentFragment internal): NOT STARTED — affects
-  clipboard interchange; FragmentElement schema must be preserved.
-- Phase 1.14 (deletion): NOT STARTED — this is where the memory
-  wins finally materialize. Requires Phase 1.13c first.
+- Phase 1.13c (use case readers): complete ✓ — `store()` plumbed on
+  both UoW traits + 7 readers migrated (extract_fragment_uc,
+  get_text_at_position_uc, get_document_stats_uc, export_html_uc,
+  export_markdown_uc, export_docx_uc, export_latex_uc). The
+  `replace_text_uc` reader is part of a writer path and deferred
+  to 1.13e. Memory unchanged: dual-write still active.
+- Phase 1.13d (DocumentFragment internal): N/A — FragmentElement
+  schema is preserved verbatim; the conversion `from_entity` still
+  consumes an `InlineElement`, but now the InlineElement is
+  synthesized via `synthesize_block_inline_elements`. After Phase
+  1.14 the `from_entity`/`to_entity` methods are rewritten to map
+  directly to/from `FormatRun`+`ImageAnchor`.
+- Phase 1.13e (writer migration): NOT STARTED — every editing /
+  formatting / import use case currently mutates `InlineElement`
+  entities. Rewriting them to splice `format_runs` and
+  `block_images` directly is the largest remaining piece of Phase
+  1 (~13 use cases, several hundred LOC each). After this is done,
+  the inline_elements table can be deleted in Phase 1.14.
+- Phase 1.14 (deletion): NOT STARTED — depends on 1.13e. Memory
+  wins materialize here.
 - Phase 1.17 (bench compare): N/A until 1.14 done.
 
 The current state is a stable WIP checkpoint that Phase 2 (rope swap)
