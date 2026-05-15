@@ -100,10 +100,6 @@ impl CommandUnitOfWork for InsertImageUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "Update")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Update")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 impl InsertImageUnitOfWorkTrait for InsertImageUnitOfWork {}
 
 pub struct InsertImageUnitOfWorkFactory {

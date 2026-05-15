@@ -20,6 +20,10 @@ pub use common::direct_access::block::block_repository::BlockRelationshipField;
 pub use common::direct_access::document::document_repository::DocumentRelationshipField;
 pub use common::direct_access::frame::frame_repository::FrameRelationshipField;
 pub use common::direct_access::root::root_repository::RootRelationshipField;
+pub use common::format_runs::{FormatRun, ImageAnchor};
+pub use common::format_runs_query::{
+    get_block_images, get_format_runs, synthesize_block_inline_elements,
+};
 
 pub use common::direct_access::table::table_repository::TableRelationshipField;
 pub use common::direct_access::table_cell::table_cell_repository::TableCellRelationshipField;
@@ -223,6 +227,37 @@ pub fn get_element_ids(db_context: &DbContext, block_id: &EntityId) -> Result<Ve
 pub fn get_first_block_element_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
     let block_ids = get_block_ids(db_context)?;
     get_element_ids(db_context, &block_ids[0])
+}
+
+/// Synthesize the inline-element view of a block from format_runs +
+/// block_images. Use this in tests that previously called
+/// `inline_element_controller::get` on each element id — after the
+/// writer migration, the inline_elements table no longer reflects
+/// images created by feature use cases.
+pub fn synth_block_elements(
+    db_context: &DbContext,
+    block_id: EntityId,
+) -> Result<Vec<common::entities::InlineElement>> {
+    let block = block_controller::get(db_context, &block_id)?
+        .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+    Ok(synthesize_block_inline_elements(
+        db_context.get_store(),
+        block_id,
+        &block.plain_text,
+    ))
+}
+
+/// Synthesized inline-element view of the first block.
+pub fn synth_first_block_elements(
+    db_context: &DbContext,
+) -> Result<Vec<common::entities::InlineElement>> {
+    let block_ids = get_block_ids(db_context)?;
+    synth_block_elements(db_context, block_ids[0])
+}
+
+/// Image anchors stored on a block (post-Phase-1 source of truth for images).
+pub fn get_block_image_anchors(db_context: &DbContext, block_id: EntityId) -> Vec<ImageAnchor> {
+    get_block_images(db_context.get_store(), block_id)
 }
 
 /// Get the first frame ID for the document.

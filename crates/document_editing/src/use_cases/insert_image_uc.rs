@@ -3,11 +3,12 @@ use crate::InsertImageDto;
 use crate::InsertImageResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
+use common::entities::{Block, Document, Frame, InlineContent, Root};
+use common::format_runs::{ImageAnchor, synth_element_id};
+use common::format_runs_query::synthesize_block_inline_elements;
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -31,10 +32,6 @@ pub trait InsertImageUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "Update")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Update")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 pub trait InsertImageUnitOfWorkTrait: CommandUnitOfWork {}
 
 pub struct InsertImageUseCase {
@@ -76,7 +73,7 @@ fn execute_insert_image(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    // Snapshot for undo before mutation
+    // Snapshot for undo before mutation (covers blocks, block_images, format_runs, document).
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
     // Get frames
@@ -96,201 +93,95 @@ fn execute_insert_image(
     // Find block at position
     let (block, block_idx, offset) = find_block_at_position(&blocks, position)?;
 
-    // Get elements for this block
-    let element_ids = uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-    let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+    // Synthesize the inline-element view of the target block from format_runs +
+    // block_images. This is read-only — we use it to locate the byte offset
+    // inside `block.plain_text` where the new image should be anchored.
+    let elements = synthesize_block_inline_elements(&uow.store(), block.id, &block.plain_text);
 
-    if elements.is_empty() {
-        return Err(anyhow!("Block has no inline elements"));
-    }
-
-    // Find element at offset
-    let (element, elem_idx, elem_offset) = find_element_at_offset(&elements, offset)?;
+    // byte_offset = position inside `block.plain_text` where the new image is
+    // anchored. Empty blocks anchor at 0. Otherwise we walk the synthesized
+    // elements: each Text contributes its UTF-8 byte length; Image / Empty
+    // contribute zero.
+    let byte_offset: u32 = if elements.is_empty() {
+        0
+    } else {
+        let (element, elem_idx, elem_offset) = find_element_at_offset(&elements, offset)?;
+        let mut bo: u32 = 0;
+        for prev in &elements[..elem_idx] {
+            if let InlineContent::Text(s) = &prev.content {
+                bo += s.len() as u32;
+            }
+        }
+        match &element.content {
+            InlineContent::Text(s) => {
+                let split_byte = s
+                    .char_indices()
+                    .nth(elem_offset as usize)
+                    .map(|(b, _)| b)
+                    .unwrap_or(s.len());
+                bo + split_byte as u32
+            }
+            InlineContent::Image { .. } | InlineContent::Empty => bo,
+        }
+    };
 
     let now = chrono::Utc::now();
 
-    // Split the current element at the insertion point and insert an image element
-    match &element.content {
-        InlineContent::Text(s) => {
-            let chars: Vec<char> = s.chars().collect();
-            let before_text: String = chars[..elem_offset as usize].iter().collect();
-            let after_text: String = chars[elem_offset as usize..].iter().collect();
-
-            // Truncate the current element to before_text
-            let mut updated = element.clone();
-            updated.content = InlineContent::Text(before_text);
-            updated.updated_at = now;
-            uow.update_inline_element(&updated)?;
-
-            // Create the image element
-            let image_elem = InlineElement {
-                id: 0,
-                created_at: now,
-                updated_at: now,
-                content: InlineContent::Image {
-                    name: dto.image_name.clone(),
-                    width: dto.width,
-                    height: dto.height,
-                    quality: 100,
-                },
-                ..Default::default()
-            };
-            let insert_index = (elem_idx + 1) as i32;
-            let created_image = uow.create_inline_element(&image_elem, block.id, insert_index)?;
-
-            // Create the after element if non-empty
-            if !after_text.is_empty() {
-                let after_elem = InlineElement {
-                    id: 0,
-                    created_at: now,
-                    updated_at: now,
-                    content: InlineContent::Text(after_text),
-                    fmt_font_family: element.fmt_font_family.clone(),
-                    fmt_font_point_size: element.fmt_font_point_size,
-                    fmt_font_bold: element.fmt_font_bold,
-                    fmt_font_italic: element.fmt_font_italic,
-                    fmt_font_underline: element.fmt_font_underline,
-                    fmt_font_overline: element.fmt_font_overline,
-                    fmt_font_strikeout: element.fmt_font_strikeout,
-                    fmt_font_weight: element.fmt_font_weight,
-                    fmt_letter_spacing: element.fmt_letter_spacing,
-                    fmt_word_spacing: element.fmt_word_spacing,
-                    fmt_anchor_href: element.fmt_anchor_href.clone(),
-                    fmt_anchor_names: element.fmt_anchor_names.clone(),
-                    fmt_is_anchor: element.fmt_is_anchor,
-                    fmt_tooltip: element.fmt_tooltip.clone(),
-                    fmt_underline_style: element.fmt_underline_style.clone(),
-                    fmt_vertical_alignment: element.fmt_vertical_alignment.clone(),
-                };
-                uow.create_inline_element(&after_elem, block.id, insert_index + 1)?;
-            }
-
-            // Update block cached fields: image occupies 1 position but doesn't add to plain_text
-            let mut updated_block = block.clone();
-            updated_block.text_length += 1;
-            updated_block.updated_at = now;
-            uow.update_block(&updated_block)?;
-
-            // Update subsequent blocks' document_position
-            let mut blocks_to_update: Vec<Block> = Vec::new();
-            for b in &blocks[(block_idx + 1)..] {
-                let mut ub = b.clone();
-                ub.document_position += 1;
-                ub.updated_at = now;
-                blocks_to_update.push(ub);
-            }
-            if !blocks_to_update.is_empty() {
-                uow.update_block_multi(&blocks_to_update)?;
-            }
-
-            // Update Document.character_count
-            let mut updated_doc = document.clone();
-            updated_doc.character_count += 1;
-            updated_doc.updated_at = now;
-            uow.update_document(&updated_doc)?;
-
-            Ok((
-                InsertImageResultDto {
-                    new_position: position + 1,
-                    element_id: created_image.id as i64,
-                },
-                snapshot,
-            ))
-        }
-        InlineContent::Empty => {
-            // Create the image element after the empty element
-            let image_elem = InlineElement {
-                id: 0,
-                created_at: now,
-                updated_at: now,
-                content: InlineContent::Image {
-                    name: dto.image_name.clone(),
-                    width: dto.width,
-                    height: dto.height,
-                    quality: 100,
-                },
-                ..Default::default()
-            };
-            let insert_index = (elem_idx + 1) as i32;
-            let created_image = uow.create_inline_element(&image_elem, block.id, insert_index)?;
-
-            let mut updated_block = block.clone();
-            updated_block.text_length += 1;
-            updated_block.updated_at = now;
-            uow.update_block(&updated_block)?;
-
-            let mut blocks_to_update: Vec<Block> = Vec::new();
-            for b in &blocks[(block_idx + 1)..] {
-                let mut ub = b.clone();
-                ub.document_position += 1;
-                ub.updated_at = now;
-                blocks_to_update.push(ub);
-            }
-            if !blocks_to_update.is_empty() {
-                uow.update_block_multi(&blocks_to_update)?;
-            }
-
-            let mut updated_doc = document.clone();
-            updated_doc.character_count += 1;
-            updated_doc.updated_at = now;
-            uow.update_document(&updated_doc)?;
-
-            Ok((
-                InsertImageResultDto {
-                    new_position: position + 1,
-                    element_id: created_image.id as i64,
-                },
-                snapshot,
-            ))
-        }
-        InlineContent::Image { .. } => {
-            // Insert image after the current image element
-            let image_elem = InlineElement {
-                id: 0,
-                created_at: now,
-                updated_at: now,
-                content: InlineContent::Image {
-                    name: dto.image_name.clone(),
-                    width: dto.width,
-                    height: dto.height,
-                    quality: 100,
-                },
-                ..Default::default()
-            };
-            let insert_index = (elem_idx + 1) as i32;
-            let created_image = uow.create_inline_element(&image_elem, block.id, insert_index)?;
-
-            let mut updated_block = block.clone();
-            updated_block.text_length += 1;
-            updated_block.updated_at = now;
-            uow.update_block(&updated_block)?;
-
-            let mut blocks_to_update: Vec<Block> = Vec::new();
-            for b in &blocks[(block_idx + 1)..] {
-                let mut ub = b.clone();
-                ub.document_position += 1;
-                ub.updated_at = now;
-                blocks_to_update.push(ub);
-            }
-            if !blocks_to_update.is_empty() {
-                uow.update_block_multi(&blocks_to_update)?;
-            }
-
-            let mut updated_doc = document.clone();
-            updated_doc.character_count += 1;
-            updated_doc.updated_at = now;
-            uow.update_document(&updated_doc)?;
-
-            Ok((
-                InsertImageResultDto {
-                    new_position: position + 1,
-                    element_id: created_image.id as i64,
-                },
-                snapshot,
-            ))
-        }
+    // Insert ImageAnchor directly into block_images, maintaining sort order
+    // (ascending by byte_offset; equal byte_offsets keep insertion order, so
+    // the new image goes AFTER any existing anchors at the same byte position).
+    {
+        let store = uow.store();
+        let mut images_map = store.block_images.write().unwrap();
+        let images = images_map.entry(block.id).or_default();
+        let insert_idx = images
+            .iter()
+            .position(|a| a.byte_offset > byte_offset)
+            .unwrap_or(images.len());
+        images.insert(
+            insert_idx,
+            ImageAnchor {
+                byte_offset,
+                name: dto.image_name.clone(),
+                width: dto.width,
+                height: dto.height,
+                quality: 100,
+                format: Default::default(),
+            },
+        );
     }
+
+    // Update block cached fields: image occupies 1 logical position but adds
+    // zero bytes to plain_text.
+    let mut updated_block = block.clone();
+    updated_block.text_length += 1;
+    updated_block.updated_at = now;
+    uow.update_block(&updated_block)?;
+
+    // Shift subsequent blocks' document_position by +1.
+    let mut blocks_to_update: Vec<Block> = Vec::new();
+    for b in &blocks[(block_idx + 1)..] {
+        let mut ub = b.clone();
+        ub.document_position += 1;
+        ub.updated_at = now;
+        blocks_to_update.push(ub);
+    }
+    if !blocks_to_update.is_empty() {
+        uow.update_block_multi(&blocks_to_update)?;
+    }
+
+    let mut updated_doc = document.clone();
+    updated_doc.character_count += 1;
+    updated_doc.updated_at = now;
+    uow.update_document(&updated_doc)?;
+
+    Ok((
+        InsertImageResultDto {
+            new_position: position + 1,
+            element_id: synth_element_id(block.id, byte_offset) as i64,
+        },
+        snapshot,
+    ))
 }
 
 impl InsertImageUseCase {
