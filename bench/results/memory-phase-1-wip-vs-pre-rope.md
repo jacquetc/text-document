@@ -52,7 +52,7 @@ switch to byte-range deltas, since InlineElement won't exist).
   synthesized via `synthesize_block_inline_elements`. After Phase
   1.14 the `from_entity`/`to_entity` methods are rewritten to map
   directly to/from `FormatRun`+`ImageAnchor`.
-- Phase 1.13e (writer migration): IN PROGRESS — 7 of 13 use cases
+- Phase 1.13e (writer migration): IN PROGRESS — 9 of 13 use cases
   migrated:
   * `insert_image_uc` — writes `block_images` directly.
   * `set_text_format_uc` — replaces inline_element fmt_* updates with
@@ -69,6 +69,12 @@ switch to byte-range deltas, since InlineElement won't exist).
     and reverse-syncs an Empty / Text inline_element per block so
     legacy writers reading inline_elements still see the right
     content.
+  * `insert_formatted_text_uc` — same shape as insert_text but
+    splices a single FormatRun carrying the dto's character format
+    over the inserted byte range (overrides any inherited format
+    from the surrounding run).
+  * `replace_text_uc` — byte-range delete-then-insert per match,
+    inheriting surrounding format on the replacement bytes.
 
   Compatibility bridge: the auto-sync hook (inline_elements →
   format_runs) stays enabled while writers migrate one-at-a-time;
@@ -82,15 +88,14 @@ switch to byte-range deltas, since InlineElement won't exist).
     counter key `"inline_element"` (mismatched CamelCase caused
     ID collisions with legacy creates).
 
-  The remaining 6 unmigrated writers continue to work via the
+  The remaining 4 unmigrated writers continue to work via the
   legacy path + auto-sync (they read/write inline_elements; format_
   runs gets rebuilt from inline_elements automatically):
-  `insert_formatted_text_uc`, `insert_fragment_uc`,
-  `insert_html_at_position_uc`, `insert_markdown_at_position_uc`,
-  `import_html_uc`, `import_markdown_uc`, `replace_text_uc`.
-  They can now migrate one-at-a-time using the same dual-write
-  pattern (reverse-sync after writing format_runs/block_images);
-  no further atomic coupling remains.
+  `insert_fragment_uc`, `insert_html_at_position_uc`,
+  `insert_markdown_at_position_uc`, `import_html_uc`,
+  `import_markdown_uc`. They can now migrate one-at-a-time using
+  the same dual-write pattern (reverse-sync after writing
+  format_runs/block_images); no further atomic coupling remains.
 - Phase 1.14 (deletion): NOT STARTED — depends on 1.13e. Memory
   wins materialize here.
 - Phase 1.17 (bench compare): N/A until 1.14 done.
