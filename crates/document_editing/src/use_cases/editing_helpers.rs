@@ -1,20 +1,24 @@
 use anyhow::{Result, anyhow};
+use common::database::hashmap_store::HashMapStore;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::entities::{Block, Frame, InlineContent, InlineElement};
+use common::format_runs_query::rebuild_block_inline_elements;
 use common::types::EntityId;
+use std::sync::Arc;
 
-/// Trait for UoW operations needed to create a cell frame.
-/// All table-related UoW traits satisfy this via proc macros.
+/// Trait for UoW operations needed to create a cell frame. All
+/// table-related UoW traits satisfy this via the
+/// `impl_cell_frame_creator!` macro.
+///
+/// The empty `InlineElement` that historically seeded each new cell
+/// block is now produced by reverse-syncing from the (empty) format
+/// runs via [`rebuild_block_inline_elements`], so callers no longer
+/// need to expose `create_inline_element`.
 pub trait CellFrameCreator {
     fn cfc_create_frame(&mut self, frame: &Frame, owner_id: EntityId, index: i32) -> Result<Frame>;
     fn cfc_create_block(&mut self, block: &Block, owner_id: EntityId, index: i32) -> Result<Block>;
-    fn cfc_create_inline_element(
-        &mut self,
-        elem: &InlineElement,
-        owner_id: EntityId,
-        index: i32,
-    ) -> Result<InlineElement>;
     fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame>;
+    fn cfc_store(&self) -> Arc<HashMapStore>;
 }
 
 /// Implement `CellFrameCreator` for a `Box<dyn UowTrait>` where the UoW trait has the needed methods.
@@ -37,16 +41,11 @@ macro_rules! impl_cell_frame_creator {
             ) -> Result<Block> {
                 (**self).create_block(block, owner_id, index)
             }
-            fn cfc_create_inline_element(
-                &mut self,
-                elem: &InlineElement,
-                owner_id: EntityId,
-                index: i32,
-            ) -> Result<InlineElement> {
-                (**self).create_inline_element(elem, owner_id, index)
-            }
             fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame> {
                 (**self).update_frame(frame)
+            }
+            fn cfc_store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+                (**self).store()
             }
         }
     };
@@ -54,8 +53,11 @@ macro_rules! impl_cell_frame_creator {
 
 pub(crate) use impl_cell_frame_creator;
 
-/// Create a single cell Frame with one empty Block containing one empty InlineElement.
-/// Returns the created frame's ID and the created block.
+/// Create a single cell Frame containing one empty Block. The block is
+/// reverse-synced through `rebuild_block_inline_elements` so the legacy
+/// inline_elements bridge sees the conventional single-Empty element
+/// for the cell; the new format_runs / block_images representation is
+/// the source of truth (both empty for a brand-new cell).
 pub fn create_cell_frame(
     uow: &mut dyn CellFrameCreator,
     doc_id: EntityId,
@@ -70,11 +72,7 @@ pub fn create_cell_frame(
     };
     let created_block = uow.cfc_create_block(&block, created_frame.id, -1)?;
 
-    let empty_elem = InlineElement {
-        content: InlineContent::Empty,
-        ..InlineElement::default()
-    };
-    uow.cfc_create_inline_element(&empty_elem, created_block.id, -1)?;
+    rebuild_block_inline_elements(uow.cfc_store().as_ref(), created_block.id, "");
 
     let mut updated_frame = created_frame.clone();
     updated_frame.child_order = vec![created_block.id as i64];
