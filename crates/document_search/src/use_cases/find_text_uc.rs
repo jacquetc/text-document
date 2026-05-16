@@ -8,7 +8,7 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, Root};
+use common::entities::{Block, Document, Frame, Root};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait FindTextUnitOfWorkFactoryTrait: Send + Sync {

@@ -241,7 +241,7 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
             if let Some(elem) = elem
-                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && elem.fmt_font_bold == Some(true)
             {
                 bold_substring_count += t.matches("bold text").count();
@@ -464,7 +464,7 @@ fn test_extract_insert_fragment_with_image() -> Result<()> {
     let has_image = fragment.blocks.iter().any(|b| {
         b.elements
             .iter()
-            .any(|e| matches!(e.content, common::entities::InlineContent::Image { .. }))
+            .any(|e| matches!(e.content, common::format_runs::InlineContent::Image { .. }))
     });
     assert!(has_image, "Fragment should contain an image element");
 

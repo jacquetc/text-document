@@ -4,7 +4,7 @@ use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::entities::{Block, Document, Frame, FramePosition, List, Resource, Root, Table, TableCell};
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::long_operation::LongOperation;
 use common::parser_tools::content_parser::{
     ParsedElement, format_runs_from_spans, parse_html_elements,
@@ -214,7 +214,6 @@ impl LongOperation for ImportHtmlUseCase {
                             runs_map.remove(&created_block.id);
                         }
                     }
-                    rebuild_block_inline_elements(uow.store().as_ref(), created_block.id, &plain_text);
 
                     // Handle list items
                     if let Some(ref list_style) = parsed_block.list_style {
@@ -309,11 +308,6 @@ impl LongOperation for ImportHtmlUseCase {
                                     runs_map.remove(&created_block.id);
                                 }
                             }
-                            rebuild_block_inline_elements(
-                                uow.store().as_ref(),
-                                created_block.id,
-                                &plain_text,
-                            );
 
                             let mut updated_cell_frame = created_cell_frame.clone();
                             updated_cell_frame.child_order = vec![created_block.id as i64];

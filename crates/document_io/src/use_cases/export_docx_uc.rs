@@ -4,8 +4,9 @@ use crate::ExportDocxResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, Root, Table, TableCell,
+    Block, Document, Frame, List, Root, Table, TableCell,
 };
+use common::format_runs::{InlineContent};
 use common::long_operation::LongOperation;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
@@ -164,7 +165,7 @@ impl LongOperation for ExportDocxUseCase {
                     return Err(anyhow!("Operation was cancelled"));
                 }
 
-                let elements = common::format_runs_query::synthesize_block_inline_elements(
+                let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
             &block.plain_text,
@@ -355,7 +356,7 @@ impl ExportDocxUseCase {
                         blocks.sort_by_key(|b| b.document_position);
 
                         for block in &blocks {
-                            let elements = common::format_runs_query::synthesize_block_inline_elements(
+                            let elements = common::format_runs_query::inline_segments_for_block(
                                 &uow.store(),
                                 block.id,
                                 &block.plain_text,

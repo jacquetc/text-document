@@ -12,7 +12,7 @@ use common::format_runs::{
     shift_images_for_delete, shift_images_for_insert, shift_runs_for_delete,
     shift_runs_for_insert,
 };
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
@@ -239,7 +239,6 @@ fn execute_insert_with_selection(
     // Reverse-sync: rebuild inline_elements from the new (plain_text +
     // format_runs + block_images) state so legacy readers / writers see a
     // consistent view.
-    rebuild_block_inline_elements(&uow.store(), block.id, &new_plain);
 
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for b in &blocks[(block_idx + 1)..] {
@@ -355,7 +354,6 @@ fn execute_insert_simple(
         }
     }
 
-    rebuild_block_inline_elements(&uow.store(), block.id, &new_plain);
 
     let mut updated_doc = document.clone();
     updated_doc.character_count += inserted_char_len;

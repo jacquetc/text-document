@@ -14,7 +14,6 @@ use common::format_runs::{
     FormatRun, ImageAnchor, debug_assert_well_formed, logical_offset_to_byte,
     shift_images_for_delete, shift_runs_for_delete,
 };
-use common::format_runs_query::{drop_block_inline_elements, rebuild_block_inline_elements};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -100,7 +99,6 @@ fn clear_block(
     let store = uow.store();
     store.format_runs.write().unwrap().insert(block.id, Vec::new());
     store.block_images.write().unwrap().insert(block.id, Vec::new());
-    rebuild_block_inline_elements(&store, block.id, "");
     Ok(())
 }
 
@@ -110,7 +108,6 @@ fn drop_block_runs_and_images(uow: &Box<dyn DeleteTextUnitOfWorkTrait>, block_id
     let store = uow.store();
     store.format_runs.write().unwrap().remove(&block_id);
     store.block_images.write().unwrap().remove(&block_id);
-    drop_block_inline_elements(&store, block_id);
 }
 
 fn execute_delete(
@@ -600,8 +597,6 @@ fn execute_delete(
         updated_block.updated_at = chrono::Utc::now();
         uow.update_block(&updated_block)?;
 
-        rebuild_block_inline_elements(&uow.store(), start_block.id, &new_plain);
-
         let mut blocks_to_update: Vec<Block> = Vec::new();
         for b in &blocks[(start_block_idx + 1)..] {
             let mut ub = b.clone();
@@ -737,8 +732,6 @@ fn execute_delete(
             .unwrap()
             .insert(start_block.id, merged_images);
 
-        rebuild_block_inline_elements(&store, start_block.id, &merged_plain);
-
         // Remove intermediate and end blocks.
         let blocks_to_remove: Vec<EntityId> = blocks[(start_block_idx + 1)..=end_block_idx]
             .iter()
@@ -851,7 +844,6 @@ fn delete_char_range_in_block(
     updated.text_length -= positions_removed;
     updated.updated_at = chrono::Utc::now();
     uow.update_block(&updated)?;
-    rebuild_block_inline_elements(&uow.store(), block.id, &new_plain);
     Ok(positions_removed)
 }
 

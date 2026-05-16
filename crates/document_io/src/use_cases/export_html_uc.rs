@@ -3,9 +3,10 @@ use crate::ExportHtmlDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Alignment, Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table,
+    Alignment, Block, Document, Frame, List, ListStyle, Root, Table,
     TableCell, TextDirection,
 };
+use common::format_runs::{InlineContent};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
 
@@ -224,7 +225,7 @@ impl ExportHtmlUseCase {
 
             // --- Code block ---
             if block.fmt_is_code_block == Some(true) {
-                let elements = common::format_runs_query::synthesize_block_inline_elements(
+                let elements = common::format_runs_query::inline_segments_for_block(
                     &uow.store(),
                     block.id,
                     &block.plain_text,
@@ -451,7 +452,7 @@ impl ExportHtmlUseCase {
         uow: &dyn ExportHtmlUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let elements = common::format_runs_query::synthesize_block_inline_elements(
+        let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
             &block.plain_text,

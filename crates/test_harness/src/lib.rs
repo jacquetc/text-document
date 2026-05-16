@@ -21,8 +21,9 @@ pub use common::direct_access::frame::frame_repository::FrameRelationshipField;
 pub use common::direct_access::root::root_repository::RootRelationshipField;
 pub use common::format_runs::{FormatRun, ImageAnchor};
 pub use common::format_runs_query::{
-    get_block_images, get_format_runs, synthesize_block_inline_elements,
+    get_block_images, get_format_runs, inline_segments_for_block,
 };
+pub use common::format_runs::InlineSegment;
 
 pub use common::direct_access::table::table_repository::TableRelationshipField;
 pub use common::direct_access::table_cell::table_cell_repository::TableCellRelationshipField;
@@ -209,12 +210,23 @@ pub fn get_block_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
 /// stable derivations of `(block_id, byte_start)` produced by
 /// [`common::format_runs::synth_element_id`], so callers can
 /// round-trip an id through [`inline_element_controller::get`] (the
-/// shim below) to fetch the corresponding `InlineElement` view.
+/// shim below) to fetch the corresponding `InlineSegment` view.
 pub fn get_element_ids(db_context: &DbContext, block_id: &EntityId) -> Result<Vec<EntityId>> {
-    Ok(synth_block_elements(db_context, *block_id)?
-        .into_iter()
-        .map(|e| e.id)
-        .collect())
+    use common::format_runs::{InlineContent, synth_element_id};
+
+    let segments = synth_block_elements(db_context, *block_id)?;
+    let mut ids = Vec::new();
+    let mut byte_offset: u32 = 0;
+
+    for seg in segments {
+        ids.push(synth_element_id(*block_id, byte_offset));
+        // Advance byte offset (Text contributes UTF-8 length, Image/Empty contributes 0)
+        if let InlineContent::Text(s) = &seg.content {
+            byte_offset += s.len() as u32;
+        }
+    }
+
+    Ok(ids)
 }
 
 /// Get the first block's synthesized element IDs.
@@ -226,19 +238,30 @@ pub fn get_first_block_element_ids(db_context: &DbContext) -> Result<Vec<EntityI
 /// Compatibility shim: the legacy `inline_element_controller::get`
 /// looked up an entity row in the `inline_elements` table by id. After
 /// Phase 1.14 the table is gone; this shim walks every block's
-/// synthesized inline-element view to find the matching id. Used by
+/// synthesized inline-segment view to find the matching synthetic id. Used by
 /// tests that previously did `inline_element_controller::get(db, &id)`.
 pub mod inline_element_controller {
     use super::*;
+    use common::format_runs::synth_element_id;
 
     pub fn get(
         db_context: &DbContext,
         elem_id: &EntityId,
-    ) -> Result<Option<common::entities::InlineElement>> {
+    ) -> Result<Option<InlineSegment>> {
         for bid in get_all_block_ids(db_context)? {
-            for elem in synth_block_elements(db_context, bid)? {
-                if elem.id == *elem_id {
-                    return Ok(Some(elem));
+            let _block = block_controller::get(db_context, &bid)?
+                .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+            let segments = synth_block_elements(db_context, bid)?;
+
+            let mut byte_offset: u32 = 0;
+            for seg in segments {
+                let synth_id = synth_element_id(bid, byte_offset);
+                if synth_id == *elem_id {
+                    return Ok(Some(seg));
+                }
+                // Advance byte offset (Text contributes UTF-8 length, Image/Empty contributes 0)
+                if let common::format_runs::InlineContent::Text(s) = &seg.content {
+                    byte_offset += s.len() as u32;
                 }
             }
         }
@@ -254,20 +277,20 @@ pub mod inline_element_controller {
 pub fn synth_block_elements(
     db_context: &DbContext,
     block_id: EntityId,
-) -> Result<Vec<common::entities::InlineElement>> {
+) -> Result<Vec<InlineSegment>> {
     let block = block_controller::get(db_context, &block_id)?
         .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
-    Ok(synthesize_block_inline_elements(
+    Ok(inline_segments_for_block(
         db_context.get_store(),
         block_id,
         &block.plain_text,
     ))
 }
 
-/// Synthesized inline-element view of the first block.
+/// Synthesized inline-segment view of the first block.
 pub fn synth_first_block_elements(
     db_context: &DbContext,
-) -> Result<Vec<common::entities::InlineElement>> {
+) -> Result<Vec<InlineSegment>> {
     let block_ids = get_block_ids(db_context)?;
     synth_block_elements(db_context, block_ids[0])
 }

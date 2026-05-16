@@ -3,7 +3,7 @@
 pub use common::entities::Alignment;
 use common::entities::Block;
 pub use common::entities::CharVerticalAlignment;
-pub use common::entities::InlineContent;
+pub use common::format_runs::InlineContent;
 pub use common::entities::MarkerType;
 pub use common::entities::TextDirection;
 pub use common::entities::UnderlineStyle;

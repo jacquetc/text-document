@@ -4,9 +4,10 @@ use crate::ExportLatexResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
+    Block, Document, Frame, List, ListStyle, Root, Table, TableCell,
     TextDirection,
 };
+use common::format_runs::{InlineContent};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -324,7 +325,7 @@ impl ExportLatexUseCase {
         uow: &dyn ExportLatexUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let elements = common::format_runs_query::synthesize_block_inline_elements(
+        let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
             &block.plain_text,
@@ -347,7 +348,7 @@ impl ExportLatexUseCase {
         uow: &dyn ExportLatexUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let elements = common::format_runs_query::synthesize_block_inline_elements(
+        let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
             &block.plain_text,

@@ -6,8 +6,9 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Frame, InlineContent, InlineElement, List, Root, Table, TableCell};
-use common::format_runs_query::synthesize_block_inline_elements;
+use common::entities::{Block, Frame, List, Root, Table, TableCell};
+use common::format_runs::{InlineContent, InlineSegment};
+use common::format_runs_query::inline_segments_for_block;
 use common::parser_tools::fragment_schema::{
     FragmentBlock, FragmentData, FragmentElement, FragmentList, FragmentTable, FragmentTableCell,
 };
@@ -228,7 +229,7 @@ impl ExtractFragmentUseCase {
                         block.text_length as usize
                     };
 
-                    let elements = synthesize_block_inline_elements(
+                    let elements = inline_segments_for_block(
                         &uow.store(),
                         block.id,
                         &block.plain_text,
@@ -306,7 +307,7 @@ impl ExtractFragmentUseCase {
                 block.text_length as usize
             };
 
-            let elements = synthesize_block_inline_elements(
+            let elements = inline_segments_for_block(
                 &uow.store(),
                 block.id,
                 &block.plain_text,
@@ -368,7 +369,7 @@ impl ExtractFragmentUseCase {
         uow: &dyn ExtractFragmentUnitOfWorkTrait,
         block: &Block,
     ) -> Result<(Vec<FragmentElement>, String)> {
-        let elements = synthesize_block_inline_elements(&uow.store(), block.id, &block.plain_text);
+        let elements = inline_segments_for_block(&uow.store(), block.id, &block.plain_text);
         Ok(extract_elements_in_range(
             &elements,
             0,
@@ -475,7 +476,7 @@ fn block_to_fragment_block(
 /// Extract elements within a character range [local_start, local_end) of a block.
 /// Returns the extracted FragmentElements and the concatenated plain text.
 fn extract_elements_in_range(
-    elements: &[InlineElement],
+    elements: &[InlineSegment],
     local_start: usize,
     local_end: usize,
 ) -> (Vec<FragmentElement>, String) {
@@ -516,7 +517,7 @@ fn extract_elements_in_range(
                 let chars: Vec<char> = s.chars().collect();
                 let slice: String = chars[take_start..take_end].iter().collect();
                 if !slice.is_empty() {
-                    let mut fe = FragmentElement::from_entity(elem);
+                    let mut fe = FragmentElement::from_segment(elem);
                     fe.content = InlineContent::Text(slice.clone());
                     result_elements.push(fe);
                     result_text.push_str(&slice);
@@ -525,7 +526,7 @@ fn extract_elements_in_range(
             InlineContent::Image { .. } => {
                 // Image is 1 char, include if in range
                 if take_start == 0 && take_end == 1 {
-                    result_elements.push(FragmentElement::from_entity(elem));
+                    result_elements.push(FragmentElement::from_segment(elem));
                     result_text.push('\u{FFFC}');
                 }
             }

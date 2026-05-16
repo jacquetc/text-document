@@ -11,7 +11,7 @@ use common::format_runs::{
     debug_assert_well_formed, logical_offset_to_byte, shift_images_for_delete,
     shift_images_for_insert, shift_runs_for_delete, shift_runs_for_insert,
 };
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -160,7 +160,6 @@ fn replace_in_block(
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
-    rebuild_block_inline_elements(&store, block.id, &new_plain);
     Ok(())
 }
 

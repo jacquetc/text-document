@@ -3,8 +3,9 @@ use crate::ExportMarkdownDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
+    Block, Document, Frame, List, ListStyle, Root, Table, TableCell,
 };
+use common::format_runs::{InlineContent, InlineSegment};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
 
@@ -258,7 +259,7 @@ impl ExportMarkdownUseCase {
         // Check if this is a code block
         if block.fmt_is_code_block == Some(true) {
             let lang = block.fmt_code_language.as_deref().unwrap_or("");
-            let elements = common::format_runs_query::synthesize_block_inline_elements(
+            let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
             &block.plain_text,
@@ -296,7 +297,7 @@ impl ExportMarkdownUseCase {
         }
 
         // Get inline elements
-        let elements = common::format_runs_query::synthesize_block_inline_elements(
+        let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
             &block.plain_text,
@@ -354,7 +355,7 @@ impl ExportMarkdownUseCase {
     }
 
     /// Render inline elements into markdown text with formatting.
-    fn render_inline_elements(&self, elements: &[InlineElement]) -> Result<String> {
+    fn render_inline_elements(&self, elements: &[InlineSegment]) -> Result<String> {
         let mut inline_md = String::new();
         for elem in elements {
             let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
@@ -489,7 +490,7 @@ impl ExportMarkdownUseCase {
         uow: &dyn ExportMarkdownUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let elements = common::format_runs_query::synthesize_block_inline_elements(
+        let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
             &block.plain_text,

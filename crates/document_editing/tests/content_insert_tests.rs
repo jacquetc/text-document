@@ -42,7 +42,7 @@ fn test_insert_markdown_simple_paragraph() -> Result<()> {
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
             if let Some(elem) = elem
-                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && t == "world"
             {
                 assert_eq!(elem.fmt_font_bold, Some(true));
@@ -214,7 +214,7 @@ fn test_insert_html_simple() -> Result<()> {
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
             if let Some(elem) = elem
-                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && t == "world"
             {
                 assert_eq!(elem.fmt_font_bold, Some(true));
@@ -354,7 +354,7 @@ fn test_insert_fragment_simple() -> Result<()> {
         let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
-            if let common::entities::InlineContent::Text(ref t) = elem.content
+            if let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && t.contains("bold text")
                 && elem.fmt_font_bold == Some(true)
             {
@@ -424,7 +424,7 @@ fn test_insert_markdown_code_block() -> Result<()> {
         let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
-            if let common::entities::InlineContent::Text(ref t) = elem.content
+            if let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && t.contains("fn main")
             {
                 assert_eq!(elem.fmt_font_family, Some("monospace".to_string()));
@@ -553,7 +553,7 @@ fn test_insert_html_single_paragraph_merges_inline() -> Result<()> {
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
             if let Some(elem) = elem
-                && let common::entities::InlineContent::Text(ref t) = elem.content
+                && let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && t == "beautiful"
             {
                 assert_eq!(elem.fmt_font_bold, Some(true));

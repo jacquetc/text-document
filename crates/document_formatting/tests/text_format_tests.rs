@@ -3,14 +3,14 @@
 extern crate text_document_formatting as document_formatting;
 
 use anyhow::Result;
-use common::entities::InlineContent;
+use common::format_runs::InlineContent;
 
 use document_formatting::document_formatting_controller;
 use document_formatting::{CharVerticalAlignment, SetTextFormatDto, UnderlineStyle};
 
 use test_harness::{
     FrameRelationshipField, UpdateBlockDto, block_controller, create_list, frame_controller,
-    get_block_ids, get_sorted_cells, inline_element_controller, insert_image, insert_table,
+    get_block_ids, get_sorted_cells, insert_image, insert_table,
     setup_with_text,
 };
 

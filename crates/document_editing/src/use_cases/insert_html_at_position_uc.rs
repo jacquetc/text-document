@@ -11,7 +11,7 @@ use common::format_runs::{
     FormatRun, coalesce_in_place, debug_assert_well_formed, logical_offset_to_byte,
     shift_images_for_insert, shift_runs_for_insert, splice_range, split_images_at, split_runs_at,
 };
-use common::format_runs_query::{drop_block_inline_elements, rebuild_block_inline_elements};
+
 use common::parser_tools::content_parser::{self, ParsedBlock, format_runs_from_spans};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
@@ -73,7 +73,6 @@ fn write_block_state(
             images_map.insert(block_id, images);
         }
     }
-    rebuild_block_inline_elements(store.as_ref(), block_id, plain_text);
 }
 
 fn parsed_block_payload(parsed: &ParsedBlock) -> (String, Vec<FormatRun>) {
@@ -287,7 +286,6 @@ fn execute_content_insert(
             uow.update_block_with_relationships(&updated_current)?;
             // The old inline_elements list for this block is now stale;
             // rebuild from the new (plain_text, runs, images).
-            drop_block_inline_elements(uow.store().as_ref(), current_block.id);
             (first_plain.clone(), first_runs_at_zero.clone(), Vec::new())
         } else if merge_first {
             let mut hp =
@@ -629,7 +627,6 @@ fn execute_content_insert(
             updated_current.fmt_background_color = parsed.background_color.clone();
             updated_current.updated_at = now;
             uow.update_block_with_relationships(&updated_current)?;
-            drop_block_inline_elements(uow.store().as_ref(), current_block.id);
             write_block_state(
                 uow,
                 current_block.id,

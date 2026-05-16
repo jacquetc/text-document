@@ -372,7 +372,7 @@ fn test_insert_formatted_text_replaces_selection() -> Result<()> {
     let mut found_bold_earth = false;
     for elem_id in &elem_ids {
         let elem = inline_element_controller::get(&db, elem_id)?.unwrap();
-        if let common::entities::InlineContent::Text(ref t) = elem.content
+        if let common::format_runs::InlineContent::Text(ref t) = elem.content
             && t.contains("Earth")
             && elem.fmt_font_bold == Some(true)
         {
@@ -475,7 +475,7 @@ fn test_insert_image_at_position_zero() -> Result<()> {
     let elements = test_harness::synth_first_block_elements(&db)?;
     let has_image = elements
         .iter()
-        .any(|e| matches!(e.content, common::entities::InlineContent::Image { .. }));
+        .any(|e| matches!(e.content, common::format_runs::InlineContent::Image { .. }));
     assert!(has_image, "Block should contain an image element");
 
     Ok(())

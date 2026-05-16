@@ -144,49 +144,6 @@ pub enum MarkerType {
     Checked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct InlineElement {
-    pub id: EntityId,
-    #[serde(with = "chrono::serde::ts_milliseconds")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    #[serde(with = "chrono::serde::ts_milliseconds")]
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub content: InlineContent,
-    pub fmt_font_family: Option<String>,
-    pub fmt_font_point_size: Option<i64>,
-    pub fmt_font_weight: Option<i64>,
-    pub fmt_font_bold: Option<bool>,
-    pub fmt_font_italic: Option<bool>,
-    pub fmt_font_underline: Option<bool>,
-    pub fmt_font_overline: Option<bool>,
-    pub fmt_font_strikeout: Option<bool>,
-    pub fmt_letter_spacing: Option<i64>,
-    pub fmt_word_spacing: Option<i64>,
-    pub fmt_anchor_href: Option<String>,
-    pub fmt_anchor_names: Vec<String>,
-    pub fmt_is_anchor: Option<bool>,
-    pub fmt_tooltip: Option<String>,
-    pub fmt_underline_style: Option<UnderlineStyle>,
-    pub fmt_vertical_alignment: Option<CharVerticalAlignment>,
-}
-
-impl HasId for InlineElement {
-    fn id(&self) -> EntityId {
-        self.id
-    }
-}
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-pub enum InlineContent {
-    #[default]
-    Empty,
-    Text(String),
-    Image {
-        name: String,
-        width: i64,
-        height: i64,
-        quality: i64,
-    },
-}
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum UnderlineStyle {
     #[default]

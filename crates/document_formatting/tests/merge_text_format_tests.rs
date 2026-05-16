@@ -4,7 +4,7 @@ extern crate text_document_formatting as document_formatting;
 
 use anyhow::Result;
 use common::database::db_context::DbContext;
-use common::entities::InlineContent;
+use common::format_runs::InlineContent;
 
 use document_formatting::document_formatting_controller;
 use document_formatting::{

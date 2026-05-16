@@ -12,7 +12,7 @@ use common::format_runs::{
     logical_offset_to_byte, shift_images_for_delete, shift_images_for_insert,
     shift_runs_for_delete, shift_runs_for_insert, splice_range,
 };
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
@@ -134,7 +134,6 @@ fn delete_range_in_block(
     updated_block.text_length -= positions_removed;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
-    rebuild_block_inline_elements(&store, block.id, &new_plain);
     Ok(positions_removed)
 }
 
@@ -196,7 +195,6 @@ fn insert_formatted_at(
         }
     }
 
-    rebuild_block_inline_elements(&store, block.id, &new_plain);
     Ok(())
 }
 
@@ -464,11 +462,6 @@ impl UndoRedoCommand for InsertFormattedTextUseCase {
                     .write()
                     .unwrap()
                     .insert(data.block_id, data.original_block_images.clone());
-                rebuild_block_inline_elements(
-                    &store,
-                    data.block_id,
-                    &data.original_block.plain_text,
-                );
 
                 let mut doc = uow
                     .get_document(&data.doc_id)?

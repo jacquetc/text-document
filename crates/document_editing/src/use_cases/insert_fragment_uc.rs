@@ -10,12 +10,12 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineElement, List, Root, Table, TableCell};
+use common::entities::{Block, Document, Frame, List, Root, Table, TableCell};
 use common::format_runs::{
-    FormatRun, ImageAnchor, coalesce_in_place, debug_assert_well_formed, format_runs_from_inline_elements,
-    logical_offset_to_byte, split_images_at, split_runs_at,
+    FormatRun, ImageAnchor, InlineSegment, coalesce_in_place, debug_assert_well_formed,
+    logical_offset_to_byte, split_images_at, split_runs_at, character_format_from_segment,
 };
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::parser_tools::fragment_schema::{FragmentBlock, FragmentData, FragmentTable};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
@@ -61,13 +61,71 @@ impl_cell_frame_creator!(dyn InsertFragmentUnitOfWorkTrait);
 /// Convert a `FragmentBlock` to the (plain_text, format_runs,
 /// block_images) representation expected by the store. The plain_text is
 /// copied verbatim; runs and images are derived from the block's
-/// `elements`, which serialize the legacy InlineElement model. Empty
+/// `elements`, which mirror the InlineSegment model. Empty
 /// elements collapse to nothing; Image elements become ImageAnchors at
 /// their running byte offset; Text elements emit FormatRuns over their
 /// UTF-8 byte range (with adjacent equal-format runs coalesced).
 fn frag_block_state(fb: &FragmentBlock) -> (Vec<FormatRun>, Vec<ImageAnchor>) {
-    let elements: Vec<InlineElement> = fb.elements.iter().map(|fe| fe.to_entity()).collect();
-    format_runs_from_inline_elements(&elements)
+    use common::format_runs::{InlineContent, ImageAnchor};
+
+    let mut runs: Vec<FormatRun> = Vec::new();
+    let mut images: Vec<ImageAnchor> = Vec::new();
+    let mut byte_offset: u32 = 0;
+
+    for elem in &fb.elements {
+        let fmt = character_format_from_segment(&InlineSegment {
+            content: elem.content.clone(),
+            fmt_font_family: elem.fmt_font_family.clone(),
+            fmt_font_point_size: elem.fmt_font_point_size,
+            fmt_font_weight: elem.fmt_font_weight,
+            fmt_font_bold: elem.fmt_font_bold,
+            fmt_font_italic: elem.fmt_font_italic,
+            fmt_font_underline: elem.fmt_font_underline,
+            fmt_font_overline: elem.fmt_font_overline,
+            fmt_font_strikeout: elem.fmt_font_strikeout,
+            fmt_letter_spacing: elem.fmt_letter_spacing,
+            fmt_word_spacing: elem.fmt_word_spacing,
+            fmt_anchor_href: elem.fmt_anchor_href.clone(),
+            fmt_anchor_names: elem.fmt_anchor_names.clone(),
+            fmt_is_anchor: elem.fmt_is_anchor,
+            fmt_tooltip: elem.fmt_tooltip.clone(),
+            fmt_underline_style: elem.fmt_underline_style.clone(),
+            fmt_vertical_alignment: elem.fmt_vertical_alignment.clone(),
+        });
+
+        match &elem.content {
+            InlineContent::Empty => {}
+            InlineContent::Text(s) => {
+                let len = s.len() as u32;
+                if len > 0 {
+                    runs.push(FormatRun {
+                        byte_start: byte_offset,
+                        byte_end: byte_offset + len,
+                        format: fmt,
+                    });
+                    byte_offset += len;
+                }
+            }
+            InlineContent::Image {
+                name,
+                width,
+                height,
+                quality,
+            } => {
+                images.push(ImageAnchor {
+                    byte_offset,
+                    name: name.clone(),
+                    width: *width,
+                    height: *height,
+                    quality: *quality,
+                    format: fmt,
+                });
+            }
+        }
+    }
+
+    coalesce_in_place(&mut runs);
+    (runs, images)
 }
 
 /// Write `format_runs` and `block_images` for `block_id`, then reverse-sync
@@ -97,7 +155,6 @@ fn write_block_state(
             images_map.insert(block_id, images);
         }
     }
-    rebuild_block_inline_elements(store.as_ref(), block_id, plain_text);
 }
 
 /// Clear all per-block state (format_runs + block_images) for a block

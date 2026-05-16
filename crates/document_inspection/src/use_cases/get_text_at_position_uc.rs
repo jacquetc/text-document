@@ -7,8 +7,9 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, TableCell};
-use common::format_runs_query::synthesize_block_inline_elements;
+use common::entities::{Block, Document, Frame, Root, TableCell};
+use common::format_runs::{InlineContent, synth_element_id};
+use common::format_runs_query::inline_segments_for_block;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait GetTextAtPositionUnitOfWorkFactoryTrait: Send + Sync {
@@ -121,20 +122,20 @@ impl GetTextAtPositionUseCase {
                 break;
             }
 
-            // Synthesize this block's elements from format_runs to find the first
+            // Synthesize this block's segments from format_runs to find the first
             // element ID and extract text.
-            let owned_elements =
-                synthesize_block_inline_elements(&uow.store(), block.id, &block.plain_text);
-            let elements: Vec<&InlineElement> = owned_elements.iter().collect();
+            let owned_segments =
+                inline_segments_for_block(&uow.store(), block.id, &block.plain_text);
 
             let mut current_char_offset: usize = 0;
+            let mut current_byte_offset: u32 = 0;
 
-            for elem in &elements {
+            for seg in &owned_segments {
                 if remaining == 0 {
                     break;
                 }
 
-                let elem_text = match &elem.content {
+                let elem_text = match &seg.content {
                     InlineContent::Text(s) => s.clone(),
                     InlineContent::Image { .. } => "\u{FFFC}".to_string(),
                     InlineContent::Empty => String::new(),
@@ -156,9 +157,17 @@ impl GetTextAtPositionUseCase {
                     remaining -= take;
 
                     if !found_first_element {
-                        first_element_id = elem.id;
+                        // Compute synthetic element ID from block_id and byte_start
+                        first_element_id = synth_element_id(block.id, current_byte_offset);
                         found_first_element = true;
                     }
+                }
+
+                // Advance byte offset (Text contributes its UTF-8 length, Image contributes 0)
+                match &seg.content {
+                    InlineContent::Text(s) => current_byte_offset += s.len() as u32,
+                    InlineContent::Image { .. } => {},
+                    InlineContent::Empty => {},
                 }
 
                 current_char_offset += elem_char_len;

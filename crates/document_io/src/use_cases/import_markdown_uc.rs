@@ -4,7 +4,7 @@ use crate::ImportMarkdownResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::entities::{Block, Document, Frame, FramePosition, List, Root, Table, TableCell};
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::long_operation::LongOperation;
 use common::parser_tools::content_parser::{
     ParsedElement, format_runs_from_spans, parse_markdown,
@@ -193,7 +193,6 @@ fn import_parsed_elements(
                         runs_map.remove(&created_block.id);
                     }
                 }
-                rebuild_block_inline_elements(uow.store().as_ref(), created_block.id, &plain_text);
 
                 // Handle list items
                 if let Some(ref list_style) = parsed_block.list_style {
@@ -289,11 +288,6 @@ fn import_parsed_elements(
                                 runs_map.remove(&created_block.id);
                             }
                         }
-                        rebuild_block_inline_elements(
-                            uow.store().as_ref(),
-                            created_block.id,
-                            &plain_text,
-                        );
 
                         // Update cell frame's child_order
                         let mut updated_cell_frame = created_cell_frame.clone();

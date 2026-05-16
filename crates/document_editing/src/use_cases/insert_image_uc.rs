@@ -1,4 +1,4 @@
-use super::editing_helpers::{find_block_at_position, find_element_at_offset};
+use super::editing_helpers::{find_block_at_position, find_segment_at_offset};
 use crate::InsertImageDto;
 use crate::InsertImageResultDto;
 use anyhow::{Result, anyhow};
@@ -6,9 +6,9 @@ use common::database::CommandUnitOfWork;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, Root};
-use common::format_runs::{ImageAnchor, synth_element_id};
-use common::format_runs_query::synthesize_block_inline_elements;
+use common::entities::{Block, Document, Frame, Root};
+use common::format_runs::{ImageAnchor, InlineContent, synth_element_id};
+use common::format_runs_query::inline_segments_for_block;
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -93,30 +93,30 @@ fn execute_insert_image(
     // Find block at position
     let (block, block_idx, offset) = find_block_at_position(&blocks, position)?;
 
-    // Synthesize the inline-element view of the target block from format_runs +
+    // Synthesize the inline-segment view of the target block from format_runs +
     // block_images. This is read-only — we use it to locate the byte offset
     // inside `block.plain_text` where the new image should be anchored.
-    let elements = synthesize_block_inline_elements(&uow.store(), block.id, &block.plain_text);
+    let segments = inline_segments_for_block(&uow.store(), block.id, &block.plain_text);
 
     // byte_offset = position inside `block.plain_text` where the new image is
     // anchored. Empty blocks anchor at 0. Otherwise we walk the synthesized
-    // elements: each Text contributes its UTF-8 byte length; Image / Empty
+    // segments: each Text contributes its UTF-8 byte length; Image / Empty
     // contribute zero.
-    let byte_offset: u32 = if elements.is_empty() {
+    let byte_offset: u32 = if segments.is_empty() {
         0
     } else {
-        let (element, elem_idx, elem_offset) = find_element_at_offset(&elements, offset)?;
+        let (segment, seg_idx, seg_offset) = find_segment_at_offset(&segments, offset)?;
         let mut bo: u32 = 0;
-        for prev in &elements[..elem_idx] {
+        for prev in &segments[..seg_idx] {
             if let InlineContent::Text(s) = &prev.content {
                 bo += s.len() as u32;
             }
         }
-        match &element.content {
+        match &segment.content {
             InlineContent::Text(s) => {
                 let split_byte = s
                     .char_indices()
-                    .nth(elem_offset as usize)
+                    .nth(seg_offset as usize)
                     .map(|(b, _)| b)
                     .unwrap_or(s.len());
                 bo + split_byte as u32

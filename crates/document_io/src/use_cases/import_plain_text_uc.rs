@@ -2,7 +2,7 @@ use crate::ImportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::entities::{Block, Document, Frame, Root};
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait ImportPlainTextUnitOfWorkFactoryTrait: Send + Sync {
@@ -80,14 +80,6 @@ impl ImportPlainTextUseCase {
 
             // format_runs / block_images stay empty for plain-text import: an
             // absent or empty run vector means "default format everywhere".
-            // Reverse-sync inline_elements so legacy readers/writers see a
-            // consistent view (one Text element per non-empty line, Empty
-            // for empty lines).
-            rebuild_block_inline_elements(
-                uow.store().as_ref(),
-                created_block.id,
-                line,
-            );
 
             block_ids.push(created_block.id as i64);
             total_chars += line_chars;

@@ -568,7 +568,7 @@ fn test_set_text_format_cross_block() -> Result<()> {
     for block_id in &block_ids {
         let elements = test_harness::synth_block_elements(&db_context, *block_id)?;
         for elem in &elements {
-            if let common::entities::InlineContent::Text(ref t) = elem.content
+            if let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && !t.is_empty()
             {
                 assert_eq!(

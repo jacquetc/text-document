@@ -1,8 +1,8 @@
 use anyhow::{Result, anyhow};
 use common::database::hashmap_store::HashMapStore;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
-use common::entities::{Block, Frame, InlineContent, InlineElement};
-use common::format_runs_query::rebuild_block_inline_elements;
+use common::entities::{Block, Frame};
+use common::format_runs::{InlineContent, InlineSegment};
 use common::types::EntityId;
 use std::sync::Arc;
 
@@ -72,7 +72,6 @@ pub fn create_cell_frame(
     };
     let created_block = uow.cfc_create_block(&block, created_frame.id, -1)?;
 
-    rebuild_block_inline_elements(uow.cfc_store().as_ref(), created_block.id, "");
 
     let mut updated_frame = created_frame.clone();
     updated_frame.child_order = vec![created_block.id as i64];
@@ -195,33 +194,33 @@ pub fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block,
 /// Find the inline element at a given offset within a block, and compute
 /// the offset within that element.
 ///
-/// Returns `(element, index_in_list, offset_within_element)`.
-pub fn find_element_at_offset(
-    elements: &[InlineElement],
+/// Returns `(segment, index_in_list, offset_within_segment)`.
+pub fn find_segment_at_offset(
+    segments: &[InlineSegment],
     offset: i64,
-) -> Result<(InlineElement, usize, i64)> {
+) -> Result<(InlineSegment, usize, i64)> {
     let mut running = 0i64;
-    for (i, elem) in elements.iter().enumerate() {
-        let elem_len = match &elem.content {
+    for (i, seg) in segments.iter().enumerate() {
+        let seg_len = match &seg.content {
             InlineContent::Text(s) => s.chars().count() as i64,
             InlineContent::Image { .. } => 1,
             InlineContent::Empty => 0,
         };
-        if offset <= running + elem_len {
-            return Ok((elem.clone(), i, offset - running));
+        if offset <= running + seg_len {
+            return Ok((seg.clone(), i, offset - running));
         }
-        running += elem_len;
+        running += seg_len;
     }
-    // Fall back to last element at its end
-    if let Some(elem) = elements.last() {
-        let elem_len = match &elem.content {
+    // Fall back to last segment at its end
+    if let Some(seg) = segments.last() {
+        let seg_len = match &seg.content {
             InlineContent::Text(s) => s.chars().count() as i64,
             InlineContent::Image { .. } => 1,
             InlineContent::Empty => 0,
         };
-        return Ok((elem.clone(), elements.len() - 1, elem_len));
+        return Ok((seg.clone(), segments.len() - 1, seg_len));
     }
-    Err(anyhow!("No inline elements found in block"))
+    Err(anyhow!("No inline segments found in block"))
 }
 
 /// Collect all block IDs in document order by traversing child_order recursively.

@@ -11,7 +11,7 @@ use common::entities::{Block, Document, Frame, Root, TableCell};
 use common::format_runs::{
     debug_assert_well_formed, logical_offset_to_byte, split_images_at, split_runs_at,
 };
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -140,7 +140,6 @@ fn execute_insert_block(
         .write()
         .unwrap()
         .insert(current_block.id, left_images);
-    rebuild_block_inline_elements(&store, current_block.id, &text_before);
 
     // Create the "after" block.
     let new_block_position = current_block.document_position + updated_current.text_length + 1;
@@ -211,8 +210,7 @@ fn execute_insert_block(
         .write()
         .unwrap()
         .insert(created_block.id, right_images);
-    let created_plain = created_block.plain_text.clone();
-    rebuild_block_inline_elements(&store, created_block.id, &created_plain);
+    let _created_plain = created_block.plain_text.clone();
 
     let frame = uow
         .get_frame(&owner_frame_id)?

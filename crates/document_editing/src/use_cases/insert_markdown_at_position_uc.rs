@@ -11,7 +11,7 @@ use common::format_runs::{
     FormatRun, coalesce_in_place, debug_assert_well_formed, logical_offset_to_byte,
     shift_images_for_insert, shift_runs_for_insert, splice_range, split_images_at, split_runs_at,
 };
-use common::format_runs_query::rebuild_block_inline_elements;
+
 use common::parser_tools::content_parser::{self, ParsedBlock, format_runs_from_spans};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::snapshot::EntityTreeSnapshot;
@@ -72,7 +72,6 @@ fn write_block_state(
             images_map.insert(block_id, images);
         }
     }
-    rebuild_block_inline_elements(store.as_ref(), block_id, plain_text);
 }
 
 /// Compute (plain_text, runs_at_zero) for the inline content of `parsed`,
