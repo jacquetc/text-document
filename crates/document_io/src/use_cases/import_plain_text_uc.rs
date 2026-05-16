@@ -1,6 +1,7 @@
 use crate::ImportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{rope_append_block, rope_reset};
 use common::entities::{Block, Document, Frame, Root};
 
 use common::types::{EntityId, ROOT_ENTITY_ID};
@@ -59,6 +60,10 @@ impl ImportPlainTextUseCase {
         let new_frame = Frame::default();
         let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
+        // Under rope_backend, reset the rope+block_offsets before
+        // appending the new content. No-op under default.
+        rope_reset(&uow.store());
+
         let normalized = dto.plain_text.replace("\r\n", "\n").replace('\r', "\n");
         let lines: Vec<&str> = normalized.split('\n').collect();
         let num_blocks = lines.len() as i64;
@@ -80,6 +85,12 @@ impl ImportPlainTextUseCase {
 
             // format_runs / block_images stay empty for plain-text import: an
             // absent or empty run vector means "default format everywhere".
+
+            // Mirror the block's text into the global rope (no-op under
+            // default; real append under rope_backend). The newline
+            // separator goes between blocks, not after the last one.
+            let with_separator = i < lines.len() - 1;
+            rope_append_block(&uow.store(), created_block.id, line, with_separator);
 
             block_ids.push(created_block.id as i64);
             total_chars += line_chars;

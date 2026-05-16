@@ -3,6 +3,7 @@
 pub mod block_offset_index;
 pub mod db_context;
 pub mod hashmap_store;
+pub mod rope_helpers;
 pub mod rope_store;
 pub mod transactions;
 
