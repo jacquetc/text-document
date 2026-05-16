@@ -3,7 +3,7 @@
 // the jn_list_from_block_list table and the `hydrate()` re-population
 // step are gone.
 
-use crate::database::hashmap_store::HashMapStore;
+use crate::database::Store;
 use crate::entities::Block;
 use crate::error::RepositoryError;
 use crate::types::EntityId;
@@ -26,11 +26,11 @@ fn write_field(block: &mut Block, field: &BlockRelationshipField, ids: Vec<Entit
 }
 
 pub struct BlockHashMapTable<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> BlockHashMapTable<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }
@@ -307,11 +307,11 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
 }
 
 pub struct BlockHashMapTableRO<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> BlockHashMapTableRO<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }

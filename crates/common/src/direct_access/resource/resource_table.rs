@@ -3,7 +3,7 @@
 // relationships; backward cleanup on remove iterates Documents and
 // strips removed ids from `doc.resources`.
 
-use crate::database::hashmap_store::HashMapStore;
+use crate::database::Store;
 use crate::entities::Resource;
 use crate::error::RepositoryError;
 use crate::types::EntityId;
@@ -12,11 +12,11 @@ use super::resource_repository::ResourceTable;
 use super::resource_repository::ResourceTableRO;
 
 pub struct ResourceHashMapTable<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> ResourceHashMapTable<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }
@@ -131,11 +131,11 @@ impl<'a> ResourceTable for ResourceHashMapTable<'a> {
 }
 
 pub struct ResourceHashMapTableRO<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> ResourceHashMapTableRO<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }

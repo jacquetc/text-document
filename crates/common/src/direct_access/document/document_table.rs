@@ -4,7 +4,7 @@
 // jn_*_from_document_* tables and the `hydrate()` re-population step
 // are gone.
 
-use crate::database::hashmap_store::HashMapStore;
+use crate::database::Store;
 use crate::entities::Document;
 use crate::error::RepositoryError;
 use crate::types::EntityId;
@@ -35,11 +35,11 @@ fn write_field(doc: &mut Document, field: &DocumentRelationshipField, ids: Vec<E
 }
 
 pub struct DocumentHashMapTable<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> DocumentHashMapTable<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }
@@ -297,11 +297,11 @@ impl<'a> DocumentTable for DocumentHashMapTable<'a> {
 }
 
 pub struct DocumentHashMapTableRO<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> DocumentHashMapTableRO<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }

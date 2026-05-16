@@ -3,7 +3,7 @@
 // truth; the previous jn_document_from_root_document table and the
 // `hydrate()` re-population step are gone.
 
-use crate::database::hashmap_store::HashMapStore;
+use crate::database::Store;
 use crate::entities::Root;
 use crate::error::RepositoryError;
 use crate::types::EntityId;
@@ -49,7 +49,7 @@ fn write_field(root: &mut Root, field: &RootRelationshipField, ids: Vec<EntityId
 
 /// One-to-one constraint: no other Root may reference the same Document.
 fn check_one_to_one(
-    store: &HashMapStore,
+    store: &Store,
     self_id: EntityId,
     document_id: EntityId,
 ) -> Result<(), RepositoryError> {
@@ -69,11 +69,11 @@ fn check_one_to_one(
 }
 
 pub struct RootHashMapTable<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> RootHashMapTable<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }
@@ -332,11 +332,11 @@ impl<'a> RootTable for RootHashMapTable<'a> {
 }
 
 pub struct RootHashMapTableRO<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> RootHashMapTableRO<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }

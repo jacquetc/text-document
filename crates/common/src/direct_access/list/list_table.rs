@@ -3,7 +3,7 @@
 // backward cleanup on remove iterates Blocks (clear `block.list`) and
 // Documents (strip from `doc.lists`) directly.
 
-use crate::database::hashmap_store::HashMapStore;
+use crate::database::Store;
 use crate::entities::List;
 use crate::error::RepositoryError;
 use crate::types::EntityId;
@@ -12,11 +12,11 @@ use super::list_repository::ListTable;
 use super::list_repository::ListTableRO;
 
 pub struct ListHashMapTable<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> ListHashMapTable<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }
@@ -148,11 +148,11 @@ impl<'a> ListTable for ListHashMapTable<'a> {
 }
 
 pub struct ListHashMapTableRO<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> ListHashMapTableRO<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }

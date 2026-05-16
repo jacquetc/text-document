@@ -3,7 +3,7 @@
 // `table` are the source of truth; the three jn_*_from_frame_* tables
 // and the `hydrate()` re-population step are gone.
 
-use crate::database::hashmap_store::HashMapStore;
+use crate::database::Store;
 use crate::entities::Frame;
 use crate::error::RepositoryError;
 use crate::types::EntityId;
@@ -32,11 +32,11 @@ fn write_field(frame: &mut Frame, field: &FrameRelationshipField, ids: Vec<Entit
 }
 
 pub struct FrameHashMapTable<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> FrameHashMapTable<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }
@@ -334,11 +334,11 @@ impl<'a> FrameTable for FrameHashMapTable<'a> {
 }
 
 pub struct FrameHashMapTableRO<'a> {
-    store: &'a HashMapStore,
+    store: &'a Store,
 }
 
 impl<'a> FrameHashMapTableRO<'a> {
-    pub fn new(store: &'a HashMapStore) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self { store }
     }
 }
