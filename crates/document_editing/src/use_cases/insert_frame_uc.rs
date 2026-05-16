@@ -2,6 +2,7 @@ use crate::InsertFrameDto;
 use crate::InsertFrameResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{recompute_all_frame_byte_ranges, rope_append_empty_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -183,6 +184,21 @@ fn execute_insert_frame(
     updated_doc.block_count += 1;
     updated_doc.updated_at = now;
     uow.update_document(&updated_doc)?;
+
+    // Plan §1.6: mirror to rope. Top-level (parent=None) frames
+    // append at rope end with a `\n` boundary; the new empty block is
+    // registered in block_offsets so subsequent edits can find it.
+    //
+    // Nested (parent=Some) frames are NOT mirrored here — their
+    // position depends on parent.child_order interleaving with sibling
+    // blocks/tables/frames. Sub-frame insertion within a populated
+    // parent is currently a follow-up; this matches the pre-existing
+    // behavior where insert_frame_uc only populated the entity tree.
+    // No-op under default backend.
+    if parent_frame_id.is_none() {
+        rope_append_empty_block(&uow.store(), created_block.id);
+    }
+    recompute_all_frame_byte_ranges(&uow.store());
 
     Ok((
         InsertFrameResultDto {
