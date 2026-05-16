@@ -65,36 +65,93 @@ impl RopeStore {
     }
 
     /// O(1) snapshot of the entire store (rope is Arc-shared, all
-    /// `im::HashMap`s are HAMT-shared).
+    /// `im::HashMap`s are HAMT-shared; `BlockOffsetIndex` is a small
+    /// `Vec` cloned outright).
     pub fn snapshot(&self) -> RopeStoreSnapshot {
-        unimplemented!("RopeStore::snapshot — Phase 2 step 2")
+        RopeStoreSnapshot {
+            rope: self.rope.read().unwrap().clone(),
+            roots: self.roots.read().unwrap().clone(),
+            documents: self.documents.read().unwrap().clone(),
+            frames: self.frames.read().unwrap().clone(),
+            blocks: self.blocks.read().unwrap().clone(),
+            lists: self.lists.read().unwrap().clone(),
+            resources: self.resources.read().unwrap().clone(),
+            tables: self.tables.read().unwrap().clone(),
+            table_cells: self.table_cells.read().unwrap().clone(),
+            format_runs: self.format_runs.read().unwrap().clone(),
+            block_images: self.block_images.read().unwrap().clone(),
+            block_offsets: self.block_offsets.read().unwrap().clone(),
+            counters: self.counters.read().unwrap().clone(),
+        }
     }
 
-    /// Restore from a snapshot (overwrites counters — savepoint semantic).
-    pub fn restore(&self, _snap: &RopeStoreSnapshot) {
-        unimplemented!("RopeStore::restore — Phase 2 step 2")
+    /// Restore from a snapshot. Overwrites counters too — used for
+    /// transaction rollback (`Drop` of an uncommitted write txn).
+    pub fn restore(&self, snap: &RopeStoreSnapshot) {
+        *self.rope.write().unwrap() = snap.rope.clone();
+        *self.roots.write().unwrap() = snap.roots.clone();
+        *self.documents.write().unwrap() = snap.documents.clone();
+        *self.frames.write().unwrap() = snap.frames.clone();
+        *self.blocks.write().unwrap() = snap.blocks.clone();
+        *self.lists.write().unwrap() = snap.lists.clone();
+        *self.resources.write().unwrap() = snap.resources.clone();
+        *self.tables.write().unwrap() = snap.tables.clone();
+        *self.table_cells.write().unwrap() = snap.table_cells.clone();
+        *self.format_runs.write().unwrap() = snap.format_runs.clone();
+        *self.block_images.write().unwrap() = snap.block_images.clone();
+        *self.block_offsets.write().unwrap() = snap.block_offsets.clone();
+        *self.counters.write().unwrap() = snap.counters.clone();
     }
 
-    /// Restore everything *except* counters (undo semantic — IDs must
-    /// remain monotonically increasing across undo/redo cycles).
-    pub fn restore_without_counters(&self, _snap: &RopeStoreSnapshot) {
-        unimplemented!("RopeStore::restore_without_counters — Phase 2 step 2")
+    /// Restore everything *except* counters — used for undo, where IDs
+    /// must remain monotonically increasing across undo/redo cycles.
+    pub fn restore_without_counters(&self, snap: &RopeStoreSnapshot) {
+        *self.rope.write().unwrap() = snap.rope.clone();
+        *self.roots.write().unwrap() = snap.roots.clone();
+        *self.documents.write().unwrap() = snap.documents.clone();
+        *self.frames.write().unwrap() = snap.frames.clone();
+        *self.blocks.write().unwrap() = snap.blocks.clone();
+        *self.lists.write().unwrap() = snap.lists.clone();
+        *self.resources.write().unwrap() = snap.resources.clone();
+        *self.tables.write().unwrap() = snap.tables.clone();
+        *self.table_cells.write().unwrap() = snap.table_cells.clone();
+        *self.format_runs.write().unwrap() = snap.format_runs.clone();
+        *self.block_images.write().unwrap() = snap.block_images.clone();
+        *self.block_offsets.write().unwrap() = snap.block_offsets.clone();
+        // counters intentionally not restored
     }
 
     pub fn create_savepoint(&self) -> u64 {
-        unimplemented!("RopeStore::create_savepoint — Phase 2 step 2")
+        let snap = self.snapshot();
+        let mut id_counter = self.next_savepoint_id.write().unwrap();
+        let id = *id_counter;
+        *id_counter += 1;
+        self.savepoints.write().unwrap().insert(id, snap);
+        id
     }
 
-    pub fn restore_savepoint(&self, _savepoint_id: u64) {
-        unimplemented!("RopeStore::restore_savepoint — Phase 2 step 2")
+    pub fn restore_savepoint(&self, savepoint_id: u64) {
+        let snap = self
+            .savepoints
+            .read()
+            .unwrap()
+            .get(&savepoint_id)
+            .expect("savepoint not found")
+            .clone();
+        self.restore(&snap);
     }
 
-    pub fn discard_savepoint(&self, _savepoint_id: u64) {
-        unimplemented!("RopeStore::discard_savepoint — Phase 2 step 2")
+    pub fn discard_savepoint(&self, savepoint_id: u64) {
+        self.savepoints.write().unwrap().remove(&savepoint_id);
     }
 
-    pub(crate) fn next_id(&self, _entity_name: &str) -> EntityId {
-        unimplemented!("RopeStore::next_id — Phase 2 step 2")
+    /// Get-and-increment counter for an entity type.
+    pub(crate) fn next_id(&self, entity_name: &str) -> EntityId {
+        let mut counters = self.counters.write().unwrap();
+        let counter = counters.entry(entity_name.to_string()).or_insert(1);
+        let id = *counter;
+        *counter += 1;
+        id
     }
 
     /// Type-erased store snapshot (for the generic undo path).

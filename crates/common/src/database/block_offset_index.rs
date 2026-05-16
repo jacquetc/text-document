@@ -13,9 +13,11 @@ use im::HashMap;
 ///
 /// Each block extends from its `byte_start` to the next entry's
 /// `byte_start` (or the rope's end for the last block).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockOffsetIndex {
-    pub(crate) entries: Vec<(EntityId, u32)>,
+    // Public so step-2 snapshot tests can seed entries directly.
+    // Step 3 introduces real mutation API and may tighten visibility.
+    pub entries: Vec<(EntityId, u32)>,
 }
 
 impl BlockOffsetIndex {

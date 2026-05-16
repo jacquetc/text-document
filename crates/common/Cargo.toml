@@ -34,6 +34,7 @@ ego-tree = "0.11.0"
 ropey = "1.6"
 
 [dev-dependencies]
+proptest = "1"
 
 [lints]
 workspace = true
