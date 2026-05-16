@@ -134,6 +134,11 @@ fn execute_remove_table(
         uow.remove_frame(&anchor_id)?;
     }
 
+    // Mirror to rope: remove the TableAnchor sentinel BEFORE removing
+    // the table entity (the helper looks the anchor up by table_id).
+    // No-op under default backend.
+    common::database::rope_helpers::rope_remove_table_anchor(&uow.store(), table_id);
+
     // Remove the table (cascade removes TableCells)
     uow.remove_table(&table_id)?;
 

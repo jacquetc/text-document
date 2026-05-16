@@ -217,6 +217,66 @@ fn cross_block_delete_merges_in_rope() {
 }
 
 #[test]
+fn insert_table_inserts_object_replacement_sentinel_in_rope() {
+    // Three-block doc; insert a 2x2 table between block 1 and block 2.
+    let doc = TextDocument::new();
+    doc.set_plain_text("alpha\nbeta\ngamma").unwrap();
+    // Layout in rope: "alpha\nbeta\ngamma" (16 bytes)
+    //                 ^0    ^6   ^11
+    // Insert table at cursor position 6 (start of "beta"). With
+    // offset == 0, the table goes BEFORE "beta".
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(2, 2).unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    // Expected: "alpha\n\u{FFFC}\nbeta\ngamma"
+    assert_eq!(rope.to_string(), "alpha\n\u{FFFC}\nbeta\ngamma");
+
+    let offsets = store.block_offsets.read().unwrap();
+    // 3 real blocks + 1 TableAnchor = 4 entries
+    assert_eq!(offsets.entries.len(), 4);
+    // Entry order: alpha-block, TableAnchor, beta-block, gamma-block
+    assert!(offsets.entries[0].0.is_block());
+    assert!(offsets.entries[1].0.as_table_anchor().is_some());
+    assert!(offsets.entries[2].0.is_block());
+    assert!(offsets.entries[3].0.is_block());
+    // Byte starts: 0, 6 (alpha\n), 10 (alpha\n\u{FFFC}), 15
+    assert_eq!(offsets.entries[0].1, 0);
+    assert_eq!(offsets.entries[1].1, 6);
+    assert_eq!(offsets.entries[2].1, 10);
+    assert_eq!(offsets.entries[3].1, 15);
+}
+
+#[test]
+fn remove_table_strips_sentinel_from_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("alpha\nbeta").unwrap();
+    let cursor = doc.cursor_at(6);
+    let table = cursor.insert_table(1, 1).unwrap();
+    let table_id = table.id();
+
+    // Verify the sentinel landed.
+    {
+        let store = doc.rope_store_for_test();
+        let rope = store.rope.read().unwrap();
+        assert!(rope.to_string().contains('\u{FFFC}'));
+    }
+
+    // Remove via cursor.
+    let c2 = doc.cursor_at(0);
+    c2.remove_table(table_id).unwrap();
+
+    // Rope should be back to "alpha\nbeta".
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert_eq!(rope.to_string(), "alpha\nbeta");
+    let offsets = store.block_offsets.read().unwrap();
+    assert_eq!(offsets.entries.len(), 2);
+    assert!(offsets.entries.iter().all(|(m, _)| m.is_block()));
+}
+
+#[test]
 fn set_html_table_cells_not_in_main_rope() {
     // Step 5.5 will properly add cell content to separate byte ranges.
     // For now, top-level prose is in the rope; cell-internal blocks

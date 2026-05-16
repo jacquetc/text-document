@@ -2,6 +2,7 @@ use crate::InsertTableDto;
 use crate::InsertTableResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::rope_insert_table_anchor;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -89,13 +90,19 @@ fn execute_insert_table(
     // Resolve selection: use min position, delete selection if any
     let insert_pos = dto.position.min(dto.anchor);
 
-    // Find the frame containing the insertion position
-    let (parent_frame_id, child_order_insert_idx) = if all_blocks.is_empty() {
+    // Find the frame containing the insertion position. Also remember
+    // the cursor-adjacent block id (None for empty docs) so the rope
+    // mirror knows where to place the U+FFFC sentinel.
+    let (parent_frame_id, child_order_insert_idx, rope_anchor): (
+        EntityId,
+        usize,
+        Option<(EntityId, bool)>,
+    ) = if all_blocks.is_empty() {
         // Empty document — use the first frame
         let first_frame_id = frame_ids
             .first()
             .ok_or_else(|| anyhow!("Document has no frames"))?;
-        (*first_frame_id, 0usize)
+        (*first_frame_id, 0usize, None)
     } else {
         let (target_block, _, offset) = find_block_at_position(&all_blocks, insert_pos)?;
         // Find which frame owns this block
@@ -113,8 +120,13 @@ fn execute_insert_table(
         }
         // When at the very start of the block (offset == 0), place the
         // table before it so the table can be the first flow element.
-        let after = if offset > 0 { 1 } else { 0 };
-        (found_frame_id, found_block_idx + after)
+        let after = offset > 0;
+        let after_idx = if after { 1 } else { 0 };
+        (
+            found_frame_id,
+            found_block_idx + after_idx,
+            Some((target_block.id, after)),
+        )
     };
 
     // 1. Create the Table entity (owned by Document)
@@ -198,6 +210,15 @@ fn execute_insert_table(
         .insert(idx, -(created_anchor.id as i64));
     updated_parent.updated_at = now;
     uow.update_frame(&updated_parent)?;
+
+    // Mirror the table-anchor into the global rope (no-op under
+    // default backend). Inserts a U+FFFC sentinel + boundary newline,
+    // registers a TableAnchor(table_id) marker in the offset index.
+    // Cell-internal content stays in Block.plain_text for now —
+    // plan §1.6's Frame.byte_range model is a follow-up commit.
+    if let Some((target_block_id, after)) = rope_anchor {
+        rope_insert_table_anchor(&uow.store(), created_table.id, target_block_id, after);
+    }
 
     // 4. Assign document_position to all cell blocks in row-major order
     // The table's blocks start at insert_pos, each cell block gets 1 position

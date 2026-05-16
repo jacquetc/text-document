@@ -261,6 +261,167 @@ pub fn rope_merge_block_range(
     }
 }
 
+/// Insert a U+FFFC OBJECT REPLACEMENT CHARACTER sentinel in the rope
+/// at the table-anchor position, registering a `TableAnchor(table_id)`
+/// marker in the offset index (plan §1.6).
+///
+/// `target_block_id` is the block in the parent frame that the table
+/// is adjacent to. `after` controls whether the table goes BEFORE
+/// (`after = false`) or AFTER the target block.
+///
+/// The 3-byte sentinel is paired with an inter-marker `\n`:
+/// - `after = false`: inserts `\u{FFFC}\n` at `target.byte_start`
+/// - `after = true`, target is NOT the last entry: inserts
+///   `\u{FFFC}\n` at `target.byte_end` (between target's trailing
+///   `\n` and the next entry)
+/// - `after = true`, target IS the last entry: inserts `\n\u{FFFC}`
+///   at `target.byte_end` (rope now ends with the sentinel)
+///
+/// NOTE: cell-internal content is not yet routed through the rope.
+/// Cells remain in `Block.plain_text` until a follow-up commit adds
+/// the `Frame.byte_range` model from plan §1.6. The rope reflects
+/// table *presence* (3-byte sentinel) only.
+///
+/// No-op if `target_block_id` is not in the index.
+#[allow(unused_variables)]
+pub fn rope_insert_table_anchor(
+    store: &Store,
+    table_id: EntityId,
+    target_block_id: EntityId,
+    after: bool,
+) {
+    #[cfg(feature = "rope_backend")]
+    {
+        const SENTINEL: &str = "\u{FFFC}"; // 3 bytes
+        const SENTINEL_BYTES: u32 = 3;
+
+        let (insert_pos, target_idx, target_is_last) = {
+            let offsets = store.block_offsets.read().unwrap();
+            let target_marker = OffsetMarker::Block(target_block_id);
+            let Some((start, end)) = offsets.range_of(target_marker) else {
+                return;
+            };
+            let idx = offsets
+                .entries
+                .iter()
+                .position(|(m, _)| *m == target_marker)
+                .unwrap();
+            let is_last = idx + 1 == offsets.entries.len();
+            let pos = if after { end } else { start };
+            (pos, idx, is_last)
+        };
+
+        // Insertion strategy:
+        let (rope_inserted, marker_byte_start, new_entry_pos, shift_threshold, shift_delta) =
+            if !after {
+                // Before target: "\u{FFFC}\n" at target.byte_start
+                ("\u{FFFC}\n", insert_pos, target_idx, insert_pos, 4i32)
+            } else if !target_is_last {
+                // After target, with following entries: "\u{FFFC}\n"
+                // at target.byte_end. The TableAnchor sits where the
+                // next block USED to start; that following entry
+                // shifts by 4.
+                (
+                    "\u{FFFC}\n",
+                    insert_pos,
+                    target_idx + 1,
+                    insert_pos,
+                    4i32,
+                )
+            } else {
+                // After target which is last: "\n\u{FFFC}" appended.
+                // TableAnchor's byte_start sits 1 past the original
+                // total (after the new `\n`).
+                ("\n\u{FFFC}", insert_pos + 1, target_idx + 1, insert_pos, 4i32)
+            };
+
+        // 1. Splice the literal bytes into the rope.
+        {
+            let mut rope = store.rope.write().unwrap();
+            let char_idx = rope.byte_to_char(insert_pos as usize);
+            rope.insert(char_idx, rope_inserted);
+        }
+
+        // 2. Shift entries past the insertion point. Use shift_after
+        //    BEFORE inserting our new entry so we don't double-shift.
+        store
+            .block_offsets
+            .write()
+            .unwrap()
+            .shift_after(shift_threshold, shift_delta);
+
+        // 3. Register the TableAnchor at the resolved byte position
+        //    and the resolved Vec position.
+        store.block_offsets.write().unwrap().insert_at(
+            new_entry_pos,
+            OffsetMarker::TableAnchor(table_id),
+            marker_byte_start,
+        );
+
+        // Note: SENTINEL_BYTES is part of `shift_delta` (3 for the
+        // sentinel + 1 for the `\n`).
+        let _ = SENTINEL;
+        let _ = SENTINEL_BYTES;
+    }
+}
+
+/// Remove a TableAnchor sentinel from the rope, undoing the effect
+/// of `rope_insert_table_anchor`. Looks up the anchor's byte range
+/// (always 3 bytes for the U+FFFC plus 1 byte of inter-marker `\n`
+/// either before or after, depending on what's adjacent), removes
+/// those 4 bytes from the rope, drops the entry, shifts trailing
+/// entries by -4.
+///
+/// No-op if no TableAnchor for `table_id` exists.
+#[allow(unused_variables)]
+pub fn rope_remove_table_anchor(store: &Store, table_id: EntityId) {
+    #[cfg(feature = "rope_backend")]
+    {
+        let anchor_marker = OffsetMarker::TableAnchor(table_id);
+        let (anchor_byte_start, anchor_idx, anchor_is_last, has_predecessor) = {
+            let offsets = store.block_offsets.read().unwrap();
+            let Some((start, _end)) = offsets.range_of(anchor_marker) else {
+                return;
+            };
+            let idx = offsets
+                .entries
+                .iter()
+                .position(|(m, _)| *m == anchor_marker)
+                .unwrap();
+            let is_last = idx + 1 == offsets.entries.len();
+            let has_pred = idx > 0;
+            (start, idx, is_last, has_pred)
+        };
+
+        // Symmetric to insert_table_anchor. The 4 bytes to remove are:
+        // - if anchor is last: [byte_start - 1 .. byte_start + 3) — the
+        //   preceding `\n` + the 3-byte sentinel
+        // - otherwise: [byte_start .. byte_start + 4) — the sentinel
+        //   + the following `\n`
+        let (remove_start, remove_end) = if anchor_is_last && has_predecessor {
+            (anchor_byte_start - 1, anchor_byte_start + 3)
+        } else {
+            (anchor_byte_start, anchor_byte_start + 4)
+        };
+
+        {
+            let mut rope = store.rope.write().unwrap();
+            let char_start = rope.byte_to_char(remove_start as usize);
+            let char_end = rope.byte_to_char(remove_end as usize);
+            rope.remove(char_start..char_end);
+        }
+        {
+            let mut offsets = store.block_offsets.write().unwrap();
+            offsets.entries.remove(anchor_idx);
+        }
+        store
+            .block_offsets
+            .write()
+            .unwrap()
+            .shift_after(remove_start, -4);
+    }
+}
+
 /// Delete bytes `[byte_start_in_block..byte_end_in_block)` from inside
 /// the block identified by `block_id`. Shifts subsequent block offsets
 /// by the deleted byte length. No-op for blocks not in the index.
