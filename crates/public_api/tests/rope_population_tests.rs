@@ -363,3 +363,95 @@ fn set_html_table_cells_not_in_main_rope() {
     // global rope until step 5.5.
     assert_eq!(rope.to_string(), "before\nafter");
 }
+
+/// Phase 2 step 5.6b: pasting an inline-only fragment (the
+/// "copy text from one part, paste into another" path) mirrors the
+/// splice into the rope.
+#[test]
+fn paste_inline_fragment_mirrors_to_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world").unwrap();
+
+    // Select "world" (char positions 6..11) and copy.
+    let select = doc.cursor_at(6);
+    select.move_position(
+        text_document::MoveOperation::Right,
+        text_document::MoveMode::KeepAnchor,
+        5,
+    );
+    let frag = select.selection();
+
+    // Paste at position 0.
+    let paste = doc.cursor_at(0);
+    paste.insert_fragment(&frag).unwrap();
+
+    // Expected: "world" prepended to original → "worldhello world".
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert_eq!(rope.to_string(), "worldhello world");
+}
+
+/// Phase 2 step 5.6b: pasting a multi-block fragment splits the
+/// current block and inserts intermediate blocks. The rope mirror
+/// must keep all new blocks consistent.
+#[test]
+fn paste_multi_block_fragment_mirrors_to_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("A1\nB2\nC3").unwrap();
+
+    // Select "B2" plus the surrounding newlines so the fragment has
+    // two blocks (the trailing portion of A1 if any, B2, and the
+    // leading portion of C3 — actually selecting "1\nB2\nC" gives a
+    // 3-block fragment in practice). For simplicity select full "B2".
+    let select = doc.cursor_at(3); // start of B2
+    select.move_position(
+        text_document::MoveOperation::Right,
+        text_document::MoveMode::KeepAnchor,
+        2,
+    );
+    let frag = select.selection();
+
+    // Paste at position 0 (start of A1).
+    let paste = doc.cursor_at(0);
+    paste.insert_fragment(&frag).unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    let rope_text = rope.to_string();
+
+    // Expected: "B2" prepended to the original. Single inline-only
+    // block fragment — uses the inline-merge path → result "B2A1\nB2\nC3".
+    assert_eq!(rope_text, "B2A1\nB2\nC3");
+}
+
+/// Phase 2 step 5.6b: pasting a fragment that spans multiple blocks
+/// exercises the block-splitting path of insert_fragment_uc. The
+/// rope mirror must coordinate the head sync + middle/tail block
+/// creation correctly.
+#[test]
+fn paste_cross_block_fragment_mirrors_to_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("A1\nB2\nC3").unwrap();
+    // Block positions: A1 at 0..2, '\n' at 2, B2 at 3..5, '\n' at 5, C3 at 6..8.
+
+    // Select from inside A1 (pos 1) to inside C3 (pos 7) — spans 3 blocks:
+    // partial "1", full "B2", partial "C".
+    let select = doc.cursor_at(1);
+    select.move_position(
+        text_document::MoveOperation::Right,
+        text_document::MoveMode::KeepAnchor,
+        6,
+    );
+    let frag = select.selection();
+
+    // Move to end of doc and paste.
+    let paste = doc.cursor_at(8);
+    paste.insert_fragment(&frag).unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    let rope_text = rope.to_string();
+    // Doc after paste should contain the original "A1\nB2\nC3" PLUS the
+    // pasted "1\nB2\nC" content appended at the end.
+    assert_eq!(rope_text, "A1\nB2\nC31\nB2\nC");
+}

@@ -6,6 +6,10 @@ use crate::InsertFragmentDto;
 use crate::InsertFragmentResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{
+    rope_append_block, rope_delete_in_block, rope_insert_block_boundary, rope_insert_in_block,
+    rope_split_block,
+};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -1450,6 +1454,9 @@ fn execute_insert_fragment(
         uow.update_block(&updated_block)?;
         write_block_state(uow, current_block.id, &new_plain, runs, images);
 
+        // Mirror the inline-merge splice into the rope. No-op under default.
+        rope_insert_in_block(&uow.store(), current_block.id, byte_offset, inserted_plain);
+
         let mut blocks_to_update: Vec<Block> = Vec::new();
         for b in &blocks[(block_idx + 1)..] {
             let mut ub = b.clone();
@@ -1577,6 +1584,8 @@ fn execute_insert_fragment(
         write_block_state(uow, current_block.id, &head_plain, head_runs, head_images);
 
         let mut new_block_ids: Vec<EntityId> = Vec::new();
+        // Track (created_block_id, plain_text) for the rope mirror.
+        let mut middle_block_payload: Vec<(EntityId, String)> = Vec::new();
         let head_delta = updated_current.text_length - current_block.text_length;
         let mut total_new_chars: i64 = if merge_first || overwrite_head {
             head_delta
@@ -1648,6 +1657,7 @@ fn execute_insert_fragment(
             let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
             write_block_state(uow, created_block.id, &frag_block.plain_text, runs, images);
 
+            middle_block_payload.push((created_block.id, frag_block.plain_text.clone()));
             new_block_ids.push(created_block.id);
             total_new_chars += block_text_len;
             running_position += block_text_len + 1;
@@ -1785,6 +1795,63 @@ fn execute_insert_fragment(
         updated_frame.blocks =
             uow.get_frame_relationship(&frame_id, &FrameRelationshipField::Blocks)?;
         uow.update_frame(&updated_frame)?;
+
+        // ── Rope mirror (block-splitting path) ──
+        // Now that entity mutations are done, replay the same shape
+        // into the rope. The current block is already in the rope at
+        // its original byte position; we splice its content to match
+        // `head_plain`, then for each created middle/tail block we
+        // split off after the previous block and insert that block's
+        // text. No-op under default backend.
+        {
+            let store = uow.store();
+            // 1. Sync the head: original byte range was
+            //    [byte_offset .. byte_offset + text_after.len()) =
+            //    text_after; replace with the head's "new" portion
+            //    (= head_plain after the unchanged text_before prefix).
+            let text_after_bytes = text_after.len() as u32;
+            if text_after_bytes > 0 {
+                rope_delete_in_block(
+                    &store,
+                    current_block.id,
+                    byte_offset,
+                    byte_offset + text_after_bytes,
+                );
+            }
+            let head_extra = if head_plain.len() > text_before.len() {
+                &head_plain[text_before.len()..]
+            } else {
+                ""
+            };
+            if !head_extra.is_empty() {
+                rope_insert_in_block(&store, current_block.id, byte_offset, head_extra);
+            }
+
+            // 2. For each middle block: split off after the previous
+            //    block (which currently has no successor blocks yet
+            //    inside the rope), then fill its content.
+            let mut prev_block_id = current_block.id;
+            let mut prev_block_byte_len = head_plain.len() as u32;
+            for (created_id, frag_plain) in &middle_block_payload {
+                rope_split_block(&store, prev_block_id, prev_block_byte_len, *created_id);
+                if !frag_plain.is_empty() {
+                    rope_insert_in_block(&store, *created_id, 0, frag_plain);
+                }
+                prev_block_id = *created_id;
+                prev_block_byte_len = frag_plain.len() as u32;
+            }
+
+            // 3. If a tail block was created, split off after the
+            //    last block and insert tail_plain.
+            if let Some(tail_id) = created_tail_id {
+                rope_split_block(&store, prev_block_id, prev_block_byte_len, tail_id);
+                if !tail_plain.is_empty() {
+                    rope_insert_in_block(&store, tail_id, 0, &tail_plain);
+                }
+            }
+            let _ = rope_append_block; // silence unused-import warning for variants used elsewhere
+            let _ = rope_insert_block_boundary;
+        }
 
         let standalone_count = (middle_end - middle_start) as i64;
         let tail_count: i64 = if skip_tail { 0 } else { 1 };
