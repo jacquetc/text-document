@@ -15,7 +15,55 @@
 use crate::database::Store;
 #[cfg(feature = "rope_backend")]
 use crate::database::block_offset_index::OffsetMarker;
+use crate::entities::Block;
 use crate::types::EntityId;
+
+/// Read a block's plain-text content. Under `rope_backend`, prefers
+/// the bytes from the global rope via `block_offsets` (stripping the
+/// trailing `\n` boundary that `range_of` includes for non-last
+/// entries). Falls back to `block.plain_text` when the rope range is
+/// missing OR when it disagrees with `block.plain_text` (which
+/// happens for use cases that mutate plain_text without mirroring to
+/// the rope — e.g. `insert_html_at_position_uc`).
+///
+/// Under the default backend, always clones `block.plain_text`.
+///
+/// Read-side preparation for step 7 (when `Block.plain_text` is
+/// removed); call this from exporters and search helpers instead of
+/// `block.plain_text.clone()`.
+#[allow(unused_variables)]
+pub fn block_content_via_store(block: &Block, store: &Store) -> String {
+    #[cfg(feature = "rope_backend")]
+    {
+        let offsets = store.block_offsets.read().unwrap();
+        if let Some((bs, be)) = offsets.range_of_block(block.id) {
+            let rope = store.rope.read().unwrap();
+            let slice = rope.byte_slice(bs as usize..be as usize).to_string();
+            // Strip the trailing inter-block `\n` if present. The
+            // last block in the rope has no trailing `\n`, so this is
+            // a no-op for it.
+            let rope_text = slice
+                .strip_suffix('\n')
+                .map(|s| s.to_string())
+                .unwrap_or(slice);
+            // Divergence guard: if the rope content disagrees with
+            // `block.plain_text` (a use case mutated plain_text
+            // without mirroring), trust plain_text. After step 7 this
+            // branch goes away — plain_text won't exist.
+            if rope_text.len() != block.plain_text.len() {
+                return block.plain_text.clone();
+            }
+            return rope_text;
+        }
+        // Fallback to plain_text (e.g. unmirrored cell blocks).
+        return block.plain_text.clone();
+    }
+    #[cfg(not(feature = "rope_backend"))]
+    {
+        let _ = store;
+        block.plain_text.clone()
+    }
+}
 
 /// Reset the rope to empty and clear `block_offsets`. Called by
 /// importers when they replace the entire document content.

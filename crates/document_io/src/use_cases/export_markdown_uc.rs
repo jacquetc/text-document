@@ -2,6 +2,7 @@
 use crate::ExportMarkdownDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::{
     Block, Document, Frame, List, ListStyle, Root, Table, TableCell,
 };
@@ -259,10 +260,11 @@ impl ExportMarkdownUseCase {
         // Check if this is a code block
         if block.fmt_is_code_block == Some(true) {
             let lang = block.fmt_code_language.as_deref().unwrap_or("");
+            let block_text = block_content_via_store(block, &uow.store());
             let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
-            &block.plain_text,
+            &block_text,
         );
 
             // Concatenate raw text from elements, no formatting
@@ -297,10 +299,11 @@ impl ExportMarkdownUseCase {
         }
 
         // Synthesize inline segments view
+        let block_text = block_content_via_store(block, &uow.store());
         let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
-            &block.plain_text,
+            &block_text,
         );
 
         // Check if block has a list
@@ -490,10 +493,11 @@ impl ExportMarkdownUseCase {
         uow: &dyn ExportMarkdownUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
+        let block_text = block_content_via_store(block, &uow.store());
         let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
-            &block.plain_text,
+            &block_text,
         );
 
         self.render_inline_segments(&elements)

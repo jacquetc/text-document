@@ -2,6 +2,7 @@
 use crate::ExportHtmlDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::{
     Alignment, Block, Document, Frame, List, ListStyle, Root, Table,
     TableCell, TextDirection,
@@ -225,10 +226,11 @@ impl ExportHtmlUseCase {
 
             // --- Code block ---
             if block.fmt_is_code_block == Some(true) {
+                let block_text = block_content_via_store(block, &uow.store());
                 let elements = common::format_runs_query::inline_segments_for_block(
                     &uow.store(),
                     block.id,
-                    &block.plain_text,
+                    &block_text,
                 );
 
                 // Concatenate raw text without inline formatting
@@ -452,10 +454,11 @@ impl ExportHtmlUseCase {
         uow: &dyn ExportHtmlUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
+        let block_text = block_content_via_store(block, &uow.store());
         let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
-            &block.plain_text,
+            &block_text,
         );
 
         let mut html = String::new();

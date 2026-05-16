@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};
 use common::database::Store;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::Block;
 use regex::RegexBuilder;
 use unicode_segmentation::UnicodeSegmentation;
@@ -29,38 +30,15 @@ pub fn build_full_text_from_blocks(blocks: &[Block]) -> String {
 ///
 /// Blocks must be sorted by `document_position` (caller's
 /// responsibility).
-#[allow(unused_variables)]
 pub fn build_full_text_via_store(blocks: &[Block], store: &Store) -> String {
-    #[cfg(feature = "rope_backend")]
-    {
-        let rope = store.rope.read().unwrap();
-        let offsets = store.block_offsets.read().unwrap();
-        let mut out = String::new();
-        for (i, block) in blocks.iter().enumerate() {
-            if i > 0 {
-                out.push('\n');
-            }
-            if let Some((bs, be)) = offsets.range_of_block(block.id) {
-                let slice = rope.byte_slice(bs as usize..be as usize).to_string();
-                // The block's range covers its content PLUS any trailing
-                // `\n` boundary that separates it from the next entry.
-                // Strip one trailing `\n` to recover content only; the
-                // outer loop adds the inter-block `\n` between blocks.
-                let trimmed = slice.strip_suffix('\n').unwrap_or(&slice);
-                out.push_str(trimmed);
-            } else {
-                // Block not in the offset index (e.g. unmirrored cell
-                // block). Fall back to `plain_text`.
-                out.push_str(&block.plain_text);
-            }
+    let mut out = String::new();
+    for (i, block) in blocks.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
         }
-        return out;
+        out.push_str(&block_content_via_store(block, store));
     }
-    #[cfg(not(feature = "rope_backend"))]
-    {
-        let _ = store;
-        build_full_text_from_blocks(blocks)
-    }
+    out
 }
 
 /// Build a mapping from byte offset to char index for a string.

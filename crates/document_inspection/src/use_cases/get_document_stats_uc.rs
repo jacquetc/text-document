@@ -2,6 +2,7 @@
 use crate::DocumentStatsDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -84,14 +85,17 @@ impl GetDocumentStatsUseCase {
         let blocks_opt = uow.get_block_multi(&all_block_ids)?;
         let blocks: Vec<&Block> = blocks_opt.iter().filter_map(|b| b.as_ref()).collect();
 
-        // Word count: iterate all blocks, split plain_text by whitespace
+        // Word count: iterate all blocks, split content by whitespace.
+        // Under rope_backend, content is read from the rope via
+        // `block_content_via_store` (preparation for step 7).
+        let store = uow.store();
         let mut word_count: i64 = 0;
         for block in &blocks {
-            word_count += block.plain_text.split_whitespace().count() as i64;
+            let block_text = block_content_via_store(block, &store);
+            word_count += block_text.split_whitespace().count() as i64;
         }
 
         // Image count: sum block_images entries across all blocks.
-        let store = uow.store();
         let mut image_count: i64 = 0;
         for block in &blocks {
             image_count += get_block_images(&store, block.id).len() as i64;

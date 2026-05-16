@@ -3,6 +3,7 @@ use crate::GetTextAtPositionDto;
 use crate::TextAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -124,8 +125,9 @@ impl GetTextAtPositionUseCase {
 
             // Synthesize this block's segments from format_runs to find the first
             // element ID and extract text.
+            let block_text = block_content_via_store(block, &uow.store());
             let owned_segments =
-                inline_segments_for_block(&uow.store(), block.id, &block.plain_text);
+                inline_segments_for_block(&uow.store(), block.id, &block_text);
 
             let mut current_char_offset: usize = 0;
             let mut current_byte_offset: u32 = 0;

@@ -2,6 +2,7 @@ use crate::ExtractFragmentDto;
 use crate::ExtractFragmentResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -229,10 +230,11 @@ impl ExtractFragmentUseCase {
                         block.text_length as usize
                     };
 
+                    let block_text = block_content_via_store(block, &uow.store());
                     let elements = inline_segments_for_block(
                         &uow.store(),
                         block.id,
-                        &block.plain_text,
+                        &block_text,
                     );
 
                     let list = if let Some(list_id) = block.list {
@@ -307,10 +309,11 @@ impl ExtractFragmentUseCase {
                 block.text_length as usize
             };
 
+            let block_text = block_content_via_store(block, &uow.store());
             let elements = inline_segments_for_block(
                 &uow.store(),
                 block.id,
-                &block.plain_text,
+                &block_text,
             );
 
             let list = if let Some(list_id) = block.list {
@@ -369,7 +372,8 @@ impl ExtractFragmentUseCase {
         uow: &dyn ExtractFragmentUnitOfWorkTrait,
         block: &Block,
     ) -> Result<(Vec<FragmentElement>, String)> {
-        let elements = inline_segments_for_block(&uow.store(), block.id, &block.plain_text);
+        let block_text = block_content_via_store(block, &uow.store());
+        let elements = inline_segments_for_block(&uow.store(), block.id, &block_text);
         Ok(extract_elements_in_range(
             &elements,
             0,

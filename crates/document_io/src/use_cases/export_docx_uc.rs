@@ -3,6 +3,7 @@ use crate::ExportDocxDto;
 use crate::ExportDocxResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::{
     Block, Document, Frame, List, Root, Table, TableCell,
 };
@@ -165,10 +166,11 @@ impl LongOperation for ExportDocxUseCase {
                     return Err(anyhow!("Operation was cancelled"));
                 }
 
+                let block_text = block_content_via_store(block, &uow.store());
                 let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
-            &block.plain_text,
+            &block_text,
         );
 
                 let mut paragraph = Paragraph::new();
@@ -356,10 +358,11 @@ impl ExportDocxUseCase {
                         blocks.sort_by_key(|b| b.document_position);
 
                         for block in &blocks {
+                            let block_text = block_content_via_store(block, &uow.store());
                             let elements = common::format_runs_query::inline_segments_for_block(
                                 &uow.store(),
                                 block.id,
-                                &block.plain_text,
+                                &block_text,
                             );
 
                             let mut paragraph = Paragraph::new();

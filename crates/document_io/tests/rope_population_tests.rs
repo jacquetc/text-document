@@ -194,6 +194,39 @@ fn import_plain_text_byte_range_matches_total_bytes() -> Result<()> {
     Ok(())
 }
 
+/// Phase 2 step 5.3: `export_plain_text` reads block content from
+/// the global rope (via `block_content_via_store`). To verify the
+/// integration, mutate the rope out-of-band with `Block.plain_text`
+/// and check the export reflects the rope.
+#[test]
+fn export_plain_text_reads_from_rope() -> Result<()> {
+    let (db_context, event_hub, _undo_redo_manager) = setup()?;
+
+    document_io_controller::import_plain_text(
+        &db_context,
+        &event_hub,
+        &ImportPlainTextDto {
+            plain_text: "hello world".to_string(),
+        },
+    )?;
+
+    // Rewrite the rope directly (test-only hack): change "world" to
+    // "WORLD" without touching Block.plain_text.
+    let store = db_context.get_store();
+    {
+        let mut rope = store.rope.write().unwrap();
+        let cs = rope.byte_to_char(6);
+        let ce = rope.byte_to_char(11);
+        rope.remove(cs..ce);
+        rope.insert(cs, "WORLD");
+    }
+
+    let exported = document_io_controller::export_plain_text(&db_context, &event_hub)?;
+    assert_eq!(exported.plain_text, "hello WORLD");
+
+    Ok(())
+}
+
 /// Re-import must reset the byte_range to cover the new content
 /// (not the union of old + new).
 #[test]

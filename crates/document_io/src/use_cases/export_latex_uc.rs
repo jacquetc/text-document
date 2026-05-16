@@ -3,6 +3,7 @@ use crate::ExportLatexDto;
 use crate::ExportLatexResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::{
     Block, Document, Frame, List, ListStyle, Root, Table, TableCell,
     TextDirection,
@@ -325,10 +326,11 @@ impl ExportLatexUseCase {
         uow: &dyn ExportLatexUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
+        let block_text = block_content_via_store(block, &uow.store());
         let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
-            &block.plain_text,
+            &block_text,
         );
 
         let mut text = String::new();
@@ -348,10 +350,11 @@ impl ExportLatexUseCase {
         uow: &dyn ExportLatexUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
+        let block_text = block_content_via_store(block, &uow.store());
         let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
-            &block.plain_text,
+            &block_text,
         );
 
         let mut latex = String::new();

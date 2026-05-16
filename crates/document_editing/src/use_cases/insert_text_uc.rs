@@ -51,6 +51,11 @@ struct UndoData {
     original_block_images: Vec<ImageAnchor>,
     doc_id: EntityId,
     original_character_count: i64,
+    /// Byte range in the block where the text was inserted. Used by
+    /// undo to delete those bytes from the rope (under rope_backend
+    /// only; ignored otherwise).
+    inserted_byte_offset: u32,
+    inserted_byte_len: u32,
 }
 
 enum InsertTextUndo {
@@ -372,6 +377,8 @@ fn execute_insert_simple(
         original_block_images,
         doc_id,
         original_character_count: document.character_count,
+        inserted_byte_offset: byte_offset,
+        inserted_byte_len,
     };
 
     Ok((
@@ -489,6 +496,17 @@ impl UndoRedoCommand for InsertTextUseCase {
                     .write()
                     .unwrap()
                     .insert(data.block_id, data.original_block_images.clone());
+
+                // Revert the rope mutation done by the forward path
+                // (no-op under default backend).
+                if data.inserted_byte_len > 0 {
+                    rope_delete_in_block(
+                        &store,
+                        data.block_id,
+                        data.inserted_byte_offset,
+                        data.inserted_byte_offset + data.inserted_byte_len,
+                    );
+                }
 
                 let mut doc = uow
                     .get_document(&data.doc_id)?

@@ -2,6 +2,7 @@
 use crate::ExportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::{Block, Document, Frame, Root};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
@@ -50,8 +51,11 @@ impl ExportPlainTextUseCase {
             &common::direct_access::document::DocumentRelationshipField::Frames,
         )?;
 
-        // Step 3: Collect all block plain_text from all frames
+        // Step 3: Collect all block plain_text from all frames. Under
+        // rope_backend, content is read from the global rope via
+        // `block_content_via_store` (preparation for step 7).
         let mut all_plain_texts: Vec<String> = Vec::new();
+        let store = uow.store();
 
         for frame_id in &frame_ids {
             // Get Block IDs from the Frame.Blocks relationship
@@ -70,7 +74,7 @@ impl ExportPlainTextUseCase {
             blocks.sort_by_key(|b| b.document_position);
 
             for block in &blocks {
-                all_plain_texts.push(block.plain_text.clone());
+                all_plain_texts.push(block_content_via_store(block, &store));
             }
         }
 
