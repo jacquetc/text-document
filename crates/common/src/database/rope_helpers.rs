@@ -422,6 +422,72 @@ pub fn rope_remove_table_anchor(store: &Store, table_id: EntityId) {
     }
 }
 
+/// Remove a registered block from the rope: drops its content bytes
+/// plus one boundary `\n` (the one after, if the block has a
+/// successor; the one before, if it's the last entry), removes the
+/// entry from the index, and shifts trailing entries by the negative
+/// byte delta.
+///
+/// No-op if `block_id` is not in the index. No-op for the special
+/// case of a single-block document being asked to remove its sole
+/// block (we'd produce an empty rope but the block itself is being
+/// cascaded by the caller).
+#[allow(unused_variables)]
+pub fn rope_remove_block(store: &Store, block_id: EntityId) {
+    #[cfg(feature = "rope_backend")]
+    {
+        let block_marker = OffsetMarker::Block(block_id);
+        let (block_start, block_end, idx, is_last, has_pred) = {
+            let offsets = store.block_offsets.read().unwrap();
+            let Some((start, end)) = offsets.range_of(block_marker) else {
+                return;
+            };
+            let idx = offsets
+                .entries
+                .iter()
+                .position(|(m, _)| *m == block_marker)
+                .unwrap();
+            let is_last = idx + 1 == offsets.entries.len();
+            let has_pred = idx > 0;
+            (start, end, idx, is_last, has_pred)
+        };
+
+        // Determine the byte range to delete:
+        // - if there's a successor: [block_start..block_end) — the
+        //   block's content INCLUDING its trailing boundary `\n`
+        //   (which is the byte at block_end - 1)
+        // - if last and has predecessor: [block_start - 1..block_end)
+        //   — also delete the LEADING boundary `\n` that the previous
+        //   entry placed before us
+        // - if last and no predecessor (sole entry): just delete
+        //   [block_start..block_end) (no boundary `\n` exists)
+        let (remove_start, remove_end) = if is_last && has_pred {
+            (block_start.saturating_sub(1), block_end)
+        } else {
+            (block_start, block_end)
+        };
+        if remove_end <= remove_start {
+            // Drop the entry only; nothing to remove from the rope.
+            store.block_offsets.write().unwrap().entries.remove(idx);
+            return;
+        }
+        let deleted_bytes = remove_end - remove_start;
+
+        {
+            let mut rope = store.rope.write().unwrap();
+            let char_start = rope.byte_to_char(remove_start as usize);
+            let char_end = rope.byte_to_char(remove_end as usize);
+            rope.remove(char_start..char_end);
+        }
+        store.block_offsets.write().unwrap().entries.remove(idx);
+        store
+            .block_offsets
+            .write()
+            .unwrap()
+            .shift_after(remove_start, -(deleted_bytes as i32));
+    }
+}
+
 /// Delete bytes `[byte_start_in_block..byte_end_in_block)` from inside
 /// the block identified by `block_id`. Shifts subsequent block offsets
 /// by the deleted byte length. No-op for blocks not in the index.

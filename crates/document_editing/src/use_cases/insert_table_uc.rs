@@ -2,7 +2,9 @@ use crate::InsertTableDto;
 use crate::InsertTableResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::rope_insert_table_anchor;
+use common::database::rope_helpers::{
+    rope_append_block, rope_insert_block_boundary, rope_insert_table_anchor,
+};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -232,6 +234,21 @@ fn execute_insert_table(
     }
     if !blocks_to_update.is_empty() {
         uow.update_block_multi(&blocks_to_update)?;
+    }
+
+    // Mirror cell-block creation into the global rope. Cells live
+    // AFTER the main flow in the rope's linear layout (plan §1.6
+    // simplified: single-top-level-frame). Each cell entry needs a
+    // boundary `\n` before it — the table anchor that precedes the
+    // first cell ends without a trailing newline, and inter-cell
+    // boundaries follow the same convention as inter-block ones.
+    // No-op under default backend.
+    {
+        let store = uow.store();
+        for cell_block in &cell_blocks {
+            rope_insert_block_boundary(&store);
+            rope_append_block(&store, cell_block.id, &cell_block.plain_text);
+        }
     }
 
     // 5. Shift document_position for all blocks after the table

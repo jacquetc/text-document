@@ -217,7 +217,7 @@ fn cross_block_delete_merges_in_rope() {
 }
 
 #[test]
-fn insert_table_inserts_object_replacement_sentinel_in_rope() {
+fn insert_table_inserts_sentinel_and_appends_cells_in_rope() {
     // Three-block doc; insert a 2x2 table between block 1 and block 2.
     let doc = TextDocument::new();
     doc.set_plain_text("alpha\nbeta\ngamma").unwrap();
@@ -230,22 +230,91 @@ fn insert_table_inserts_object_replacement_sentinel_in_rope() {
 
     let store = doc.rope_store_for_test();
     let rope = store.rope.read().unwrap();
-    // Expected: "alpha\n\u{FFFC}\nbeta\ngamma"
-    assert_eq!(rope.to_string(), "alpha\n\u{FFFC}\nbeta\ngamma");
+    // Expected: main flow "alpha\n\u{FFFC}\nbeta\ngamma" (20 bytes)
+    //           + 4 empty cells each preceded by a `\n` boundary
+    //           → "alpha\n\u{FFFC}\nbeta\ngamma\n\n\n\n" (24 bytes)
+    assert_eq!(rope.to_string(), "alpha\n\u{FFFC}\nbeta\ngamma\n\n\n\n");
 
     let offsets = store.block_offsets.read().unwrap();
-    // 3 real blocks + 1 TableAnchor = 4 entries
-    assert_eq!(offsets.entries.len(), 4);
-    // Entry order: alpha-block, TableAnchor, beta-block, gamma-block
+    // 3 main blocks + 1 TableAnchor + 4 cell blocks = 8 entries
+    assert_eq!(offsets.entries.len(), 8);
+    // Main flow: alpha, TableAnchor, beta, gamma
     assert!(offsets.entries[0].0.is_block());
     assert!(offsets.entries[1].0.as_table_anchor().is_some());
     assert!(offsets.entries[2].0.is_block());
     assert!(offsets.entries[3].0.is_block());
-    // Byte starts: 0, 6 (alpha\n), 10 (alpha\n\u{FFFC}), 15
+    // Cell area: 4 empty cell blocks in row-major order
+    assert!(offsets.entries[4].0.is_block());
+    assert!(offsets.entries[5].0.is_block());
+    assert!(offsets.entries[6].0.is_block());
+    assert!(offsets.entries[7].0.is_block());
+    // Byte starts for main flow: 0, 6, 10, 15
     assert_eq!(offsets.entries[0].1, 0);
     assert_eq!(offsets.entries[1].1, 6);
     assert_eq!(offsets.entries[2].1, 10);
     assert_eq!(offsets.entries[3].1, 15);
+    // Cells: 21, 22, 23, 24 (each preceded by a 1-byte boundary)
+    assert_eq!(offsets.entries[4].1, 21);
+    assert_eq!(offsets.entries[5].1, 22);
+    assert_eq!(offsets.entries[6].1, 23);
+    assert_eq!(offsets.entries[7].1, 24);
+    assert_eq!(offsets.total_bytes(), 24);
+}
+
+#[test]
+fn cell_text_edits_mirror_to_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("main").unwrap();
+    let cursor = doc.cursor_at(4);
+    let _table = cursor.insert_table(1, 2).unwrap();
+
+    // After insertion: rope = "main\n\u{FFFC}\n\n" (main + sentinel
+    // + boundary + 2 empty cells with boundaries). Now type into the
+    // first cell. The cell's block lives at the end of the rope;
+    // its block id is one of the entries[4..].
+    let store = doc.rope_store_for_test();
+    let registered_block_ids: Vec<u64> = {
+        let offsets = store.block_offsets.read().unwrap();
+        offsets
+            .entries
+            .iter()
+            .filter_map(|(m, _)| m.as_block())
+            .collect()
+    };
+    drop(store);
+
+    // Find the cell using the public flow API and edit it.
+    use text_document::FlowElement;
+    let mut first_cell_block_id: Option<u64> = None;
+    for elem in doc.flow() {
+        if let FlowElement::Table(t) = elem {
+            let snap = t.snapshot();
+            if let Some(cell) = snap.cells.first()
+                && let Some(blk) = cell.blocks.first()
+            {
+                first_cell_block_id = Some(blk.block_id as u64);
+            }
+            break;
+        }
+    }
+    let cell_block_id = first_cell_block_id.expect("cell block not found in flow");
+    // Sanity-check: this cell block IS one of the registered block entries.
+    assert!(registered_block_ids.contains(&cell_block_id));
+
+    // Move cursor to start of that cell block and type.
+    let cell_block = doc.block_by_id(cell_block_id as usize).expect("block");
+    let cell_pos = cell_block.position();
+    let cell_cursor = doc.cursor_at(cell_pos);
+    cell_cursor.insert_text("hi").unwrap();
+
+    // The rope's cell area should now contain "hi" for that cell.
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert!(
+        rope.to_string().contains("hi"),
+        "rope should contain edited cell text, got {:?}",
+        rope.to_string()
+    );
 }
 
 #[test]
