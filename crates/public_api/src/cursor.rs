@@ -105,7 +105,13 @@ impl TextCursor {
         blocks_affected: usize,
         flow_may_change: bool,
     ) -> QueuedEvents {
-        let added = new_pos - edit_pos;
+        // Defensive: a use case can return new_position < edit_pos when
+        // invoked through a stale or out-of-range cursor (e.g. after an
+        // undo restores a state where the previously-saved cursor position
+        // is no longer valid — fuzz finds this). Treat the edit as adding
+        // 0 chars rather than overflowing; the cursor still moves to
+        // `new_pos` below.
+        let added = new_pos.saturating_sub(edit_pos);
         inner.adjust_cursors(edit_pos, removed, added);
         {
             let mut d = self.data.lock();
