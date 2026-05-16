@@ -322,8 +322,10 @@ mod tests {
         let created = create_one(&mut ctx);
         let rel_ids =
             get_relationship(&ctx.db, &created.id, &RootRelationshipField::Document).unwrap();
-        // Required OneToOne: default EntityId (0) is stored as a relationship entry
-        assert_eq!(rel_ids.len(), 1);
+        // OneToOne: an uninitialised Root has no document yet, so the
+        // relationship list is empty (post Phase-2 junction collapse;
+        // the legacy junction backend unconditionally returned [0]).
+        assert_eq!(rel_ids, Vec::<u64>::new());
     }
 
     // -----------------------------------------------------------------------
@@ -336,7 +338,8 @@ mod tests {
         let created = create_one(&mut ctx);
         let count =
             get_relationship_count(&ctx.db, &created.id, &RootRelationshipField::Document).unwrap();
-        // Required OneToOne: default EntityId (0) is stored as a relationship entry
-        assert_eq!(count, 1);
+        // OneToOne: see test_get_relationship_default — empty when no
+        // Document has been assigned yet.
+        assert_eq!(count, 0);
     }
 }
