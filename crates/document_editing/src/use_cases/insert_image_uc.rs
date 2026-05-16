@@ -3,6 +3,7 @@ use crate::InsertImageDto;
 use crate::InsertImageResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::rope_insert_in_block;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -150,6 +151,13 @@ fn execute_insert_image(
             },
         );
     }
+
+    // Mirror to the global rope: insert U+FFFC OBJECT REPLACEMENT
+    // CHARACTER at the same byte offset per plan §1.6. No-op under
+    // default backend. The sentinel is 3 UTF-8 bytes; the block's
+    // `plain_text` is intentionally NOT updated (images contribute 0
+    // bytes to plain_text but 1 logical position).
+    rope_insert_in_block(&uow.store(), block.id, byte_offset, "\u{FFFC}");
 
     // Update block cached fields: image occupies 1 logical position but adds
     // zero bytes to plain_text.

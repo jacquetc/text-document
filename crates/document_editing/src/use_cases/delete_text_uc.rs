@@ -743,6 +743,18 @@ fn execute_delete(
             .unwrap()
             .insert(start_block.id, merged_images);
 
+        // Mirror the cross-block merge into the rope (no-op under
+        // default). Deletes the rope range from `start_block + byte_so`
+        // through `end_block + byte_eo`, removes the intermediate +
+        // end block index entries, and shifts subsequent offsets.
+        common::database::rope_helpers::rope_merge_block_range(
+            &store,
+            start_block.id,
+            byte_so,
+            end_block.id,
+            byte_eo,
+        );
+
         // Remove intermediate and end blocks.
         let blocks_to_remove: Vec<EntityId> = blocks[(start_block_idx + 1)..=end_block_idx]
             .iter()

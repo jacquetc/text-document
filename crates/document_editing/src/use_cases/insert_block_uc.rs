@@ -3,6 +3,7 @@ use crate::InsertBlockDto;
 use crate::InsertBlockResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::rope_split_block;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -211,6 +212,13 @@ fn execute_insert_block(
         .unwrap()
         .insert(created_block.id, right_images);
     let _created_plain = created_block.plain_text.clone();
+
+    // Mirror the split into the rope: insert `\n` boundary at the
+    // split point, register the new block's start, and shift
+    // subsequent block offsets by +1. No-op under default backend.
+    // No-op for blocks not in the rope index (e.g. table cells —
+    // step 5.5e).
+    rope_split_block(&store, current_block.id, byte_split, created_block.id);
 
     let frame = uow
         .get_frame(&owner_frame_id)?

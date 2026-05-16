@@ -7,6 +7,7 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, Root, TableCell};
+use common::database::rope_helpers::{rope_delete_in_block, rope_insert_in_block};
 use common::format_runs::{
     CharacterFormat, FormatRun, ImageAnchor, debug_assert_well_formed,
     logical_offset_to_byte, shift_images_for_delete, shift_images_for_insert,
@@ -128,6 +129,9 @@ fn delete_range_in_block(
         shift_images_for_delete(images, byte_start, byte_end) as i64
     };
 
+    // Mirror to rope (no-op under default).
+    rope_delete_in_block(&store, block.id, byte_start, byte_end);
+
     let positions_removed = removed_text_chars + images_removed;
     let mut updated_block = block.clone();
     updated_block.plain_text = new_plain.clone();
@@ -194,6 +198,9 @@ fn insert_formatted_at(
             shift_images_for_insert(images, byte_offset, inserted_byte_len);
         }
     }
+
+    // Mirror to rope (no-op under default).
+    rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
     Ok(())
 }
