@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};
+use common::database::Store;
 use common::entities::Block;
 use regex::RegexBuilder;
 use unicode_segmentation::UnicodeSegmentation;
@@ -14,6 +15,52 @@ pub fn build_full_text_from_blocks(blocks: &[Block]) -> String {
         .map(|b| b.plain_text.as_str())
         .collect::<Vec<&str>>()
         .join("\n")
+}
+
+/// Build the full document text from main-flow blocks. Under
+/// `rope_backend`, reads content from the global rope via
+/// `block_offsets` (preparation for step 7 where `Block.plain_text`
+/// is removed). Under the default backend, falls back to
+/// `build_full_text_from_blocks` (= `Block.plain_text` concatenation).
+///
+/// In both cases the returned string has main-flow blocks joined by
+/// single `\n` separators — matching the position semantics that
+/// `document_position` is computed against.
+///
+/// Blocks must be sorted by `document_position` (caller's
+/// responsibility).
+#[allow(unused_variables)]
+pub fn build_full_text_via_store(blocks: &[Block], store: &Store) -> String {
+    #[cfg(feature = "rope_backend")]
+    {
+        let rope = store.rope.read().unwrap();
+        let offsets = store.block_offsets.read().unwrap();
+        let mut out = String::new();
+        for (i, block) in blocks.iter().enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            if let Some((bs, be)) = offsets.range_of_block(block.id) {
+                let slice = rope.byte_slice(bs as usize..be as usize).to_string();
+                // The block's range covers its content PLUS any trailing
+                // `\n` boundary that separates it from the next entry.
+                // Strip one trailing `\n` to recover content only; the
+                // outer loop adds the inter-block `\n` between blocks.
+                let trimmed = slice.strip_suffix('\n').unwrap_or(&slice);
+                out.push_str(trimmed);
+            } else {
+                // Block not in the offset index (e.g. unmirrored cell
+                // block). Fall back to `plain_text`.
+                out.push_str(&block.plain_text);
+            }
+        }
+        return out;
+    }
+    #[cfg(not(feature = "rope_backend"))]
+    {
+        let _ = store;
+        build_full_text_from_blocks(blocks)
+    }
 }
 
 /// Build a mapping from byte offset to char index for a string.

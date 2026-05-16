@@ -1,4 +1,4 @@
-use super::search_helpers::{build_full_text_from_blocks, find_all_matches};
+use super::search_helpers::{build_full_text_via_store, find_all_matches};
 use crate::ReplaceResultDto;
 use crate::ReplaceTextDto;
 use anyhow::{Result, anyhow};
@@ -62,7 +62,7 @@ fn fetch_blocks_and_build_text(
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    let full_text = build_full_text_from_blocks(&blocks);
+    let full_text = build_full_text_via_store(&blocks, &uow.store());
 
     Ok((full_text, blocks))
 }
