@@ -13,6 +13,8 @@
 //! branches go away and the helper bodies become unconditional.
 
 use crate::database::Store;
+#[cfg(feature = "rope_backend")]
+use crate::database::block_offset_index::OffsetMarker;
 use crate::types::EntityId;
 
 /// Reset the rope to empty and clear `block_offsets`. Called by
@@ -44,7 +46,7 @@ pub fn rope_append_block(store: &Store, block_id: EntityId, text: &str) -> u32 {
         drop(rope);
 
         let mut offsets = store.block_offsets.write().unwrap();
-        offsets.push(block_id, byte_start);
+        offsets.push_block(block_id, byte_start);
         offsets.set_total_bytes(new_total);
         return byte_start;
     }
@@ -94,7 +96,7 @@ pub fn rope_insert_in_block(
         }
         let block_byte_start = {
             let offsets = store.block_offsets.read().unwrap();
-            let Some((start, _end)) = offsets.range_of(block_id) else {
+            let Some((start, _end)) = offsets.range_of_block(block_id) else {
                 return;
             };
             start
@@ -136,15 +138,16 @@ pub fn rope_split_block(
 ) {
     #[cfg(feature = "rope_backend")]
     {
+        let current_marker = OffsetMarker::Block(current_block_id);
         let (block_start, current_idx) = {
             let offsets = store.block_offsets.read().unwrap();
-            let Some((start, _end)) = offsets.range_of(current_block_id) else {
+            let Some((start, _end)) = offsets.range_of(current_marker) else {
                 return;
             };
             let idx = offsets
                 .entries
                 .iter()
-                .position(|(id, _)| *id == current_block_id)
+                .position(|(m, _)| *m == current_marker)
                 .unwrap();
             (start, idx)
         };
@@ -168,11 +171,11 @@ pub fn rope_split_block(
 
         // 3. Register the new block at `split_byte + 1`, immediately
         //    after the original in the entries Vec.
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .insert_at(current_idx + 1, new_block_id, split_byte + 1);
+        store.block_offsets.write().unwrap().insert_at(
+            current_idx + 1,
+            OffsetMarker::Block(new_block_id),
+            split_byte + 1,
+        );
     }
 }
 
@@ -198,23 +201,25 @@ pub fn rope_merge_block_range(
 ) {
     #[cfg(feature = "rope_backend")]
     {
+        let start_marker = OffsetMarker::Block(start_block_id);
+        let end_marker = OffsetMarker::Block(end_block_id);
         let (start_block_byte, end_block_byte, start_idx, end_idx) = {
             let offsets = store.block_offsets.read().unwrap();
-            let Some((sb, _)) = offsets.range_of(start_block_id) else {
+            let Some((sb, _)) = offsets.range_of(start_marker) else {
                 return;
             };
-            let Some((eb, _)) = offsets.range_of(end_block_id) else {
+            let Some((eb, _)) = offsets.range_of(end_marker) else {
                 return;
             };
             let si = offsets
                 .entries
                 .iter()
-                .position(|(id, _)| *id == start_block_id)
+                .position(|(m, _)| *m == start_marker)
                 .unwrap();
             let ei = offsets
                 .entries
                 .iter()
-                .position(|(id, _)| *id == end_block_id)
+                .position(|(m, _)| *m == end_marker)
                 .unwrap();
             (sb, eb, si, ei)
         };
@@ -274,7 +279,7 @@ pub fn rope_delete_in_block(
         let deleted_bytes = byte_end_in_block - byte_start_in_block;
         let block_byte_start = {
             let offsets = store.block_offsets.read().unwrap();
-            let Some((start, _end)) = offsets.range_of(block_id) else {
+            let Some((start, _end)) = offsets.range_of_block(block_id) else {
                 return;
             };
             start

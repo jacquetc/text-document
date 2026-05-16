@@ -14,7 +14,7 @@ use proptest::prelude::*;
 #[test]
 fn empty_index_returns_none_everywhere() {
     let idx = BlockOffsetIndex::new();
-    assert_eq!(idx.range_of(1), None);
+    assert_eq!(idx.range_of_block(1), None);
     assert_eq!(idx.block_at_byte(0), None);
     assert_eq!(idx.block_at_byte(100), None);
     assert_eq!(idx.byte_to_block_byte(0), None);
@@ -26,9 +26,9 @@ fn empty_index_returns_none_everywhere() {
 fn single_block_range_covers_full_rope() {
     let mut idx = BlockOffsetIndex::new();
     idx.set_total_bytes(100);
-    idx.push(42, 0);
+    idx.push_block(42, 0);
 
-    assert_eq!(idx.range_of(42), Some((0, 100)));
+    assert_eq!(idx.range_of_block(42), Some((0, 100)));
     assert_eq!(idx.block_at_byte(0), Some(42));
     assert_eq!(idx.block_at_byte(50), Some(42));
     assert_eq!(idx.block_at_byte(100), Some(42)); // at-end belongs to last
@@ -40,14 +40,14 @@ fn single_block_range_covers_full_rope() {
 fn three_blocks_disjoint_ranges() {
     let mut idx = BlockOffsetIndex::new();
     idx.set_total_bytes(30);
-    idx.push(1, 0);
-    idx.push(2, 10);
-    idx.push(3, 20);
+    idx.push_block(1, 0);
+    idx.push_block(2, 10);
+    idx.push_block(3, 20);
 
-    assert_eq!(idx.range_of(1), Some((0, 10)));
-    assert_eq!(idx.range_of(2), Some((10, 20)));
-    assert_eq!(idx.range_of(3), Some((20, 30)));
-    assert_eq!(idx.range_of(99), None);
+    assert_eq!(idx.range_of_block(1), Some((0, 10)));
+    assert_eq!(idx.range_of_block(2), Some((10, 20)));
+    assert_eq!(idx.range_of_block(3), Some((20, 30)));
+    assert_eq!(idx.range_of_block(99), None);
 
     assert_eq!(idx.block_at_byte(0), Some(1));
     assert_eq!(idx.block_at_byte(9), Some(1));
@@ -63,15 +63,15 @@ fn three_blocks_disjoint_ranges() {
 fn shift_after_propagates_to_total_and_entries() {
     let mut idx = BlockOffsetIndex::new();
     idx.set_total_bytes(30);
-    idx.push(1, 0);
-    idx.push(2, 10);
-    idx.push(3, 20);
+    idx.push_block(1, 0);
+    idx.push_block(2, 10);
+    idx.push_block(3, 20);
 
     // Insert 5 bytes at offset 12 (inside block 2).
     idx.shift_after(12, 5);
-    assert_eq!(idx.range_of(1), Some((0, 10)));
-    assert_eq!(idx.range_of(2), Some((10, 25))); // grew by 5
-    assert_eq!(idx.range_of(3), Some((25, 35))); // start shifted +5
+    assert_eq!(idx.range_of_block(1), Some((0, 10)));
+    assert_eq!(idx.range_of_block(2), Some((10, 25))); // grew by 5
+    assert_eq!(idx.range_of_block(3), Some((25, 35))); // start shifted +5
     assert_eq!(idx.total_bytes(), 35);
 }
 
@@ -79,15 +79,15 @@ fn shift_after_propagates_to_total_and_entries() {
 fn shift_after_negative_when_threshold_above_first_block() {
     let mut idx = BlockOffsetIndex::new();
     idx.set_total_bytes(30);
-    idx.push(1, 0);
-    idx.push(2, 10);
-    idx.push(3, 20);
+    idx.push_block(1, 0);
+    idx.push_block(2, 10);
+    idx.push_block(3, 20);
 
     // Delete 5 bytes at offset 12 — only entries with byte_start ≥ 12 shift.
     idx.shift_after(12, -5);
-    assert_eq!(idx.range_of(1), Some((0, 10)));
-    assert_eq!(idx.range_of(2), Some((10, 15)));
-    assert_eq!(idx.range_of(3), Some((15, 25)));
+    assert_eq!(idx.range_of_block(1), Some((0, 10)));
+    assert_eq!(idx.range_of_block(2), Some((10, 15)));
+    assert_eq!(idx.range_of_block(3), Some((15, 25)));
     assert_eq!(idx.total_bytes(), 25);
 }
 
@@ -95,24 +95,24 @@ fn shift_after_negative_when_threshold_above_first_block() {
 fn remove_at_drops_entry_and_subsequent_blocks_extend() {
     let mut idx = BlockOffsetIndex::new();
     idx.set_total_bytes(30);
-    idx.push(1, 0);
-    idx.push(2, 10);
-    idx.push(3, 20);
+    idx.push_block(1, 0);
+    idx.push_block(2, 10);
+    idx.push_block(3, 20);
 
     // Drop block 2 from the index (caller responsible for fixing the rope).
     idx.remove_at(1);
     assert_eq!(idx.len(), 2);
-    assert_eq!(idx.range_of(1), Some((0, 20))); // now extends to block 3's start
-    assert_eq!(idx.range_of(2), None);
-    assert_eq!(idx.range_of(3), Some((20, 30)));
+    assert_eq!(idx.range_of_block(1), Some((0, 20))); // now extends to block 3's start
+    assert_eq!(idx.range_of_block(2), None);
+    assert_eq!(idx.range_of_block(3), Some((20, 30)));
 }
 
 #[test]
 fn clone_roundtrips() {
     let mut idx = BlockOffsetIndex::new();
     idx.set_total_bytes(42);
-    idx.push(1, 0);
-    idx.push(2, 21);
+    idx.push_block(1, 0);
+    idx.push_block(2, 21);
 
     let cloned = idx.clone();
     assert_eq!(idx, cloned);
@@ -127,7 +127,7 @@ fn arb_index() -> impl Strategy<Value = BlockOffsetIndex> {
         let mut idx = BlockOffsetIndex::new();
         let mut cursor = 0u32;
         for (i, gap) in gaps.iter().enumerate() {
-            idx.push((i as EntityId) + 1, cursor);
+            idx.push_block((i as EntityId) + 1, cursor);
             cursor = cursor.saturating_add(*gap);
         }
         idx.set_total_bytes(cursor);
@@ -151,7 +151,7 @@ proptest! {
         let block_id = idx
             .block_at_byte(byte)
             .expect("block_at_byte must succeed for byte ≤ total_bytes");
-        let (start, end) = idx.range_of(block_id).expect("block must be indexed");
+        let (start, end) = idx.range_of_block(block_id).expect("block must be indexed");
         prop_assert!(
             start <= byte && byte <= end,
             "byte {} must fall inside [{}, {}] for block {}",
@@ -172,7 +172,7 @@ proptest! {
         let (block_id, byte_in) = idx
             .byte_to_block_byte(byte)
             .expect("byte must map to a block");
-        let (start, _end) = idx.range_of(block_id).unwrap();
+        let (start, _end) = idx.range_of_block(block_id).unwrap();
         prop_assert_eq!(byte_in, byte - start);
     }
 

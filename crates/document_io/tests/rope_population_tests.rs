@@ -70,6 +70,8 @@ fn import_plain_text_multi_line_inserts_block_boundaries() -> Result<()> {
     assert_eq!(offsets.range_of(b0), Some((0, 6)));
     assert_eq!(offsets.range_of(b1), Some((6, 13)));
     assert_eq!(offsets.range_of(b2), Some((13, 18)));
+    // The first entries should all be real blocks (no table anchors).
+    assert!(b0.is_block() && b1.is_block() && b2.is_block());
 
     Ok(())
 }

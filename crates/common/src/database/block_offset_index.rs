@@ -1,25 +1,57 @@
-//! Sorted index of block id → rope byte range.
+//! Sorted index of marker (block or table-anchor) → rope byte range.
 //!
-//! Tracks the byte offset at which each block starts in the global
-//! rope, plus the rope's total byte length. Each block extends from
-//! its `byte_start` to the next block's `byte_start` (or to
-//! `total_bytes` for the last block).
+//! Tracks the byte offset at which each marker starts in the global
+//! rope, plus the rope's total byte length. A marker is either a
+//! real `Block` or a `TableAnchor` — the U+FFFC sentinel that
+//! occupies a line on its own in a parent frame's range to represent
+//! an embedded table (plan §1.6). Each marker extends from its
+//! `byte_start` to the next marker's `byte_start` (or to
+//! `total_bytes` for the last entry).
 //!
 //! Invariants:
 //! - `entries` is sorted by `byte_start` ascending.
-//! - No two entries share the same `byte_start` (blocks are disjoint).
+//! - No two entries share the same `byte_start`.
 //! - The last entry's `byte_start ≤ total_bytes`.
-//! - Empty `entries` ⟺ no blocks in the document.
-//!
+//! - Empty `entries` ⟺ no markers in the document.
+
 use crate::types::EntityId;
+
+/// Discriminates real blocks from table-anchor sentinels in the
+/// offset index. The wrapped `EntityId` is the corresponding entity's
+/// id (a Block id or a Table id).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OffsetMarker {
+    Block(EntityId),
+    TableAnchor(EntityId),
+}
+
+impl OffsetMarker {
+    pub fn as_block(self) -> Option<EntityId> {
+        match self {
+            OffsetMarker::Block(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn as_table_anchor(self) -> Option<EntityId> {
+        match self {
+            OffsetMarker::TableAnchor(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn is_block(self) -> bool {
+        matches!(self, OffsetMarker::Block(_))
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockOffsetIndex {
-    /// `(block_id, byte_start)` pairs sorted by `byte_start` ascending.
-    pub entries: Vec<(EntityId, u32)>,
+    /// `(marker, byte_start)` pairs sorted by `byte_start` ascending.
+    pub entries: Vec<(OffsetMarker, u32)>,
 
     /// Total byte length of the rope this index describes. The last
-    /// block extends from its `byte_start` to this value.
+    /// entry extends from its `byte_start` to this value.
     pub total_bytes: u32,
 }
 
@@ -44,16 +76,16 @@ impl BlockOffsetIndex {
         self.total_bytes = total;
     }
 
-    /// Insert a block at a given byte position. The caller is
+    /// Insert a marker at a given byte position. The caller is
     /// responsible for keeping the `byte_start` ordered relative to
     /// neighbours — this method does NOT re-sort.
-    pub fn insert_at(&mut self, position: usize, block_id: EntityId, byte_start: u32) {
-        self.entries.insert(position, (block_id, byte_start));
+    pub fn insert_at(&mut self, position: usize, marker: OffsetMarker, byte_start: u32) {
+        self.entries.insert(position, (marker, byte_start));
     }
 
-    /// Append a block at the end (its `byte_start` must be ≥ the last
+    /// Append a marker at the end (its `byte_start` must be ≥ the last
     /// entry's `byte_start`).
-    pub fn push(&mut self, block_id: EntityId, byte_start: u32) {
+    pub fn push(&mut self, marker: OffsetMarker, byte_start: u32) {
         debug_assert!(
             self.entries
                 .last()
@@ -61,19 +93,25 @@ impl BlockOffsetIndex {
                 .unwrap_or(true),
             "push must preserve ordering"
         );
-        self.entries.push((block_id, byte_start));
+        self.entries.push((marker, byte_start));
+    }
+
+    /// Convenience: register a block by id. Equivalent to
+    /// `push(OffsetMarker::Block(id), byte_start)`.
+    pub fn push_block(&mut self, block_id: EntityId, byte_start: u32) {
+        self.push(OffsetMarker::Block(block_id), byte_start);
     }
 
     /// Remove the entry at the given position. Panics if out of bounds.
-    pub fn remove_at(&mut self, position: usize) -> (EntityId, u32) {
+    pub fn remove_at(&mut self, position: usize) -> (OffsetMarker, u32) {
         self.entries.remove(position)
     }
 
-    /// Byte range `(start, end)` of a block. `end` is the next block's
-    /// `byte_start` (or `total_bytes` for the last block). Returns
-    /// `None` if the block id is not indexed.
-    pub fn range_of(&self, block_id: EntityId) -> Option<(u32, u32)> {
-        let idx = self.entries.iter().position(|(id, _)| *id == block_id)?;
+    /// Byte range `(start, end)` of a marker. `end` is the next
+    /// marker's `byte_start` (or `total_bytes` for the last entry).
+    /// Returns `None` if the marker is not indexed.
+    pub fn range_of(&self, marker: OffsetMarker) -> Option<(u32, u32)> {
+        let idx = self.entries.iter().position(|(m, _)| *m == marker)?;
         let start = self.entries[idx].1;
         let end = self
             .entries
@@ -83,33 +121,51 @@ impl BlockOffsetIndex {
         Some((start, end))
     }
 
-    /// Block id whose byte range covers `byte`. Returns `None` if the
+    /// Byte range for a block-id specifically. Convenience for the
+    /// common case.
+    pub fn range_of_block(&self, block_id: EntityId) -> Option<(u32, u32)> {
+        self.range_of(OffsetMarker::Block(block_id))
+    }
+
+    /// Marker whose byte range covers `byte`. Returns `None` if the
     /// index is empty or `byte` falls past `total_bytes`.
     ///
-    /// `byte == total_bytes` is treated as belonging to the last block
+    /// `byte == total_bytes` is treated as belonging to the last entry
     /// (this is the cursor-at-end-of-document case).
-    pub fn block_at_byte(&self, byte: u32) -> Option<EntityId> {
+    pub fn marker_at_byte(&self, byte: u32) -> Option<OffsetMarker> {
         if self.entries.is_empty() {
             return None;
         }
         if byte > self.total_bytes {
             return None;
         }
-        // Binary search for the largest entry whose byte_start ≤ byte.
         let idx = match self.entries.binary_search_by_key(&byte, |(_, bs)| *bs) {
-            Ok(i) => i,             // exact match
-            Err(0) => return None,  // byte before first block
-            Err(i) => i - 1,        // largest byte_start < byte
+            Ok(i) => i,
+            Err(0) => return None,
+            Err(i) => i - 1,
         };
         Some(self.entries[idx].0)
     }
 
+    /// Block id whose byte range covers `byte`, ignoring table-anchor
+    /// markers. Returns `None` if no block covers the byte.
+    pub fn block_at_byte(&self, byte: u32) -> Option<EntityId> {
+        self.marker_at_byte(byte).and_then(|m| m.as_block())
+    }
+
     /// Convert an absolute rope byte offset into
-    /// `(block_id, byte_in_block)`. Returns `None` for offsets past the
+    /// `(marker, byte_in_marker)`. Returns `None` for offsets past the
     /// end or for an empty index.
+    pub fn byte_to_marker_byte(&self, byte: u32) -> Option<(OffsetMarker, u32)> {
+        let marker = self.marker_at_byte(byte)?;
+        let (start, _) = self.range_of(marker)?;
+        Some((marker, byte - start))
+    }
+
+    /// Block-only variant of `byte_to_marker_byte`.
     pub fn byte_to_block_byte(&self, byte: u32) -> Option<(EntityId, u32)> {
         let block_id = self.block_at_byte(byte)?;
-        let (start, _) = self.range_of(block_id)?;
+        let (start, _) = self.range_of_block(block_id)?;
         Some((block_id, byte - start))
     }
 

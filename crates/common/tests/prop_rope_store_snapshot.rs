@@ -96,7 +96,11 @@ fn populate_some_state(store: &RopeStore) {
             },
         }],
     );
-    store.block_offsets.write().unwrap().entries.push((BLOCK_ID, 0));
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .push_block(BLOCK_ID, 0);
 
     // Pre-set counters so populate is deterministic (would otherwise
     // depend on call order).
