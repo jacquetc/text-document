@@ -4,7 +4,7 @@ extern crate text_document_io as document_io;
 
 use anyhow::Result;
 use document_io::document_io_controller;
-use document_io::{ImportHtmlDto, ImportMarkdownDto, ImportPlainTextDto};
+use document_io::ImportPlainTextDto;
 use test_harness::setup;
 
 #[test]

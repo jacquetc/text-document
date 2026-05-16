@@ -456,6 +456,34 @@ pub fn rope_insert_table_anchor(
     let _ = SENTINEL_BYTES;
 }
 
+/// Append a U+FFFC table-anchor sentinel at the end of the rope and
+/// register a `TableAnchor(table_id)` marker. If the rope is already
+/// non-empty, prepends a `\n` boundary so the sentinel doesn't run
+/// into the previous entry's content.
+///
+/// Used by import paths (`import_html_uc`, `import_markdown_uc`)
+/// that process the document linearly and append entities as they
+/// encounter them, rather than inserting relative to an existing
+/// target block.
+pub fn rope_append_table_anchor(store: &Store, table_id: EntityId) {
+    let (anchor_byte_start, new_total) = {
+        let mut rope = store.rope.write().unwrap();
+        let was_empty = rope.len_bytes() == 0;
+        let char_end = rope.len_chars();
+        let to_insert = if was_empty { "\u{FFFC}" } else { "\n\u{FFFC}" };
+        rope.insert(char_end, to_insert);
+        let new_total = rope.len_bytes() as u32;
+        // Sentinel is 3 bytes; if a `\n` was prepended that's 1 byte
+        // before the sentinel.
+        let anchor_byte_start = new_total - 3;
+        (anchor_byte_start, new_total)
+    };
+
+    let mut offsets = store.block_offsets.write().unwrap();
+    offsets.entries.push((OffsetMarker::TableAnchor(table_id), anchor_byte_start));
+    offsets.set_total_bytes(new_total);
+}
+
 /// Remove a TableAnchor sentinel from the rope, undoing the effect
 /// of `rope_insert_table_anchor`. Looks up the anchor's byte range
 /// (always 3 bytes for the U+FFFC plus 1 byte of inter-marker `\n`

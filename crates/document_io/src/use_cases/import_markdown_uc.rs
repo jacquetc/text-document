@@ -3,7 +3,9 @@ use crate::ImportMarkdownDto;
 use crate::ImportMarkdownResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{rope_append_block, rope_insert_block_boundary, rope_reset};
+use common::database::rope_helpers::{
+    rope_append_block, rope_append_table_anchor, rope_insert_block_boundary, rope_reset,
+};
 use common::entities::{Block, Document, Frame, FramePosition, List, Root, Table, TableCell};
 
 use common::long_operation::LongOperation;
@@ -276,6 +278,11 @@ fn import_parsed_elements(
                 };
                 let created_table = uow.create_table(&table, doc_id, -1)?;
 
+                // 1b. Mirror the table-anchor sentinel into the global
+                // rope. Appended at the end (the importer processes
+                // elements linearly).
+                rope_append_table_anchor(&uow.store(), created_table.id);
+
                 // 2. Create cell frames with content + TableCell entities
                 let current_frame_id = frame_stack.last().unwrap().frame_id;
                 let total_cells = num_rows * num_cols;
@@ -309,6 +316,12 @@ fn import_parsed_elements(
                                 runs_map.remove(&created_block.id);
                             }
                         }
+
+                        // Mirror the cell block into the global rope:
+                        // insert a `\n` boundary, then the cell's
+                        // content.
+                        rope_insert_block_boundary(&uow.store());
+                        rope_append_block(&uow.store(), created_block.id, &plain_text);
 
                         // Update cell frame's child_order
                         let mut updated_cell_frame = created_cell_frame.clone();
@@ -350,6 +363,12 @@ fn import_parsed_elements(
                     .unwrap()
                     .child_order
                     .push(-(created_anchor.id as i64));
+
+                // Tables put content in the rope (the anchor sentinel
+                // + cell blocks) — any subsequent main-flow block must
+                // be preceded by a `\n` boundary, same as after a
+                // Block.
+                emitted_any_main_block = true;
 
                 // Separator after the table
                 if i < total_elements - 1 {
