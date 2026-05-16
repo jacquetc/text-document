@@ -3,7 +3,6 @@
 pub mod block;
 pub mod document;
 pub mod frame;
-pub mod inline_element;
 pub mod list;
 pub mod repository_factory;
 pub mod resource;

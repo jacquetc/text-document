@@ -3,8 +3,8 @@ use anyhow::Result;
 use common::parser_tools::fragment_schema::FragmentData;
 
 use test_harness::{
-    BlockRelationshipField, block_controller, export_text, get_block_ids,
-    inline_element_controller, setup_with_text,
+    block_controller, export_text, get_block_ids, get_element_ids, inline_element_controller,
+    setup_with_text,
 };
 
 use document_editing::InsertFragmentDto;
@@ -237,11 +237,7 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
     let block_ids = get_block_ids(&db_context)?;
     let mut bold_substring_count = 0;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db_context,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
+        let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
             if let Some(elem) = elem
@@ -597,7 +593,7 @@ fn test_extract_fragment_multiple_formats() -> Result<()> {
     let mut found_italic = false;
     for block_id in &block_ids {
         let elem_ids =
-            block_controller::get_relationship(&db2, block_id, &BlockRelationshipField::Elements)?;
+            get_element_ids(&db2, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db2, elem_id)?.unwrap();
             if elem.fmt_font_bold == Some(true) {

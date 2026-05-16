@@ -23,7 +23,6 @@ pub trait ExportDocxUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO", thread_safe = true)]

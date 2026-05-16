@@ -148,7 +148,6 @@ fn execute_insert_block(
         id: 0,
         created_at: now,
         updated_at: now,
-        elements: vec![],
         list: current_block.list,
         text_length: text_after_chars + right_image_count,
         document_position: new_block_position,

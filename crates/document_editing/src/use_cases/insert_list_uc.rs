@@ -32,7 +32,6 @@ pub trait InsertListUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "List", action = "Create")]
 pub trait InsertListUnitOfWorkTrait: CommandUnitOfWork {}
 
@@ -125,7 +124,6 @@ fn execute_insert_list(
         id: 0,
         created_at: now,
         updated_at: now,
-        elements: vec![],
         list: Some(created_list.id),
         text_length: 0,
         document_position: new_block_position,
@@ -135,16 +133,6 @@ fn execute_insert_list(
 
     let insert_index = (block_idx + 1) as i32;
     let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
-
-    // Create an empty inline element for the new block
-    let empty_elem = InlineElement {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        content: InlineContent::Empty,
-        ..Default::default()
-    };
-    uow.create_inline_element(&empty_elem, created_block.id, -1)?;
 
     // Update frame's child_order
     let mut updated_frame = frame.clone();

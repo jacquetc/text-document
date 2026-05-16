@@ -2,8 +2,11 @@
 
 pub use common::entities::Alignment;
 use common::entities::Block;
+pub use common::entities::CharVerticalAlignment;
+pub use common::entities::InlineContent;
 pub use common::entities::MarkerType;
 pub use common::entities::TextDirection;
+pub use common::entities::UnderlineStyle;
 use common::types::EntityId;
 use serde::{Deserialize, Serialize};
 use std::convert::From;
@@ -13,7 +16,6 @@ pub struct BlockDto {
     pub id: EntityId,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub elements: Vec<EntityId>,
     pub list: Option<EntityId>,
     pub text_length: i64,
     pub document_position: i64,
@@ -42,7 +44,6 @@ impl From<BlockDto> for Block {
             id: dto.id,
             created_at: dto.created_at,
             updated_at: dto.updated_at,
-            elements: dto.elements,
             list: dto.list,
             text_length: dto.text_length,
             document_position: dto.document_position,
@@ -73,7 +74,6 @@ impl From<&BlockDto> for Block {
             id: dto.id,
             created_at: dto.created_at,
             updated_at: dto.updated_at,
-            elements: dto.elements.clone(),
             list: dto.list,
             text_length: dto.text_length,
             document_position: dto.document_position,
@@ -104,7 +104,6 @@ impl From<Block> for BlockDto {
             id: entity.id,
             created_at: entity.created_at,
             updated_at: entity.updated_at,
-            elements: entity.elements,
             list: entity.list,
             text_length: entity.text_length,
             document_position: entity.document_position,
@@ -133,7 +132,6 @@ impl From<Block> for BlockDto {
 pub struct CreateBlockDto {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub elements: Vec<EntityId>,
     pub list: Option<EntityId>,
     pub text_length: i64,
     pub document_position: i64,
@@ -162,7 +160,6 @@ impl From<CreateBlockDto> for Block {
             id: 0,
             created_at: dto.created_at,
             updated_at: dto.updated_at,
-            elements: dto.elements,
             list: dto.list,
             text_length: dto.text_length,
             document_position: dto.document_position,
@@ -193,7 +190,6 @@ impl From<&CreateBlockDto> for Block {
             id: 0,
             created_at: dto.created_at,
             updated_at: dto.updated_at,
-            elements: dto.elements.clone(),
             list: dto.list,
             text_length: dto.text_length,
             document_position: dto.document_position,
@@ -223,7 +219,6 @@ impl From<Block> for CreateBlockDto {
         CreateBlockDto {
             created_at: entity.created_at,
             updated_at: entity.updated_at,
-            elements: entity.elements,
             list: entity.list,
             text_length: entity.text_length,
             document_position: entity.document_position,
@@ -299,7 +294,6 @@ impl From<UpdateBlockDto> for Block {
             fmt_background_color: dto.fmt_background_color,
             fmt_is_code_block: dto.fmt_is_code_block,
             fmt_code_language: dto.fmt_code_language,
-            elements: Default::default(),
             list: Default::default(),
         }
     }
@@ -330,7 +324,6 @@ impl From<&UpdateBlockDto> for Block {
             fmt_background_color: dto.fmt_background_color.clone(),
             fmt_is_code_block: dto.fmt_is_code_block,
             fmt_code_language: dto.fmt_code_language.clone(),
-            elements: Default::default(),
             list: Default::default(),
         }
     }

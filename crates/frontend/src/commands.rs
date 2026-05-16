@@ -6,7 +6,6 @@
 pub mod block_commands;
 pub mod document_commands;
 pub mod frame_commands;
-pub mod inline_element_commands;
 pub mod list_commands;
 pub mod resource_commands;
 pub mod root_commands;

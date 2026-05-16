@@ -101,7 +101,6 @@ pub struct Block {
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub elements: Vec<EntityId>,
     pub list: Option<EntityId>,
     pub text_length: i64,
     pub document_position: i64,

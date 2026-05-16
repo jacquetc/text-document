@@ -25,18 +25,14 @@ pub struct HashMapStore {
     pub documents: RwLock<HashMap<EntityId, Document>>,
     pub frames: RwLock<HashMap<EntityId, Frame>>,
     pub blocks: RwLock<HashMap<EntityId, Block>>,
-    pub inline_elements: RwLock<HashMap<EntityId, InlineElement>>,
     pub lists: RwLock<HashMap<EntityId, List>>,
     pub resources: RwLock<HashMap<EntityId, Resource>>,
     pub tables: RwLock<HashMap<EntityId, Table>>,
     pub table_cells: RwLock<HashMap<EntityId, TableCell>>,
 
-    // ── Format runs and image anchors (rope-migration Phase 1) ──────────
-    // Per-block character formatting (sorted, non-overlapping byte spans).
-    // Will replace `inline_elements` + `jn_inline_element_from_block_elements`
-    // entirely at the end of Phase 1. During the migration, both models
-    // coexist; use cases gradually move from writing InlineElements to
-    // writing format_runs.
+    // ── Per-block character formatting + image anchors ──────────────
+    // Sorted, non-overlapping byte spans; replaces the legacy
+    // `inline_elements` table + junction (deleted in Phase 1.14).
     pub format_runs: RwLock<HashMap<EntityId, Vec<FormatRun>>>,
     pub block_images: RwLock<HashMap<EntityId, Vec<ImageAnchor>>>,
 
@@ -49,7 +45,6 @@ pub struct HashMapStore {
     pub jn_block_from_frame_blocks: RwLock<HashMap<EntityId, Vec<EntityId>>>,
     pub jn_frame_from_frame_parent_frame: RwLock<HashMap<EntityId, Vec<EntityId>>>,
     pub jn_table_from_frame_table: RwLock<HashMap<EntityId, Vec<EntityId>>>,
-    pub jn_inline_element_from_block_elements: RwLock<HashMap<EntityId, Vec<EntityId>>>,
     pub jn_list_from_block_list: RwLock<HashMap<EntityId, Vec<EntityId>>>,
     pub jn_table_cell_from_table_cells: RwLock<HashMap<EntityId, Vec<EntityId>>>,
     pub jn_frame_from_table_cell_cell_frame: RwLock<HashMap<EntityId, Vec<EntityId>>>,
@@ -74,7 +69,6 @@ impl HashMapStore {
             documents: self.documents.read().unwrap().clone(),
             frames: self.frames.read().unwrap().clone(),
             blocks: self.blocks.read().unwrap().clone(),
-            inline_elements: self.inline_elements.read().unwrap().clone(),
             lists: self.lists.read().unwrap().clone(),
             resources: self.resources.read().unwrap().clone(),
             tables: self.tables.read().unwrap().clone(),
@@ -107,11 +101,6 @@ impl HashMapStore {
                 .unwrap()
                 .clone(),
             jn_table_from_frame_table: self.jn_table_from_frame_table.read().unwrap().clone(),
-            jn_inline_element_from_block_elements: self
-                .jn_inline_element_from_block_elements
-                .read()
-                .unwrap()
-                .clone(),
             jn_list_from_block_list: self.jn_list_from_block_list.read().unwrap().clone(),
             jn_table_cell_from_table_cells: self
                 .jn_table_cell_from_table_cells
@@ -135,7 +124,6 @@ impl HashMapStore {
         *self.documents.write().unwrap() = snap.documents.clone();
         *self.frames.write().unwrap() = snap.frames.clone();
         *self.blocks.write().unwrap() = snap.blocks.clone();
-        *self.inline_elements.write().unwrap() = snap.inline_elements.clone();
         *self.lists.write().unwrap() = snap.lists.clone();
         *self.resources.write().unwrap() = snap.resources.clone();
         *self.tables.write().unwrap() = snap.tables.clone();
@@ -154,8 +142,6 @@ impl HashMapStore {
         *self.jn_frame_from_frame_parent_frame.write().unwrap() =
             snap.jn_frame_from_frame_parent_frame.clone();
         *self.jn_table_from_frame_table.write().unwrap() = snap.jn_table_from_frame_table.clone();
-        *self.jn_inline_element_from_block_elements.write().unwrap() =
-            snap.jn_inline_element_from_block_elements.clone();
         *self.jn_list_from_block_list.write().unwrap() = snap.jn_list_from_block_list.clone();
         *self.jn_table_cell_from_table_cells.write().unwrap() =
             snap.jn_table_cell_from_table_cells.clone();
@@ -210,7 +196,6 @@ impl HashMapStore {
         *self.documents.write().unwrap() = snap.documents.clone();
         *self.frames.write().unwrap() = snap.frames.clone();
         *self.blocks.write().unwrap() = snap.blocks.clone();
-        *self.inline_elements.write().unwrap() = snap.inline_elements.clone();
         *self.lists.write().unwrap() = snap.lists.clone();
         *self.resources.write().unwrap() = snap.resources.clone();
         *self.tables.write().unwrap() = snap.tables.clone();
@@ -229,8 +214,6 @@ impl HashMapStore {
         *self.jn_frame_from_frame_parent_frame.write().unwrap() =
             snap.jn_frame_from_frame_parent_frame.clone();
         *self.jn_table_from_frame_table.write().unwrap() = snap.jn_table_from_frame_table.clone();
-        *self.jn_inline_element_from_block_elements.write().unwrap() =
-            snap.jn_inline_element_from_block_elements.clone();
         *self.jn_list_from_block_list.write().unwrap() = snap.jn_list_from_block_list.clone();
         *self.jn_table_cell_from_table_cells.write().unwrap() =
             snap.jn_table_cell_from_table_cells.clone();
@@ -262,7 +245,6 @@ pub struct HashMapStoreSnapshot {
     documents: HashMap<EntityId, Document>,
     frames: HashMap<EntityId, Frame>,
     blocks: HashMap<EntityId, Block>,
-    inline_elements: HashMap<EntityId, InlineElement>,
     lists: HashMap<EntityId, List>,
     resources: HashMap<EntityId, Resource>,
     tables: HashMap<EntityId, Table>,
@@ -275,7 +257,6 @@ pub struct HashMapStoreSnapshot {
     jn_block_from_frame_blocks: HashMap<EntityId, Vec<EntityId>>,
     jn_frame_from_frame_parent_frame: HashMap<EntityId, Vec<EntityId>>,
     jn_table_from_frame_table: HashMap<EntityId, Vec<EntityId>>,
-    jn_inline_element_from_block_elements: HashMap<EntityId, Vec<EntityId>>,
     jn_list_from_block_list: HashMap<EntityId, Vec<EntityId>>,
     jn_table_cell_from_table_cells: HashMap<EntityId, Vec<EntityId>>,
     jn_frame_from_table_cell_cell_frame: HashMap<EntityId, Vec<EntityId>>,

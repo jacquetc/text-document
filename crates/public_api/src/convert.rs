@@ -216,34 +216,6 @@ impl TextFormat {
     }
 }
 
-// ── InlineElement entity → TextFormat ───────────────────────────
-
-impl From<&frontend::inline_element::dtos::InlineElementDto> for TextFormat {
-    fn from(el: &frontend::inline_element::dtos::InlineElementDto) -> Self {
-        Self {
-            font_family: el.fmt_font_family.clone(),
-            font_point_size: el.fmt_font_point_size.map(|v| v as u32),
-            font_weight: el.fmt_font_weight.map(|v| v as u32),
-            font_bold: el.fmt_font_bold,
-            font_italic: el.fmt_font_italic,
-            font_underline: el.fmt_font_underline,
-            font_overline: el.fmt_font_overline,
-            font_strikeout: el.fmt_font_strikeout,
-            letter_spacing: el.fmt_letter_spacing.map(|v| v as i32),
-            word_spacing: el.fmt_word_spacing.map(|v| v as i32),
-            underline_style: el.fmt_underline_style.clone(),
-            vertical_alignment: el.fmt_vertical_alignment.clone(),
-            anchor_href: el.fmt_anchor_href.clone(),
-            anchor_names: el.fmt_anchor_names.clone(),
-            is_anchor: el.fmt_is_anchor,
-            tooltip: el.fmt_tooltip.clone(),
-            foreground_color: None,
-            background_color: None,
-            underline_color: None,
-        }
-    }
-}
-
 // ── CharacterFormat (Phase 1 format_runs) → TextFormat ─────────
 
 impl From<&frontend::common::format_runs::CharacterFormat> for TextFormat {

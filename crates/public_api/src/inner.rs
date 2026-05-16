@@ -320,12 +320,10 @@ impl TextDocumentInner {
     pub fn initialize(ctx: AppContext) -> Result<Self> {
         use frontend::block::dtos::CreateBlockDto;
         use frontend::commands::{
-            block_commands, document_commands, frame_commands, inline_element_commands,
-            root_commands, undo_redo_commands,
+            block_commands, document_commands, frame_commands, root_commands, undo_redo_commands,
         };
         use frontend::document::dtos::CreateDocumentDto;
         use frontend::frame::dtos::CreateFrameDto;
-        use frontend::inline_element::dtos::CreateInlineElementDto;
         use frontend::root::dtos::CreateRootDto;
 
         let event_client = EventHubClient::new(&ctx.event_hub);
@@ -354,13 +352,6 @@ impl TextDocumentInner {
             Some(stack_id),
             &CreateBlockDto::default(),
             frame.id,
-            -1,
-        )?;
-        let _element = inline_element_commands::create_inline_element(
-            &ctx,
-            Some(stack_id),
-            &CreateInlineElementDto::default(),
-            block.id,
             -1,
         )?;
 

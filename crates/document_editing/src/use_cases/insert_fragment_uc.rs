@@ -296,7 +296,6 @@ fn try_replace_table_cells(
                         id: 0,
                         created_at: now,
                         updated_at: now,
-                        elements: vec![],
                         list: None,
                         text_length: extra_frag.plain_text.chars().count() as i64
                             + ximages.len() as i64,
@@ -438,7 +437,6 @@ fn insert_table_fragment(
                         id: 0,
                         created_at: now,
                         updated_at: now,
-                        elements: vec![],
                         list: None,
                         text_length: extra_len,
                         document_position: current_pos,
@@ -802,7 +800,6 @@ fn insert_mixed_fragment(
         updated_current.fmt_background_color = fb.background_color.clone();
         updated_current.fmt_is_code_block = fb.is_code_block;
         updated_current.fmt_code_language = fb.code_language.clone();
-        updated_current.elements = Vec::new();
         updated_current.updated_at = now;
         uow.update_block_with_relationships(&updated_current)?;
     } else {
@@ -885,7 +882,6 @@ fn insert_mixed_fragment(
                     id: 0,
                     created_at: now,
                     updated_at: now,
-                    elements: vec![],
                     list: list_id,
                     text_length: block_text_len,
                     document_position: running_position,
@@ -972,7 +968,6 @@ fn insert_mixed_fragment(
                                 id: 0,
                                 created_at: now,
                                 updated_at: now,
-                                elements: vec![],
                                 list: None,
                                 text_length: extra_len,
                                 document_position: running_position,
@@ -1072,7 +1067,6 @@ fn insert_mixed_fragment(
             id: 0,
             created_at: now,
             updated_at: now,
-            elements: vec![],
             list: if overwrite_head { None } else { current_block.list },
             text_length: tail_text_length,
             document_position: running_position,
@@ -1507,7 +1501,6 @@ fn execute_insert_fragment(
             updated_current.fmt_background_color = first_frag.background_color.clone();
             updated_current.fmt_is_code_block = first_frag.is_code_block;
             updated_current.fmt_code_language = first_frag.code_language.clone();
-            updated_current.elements = Vec::new();
             updated_current.updated_at = now;
             uow.update_block_with_relationships(&updated_current)?;
         } else if merge_first {
@@ -1570,7 +1563,6 @@ fn execute_insert_fragment(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
@@ -1626,7 +1618,6 @@ fn execute_insert_fragment(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: if overwrite_head { None } else { current_block.list },
                 text_length: tail_text_length,
                 document_position: running_position,
@@ -1817,7 +1808,6 @@ fn execute_insert_fragment(
             updated_current.fmt_background_color = frag_block.background_color.clone();
             updated_current.fmt_is_code_block = frag_block.is_code_block;
             updated_current.fmt_code_language = frag_block.code_language.clone();
-            updated_current.elements = Vec::new();
             updated_current.updated_at = now;
             uow.update_block_with_relationships(&updated_current)?;
             write_block_state(
@@ -1840,7 +1830,6 @@ fn execute_insert_fragment(
                     id: 0,
                     created_at: now,
                     updated_at: now,
-                    elements: vec![],
                     list: None,
                     text_length: tail_text_length,
                     document_position: running_position,
@@ -1953,7 +1942,6 @@ fn execute_insert_fragment(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
@@ -1992,7 +1980,6 @@ fn execute_insert_fragment(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: current_block.list,
                 text_length: tail_text_length,
                 document_position: running_position,

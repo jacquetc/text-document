@@ -57,7 +57,6 @@ impl QueryUnitOfWork for GetTextAtPositionUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 impl GetTextAtPositionUnitOfWorkTrait for GetTextAtPositionUnitOfWork {}

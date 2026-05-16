@@ -9,9 +9,9 @@ use document_formatting::document_formatting_controller;
 use document_formatting::{CharVerticalAlignment, SetTextFormatDto, UnderlineStyle};
 
 use test_harness::{
-    BlockRelationshipField, FrameRelationshipField, UpdateBlockDto, UpdateInlineElementDto,
-    block_controller, create_list, frame_controller, get_block_ids, get_sorted_cells,
-    inline_element_controller, insert_image, insert_table, setup_with_text,
+    FrameRelationshipField, UpdateBlockDto, block_controller, create_list, frame_controller,
+    get_block_ids, get_sorted_cells, inline_element_controller, insert_image, insert_table,
+    setup_with_text,
 };
 
 #[test]
@@ -197,13 +197,6 @@ fn test_set_text_format_in_table_cell() -> Result<()> {
         frame_controller::get_relationship(&db, &cell_frame_id, &FrameRelationshipField::Blocks)?;
     let cell_block = block_controller::get(&db, &cell_block_ids[0])?.unwrap();
     let cell_block_pos = cell_block.document_position;
-
-    let elem_ids =
-        block_controller::get_relationship(&db, &cell_block.id, &BlockRelationshipField::Elements)?;
-    let elem = inline_element_controller::get(&db, &elem_ids[0])?.unwrap();
-    let mut update_elem: UpdateInlineElementDto = elem.into();
-    update_elem.content = InlineContent::Text("Cell text".into());
-    inline_element_controller::update(&db, &hub, &mut urm, None, &update_elem)?;
 
     let mut update_block: UpdateBlockDto = cell_block.into();
     update_block.plain_text = "Cell text".into();

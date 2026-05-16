@@ -283,7 +283,6 @@ fn execute_content_insert(
             updated_current.fmt_non_breakable_lines = first_parsed.non_breakable_lines;
             updated_current.fmt_direction = first_parsed.direction.clone();
             updated_current.fmt_background_color = first_parsed.background_color.clone();
-            updated_current.elements = Vec::new();
             updated_current.updated_at = now;
             uow.update_block_with_relationships(&updated_current)?;
             // The old inline_elements list for this block is now stale;
@@ -373,7 +372,6 @@ fn execute_content_insert(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
@@ -455,7 +453,6 @@ fn execute_content_insert(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: if overwrite_head { None } else { current_block.list },
                 text_length: tail_text_length,
                 document_position: running_position,
@@ -630,7 +627,6 @@ fn execute_content_insert(
             updated_current.fmt_non_breakable_lines = parsed.non_breakable_lines;
             updated_current.fmt_direction = parsed.direction.clone();
             updated_current.fmt_background_color = parsed.background_color.clone();
-            updated_current.elements = Vec::new();
             updated_current.updated_at = now;
             uow.update_block_with_relationships(&updated_current)?;
             drop_block_inline_elements(uow.store().as_ref(), current_block.id);
@@ -652,7 +648,6 @@ fn execute_content_insert(
                     id: 0,
                     created_at: now,
                     updated_at: now,
-                    elements: vec![],
                     list: None,
                     text_length: tail_text_length,
                     document_position: running_position,
@@ -768,7 +763,6 @@ fn execute_content_insert(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
@@ -801,7 +795,6 @@ fn execute_content_insert(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                elements: vec![],
                 list: current_block.list,
                 text_length: tail_text_length,
                 document_position: running_position,

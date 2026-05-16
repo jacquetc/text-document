@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlockRelationshipField {
-    Elements,
     List,
 }
 
@@ -285,18 +284,10 @@ impl<'a> BlockRepository<'a> {
         event_buffer: &mut EventBuffer,
         id: &EntityId,
     ) -> Result<(), RepositoryError> {
-        let entity = match self.table.get(id)? {
+        let _entity = match self.table.get(id)? {
             Some(e) => e,
             None => return Ok(()),
         };
-        // get all strong forward relationship fields
-
-        let elements = entity.elements.clone();
-
-        // remove all strong relationships, initiating a cascade remove
-
-        repository_factory::write::create_inline_element_repository(self.transaction)?
-            .remove_multi(event_buffer, &elements)?;
         // Before removal, find which owner(s) reference this entity
         let affected_owner_ids: Vec<EntityId> = {
             let owner_repo = repository_factory::write::create_frame_repository(self.transaction)?;
@@ -342,21 +333,6 @@ impl<'a> BlockRepository<'a> {
             return Ok(());
         }
 
-        // get all strong forward relationship fields
-
-        let mut elements_ids: Vec<EntityId> = entities
-            .iter()
-            .flat_map(|entity| entity.as_ref().map(|entity| entity.elements.clone()))
-            .flatten()
-            .collect();
-        // remove duplicates
-        elements_ids.sort();
-        elements_ids.dedup();
-
-        // remove all strong relationships, initiating a cascade remove
-
-        repository_factory::write::create_inline_element_repository(self.transaction)?
-            .remove_multi(event_buffer, &elements_ids)?;
         // Before removal, find which owner(s) reference these entities
         let affected_owner_ids: Vec<EntityId> = {
             let owner_repo = repository_factory::write::create_frame_repository(self.transaction)?;
@@ -449,24 +425,6 @@ impl<'a> BlockRepository<'a> {
             .collect();
         if !all_right_ids.is_empty() {
             match field {
-                BlockRelationshipField::Elements => {
-                    let child_repo = repository_factory::write::create_inline_element_repository(
-                        self.transaction,
-                    )?;
-                    let found = child_repo.get_multi(&all_right_ids)?;
-                    let missing: Vec<_> = all_right_ids
-                        .iter()
-                        .zip(found.iter())
-                        .filter(|(_, entity)| entity.is_none())
-                        .map(|(id, _)| *id)
-                        .collect();
-                    if !missing.is_empty() {
-                        return Err(RepositoryError::MissingRelationshipTarget {
-                            operation: "set_relationship_multi",
-                            ids: missing,
-                        });
-                    }
-                }
                 BlockRelationshipField::List => {
                     let child_repo =
                         repository_factory::write::create_list_repository(self.transaction)?;
@@ -516,24 +474,6 @@ impl<'a> BlockRepository<'a> {
         // Validate that all right_ids exist
         if !right_ids.is_empty() {
             match field {
-                BlockRelationshipField::Elements => {
-                    let child_repo = repository_factory::write::create_inline_element_repository(
-                        self.transaction,
-                    )?;
-                    let found = child_repo.get_multi(right_ids)?;
-                    let missing: Vec<_> = right_ids
-                        .iter()
-                        .zip(found.iter())
-                        .filter(|(_, entity)| entity.is_none())
-                        .map(|(id, _)| *id)
-                        .collect();
-                    if !missing.is_empty() {
-                        return Err(RepositoryError::MissingRelationshipTarget {
-                            operation: "set_relationship",
-                            ids: missing,
-                        });
-                    }
-                }
                 BlockRelationshipField::List => {
                     let child_repo =
                         repository_factory::write::create_list_repository(self.transaction)?;
@@ -651,22 +591,6 @@ impl<'a> BlockRepository<'a> {
             block_ids.clone(),
         );
         emit(DirectAccessEntity::Block(EntityEvent::Updated), block_ids);
-
-        // Emit Created events for strong children
-
-        {
-            let child_ids: Vec<_> = store
-                .inline_elements
-                .read()
-                .unwrap()
-                .keys()
-                .copied()
-                .collect();
-            emit(
-                DirectAccessEntity::InlineElement(EntityEvent::Created),
-                child_ids.clone(),
-            );
-        }
 
         Ok(())
     }

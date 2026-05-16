@@ -10,10 +10,6 @@ pub mod write {
                 document_repository::DocumentRepository, document_table::DocumentHashMapTable,
             },
             frame::{frame_repository::FrameRepository, frame_table::FrameHashMapTable},
-            inline_element::{
-                inline_element_repository::InlineElementRepository,
-                inline_element_table::InlineElementHashMapTable,
-            },
             list::{list_repository::ListRepository, list_table::ListHashMapTable},
             resource::{
                 resource_repository::ResourceRepository, resource_table::ResourceHashMapTable,
@@ -50,16 +46,6 @@ pub mod write {
     pub fn create_block_repository(transaction: &'_ Transaction) -> Result<BlockRepository<'_>> {
         let block_table = BlockHashMapTable::new(transaction.get_store());
         Ok(BlockRepository::new(Box::new(block_table), transaction))
-    }
-
-    pub fn create_inline_element_repository(
-        transaction: &'_ Transaction,
-    ) -> Result<InlineElementRepository<'_>> {
-        let inline_element_table = InlineElementHashMapTable::new(transaction.get_store());
-        Ok(InlineElementRepository::new(
-            Box::new(inline_element_table),
-            transaction,
-        ))
     }
 
     pub fn create_list_repository(transaction: &'_ Transaction) -> Result<ListRepository<'_>> {
@@ -102,10 +88,6 @@ pub mod read {
                 document_repository::DocumentRepositoryRO, document_table::DocumentHashMapTableRO,
             },
             frame::{frame_repository::FrameRepositoryRO, frame_table::FrameHashMapTableRO},
-            inline_element::{
-                inline_element_repository::InlineElementRepositoryRO,
-                inline_element_table::InlineElementHashMapTableRO,
-            },
             list::{list_repository::ListRepositoryRO, list_table::ListHashMapTableRO},
             resource::{
                 resource_repository::ResourceRepositoryRO, resource_table::ResourceHashMapTableRO,
@@ -140,15 +122,6 @@ pub mod read {
     pub fn create_block_repository(transaction: &'_ Transaction) -> Result<BlockRepositoryRO<'_>> {
         let block_table = BlockHashMapTableRO::new(transaction.get_store());
         Ok(BlockRepositoryRO::new(Box::new(block_table)))
-    }
-
-    pub fn create_inline_element_repository(
-        transaction: &'_ Transaction,
-    ) -> Result<InlineElementRepositoryRO<'_>> {
-        let inline_element_table = InlineElementHashMapTableRO::new(transaction.get_store());
-        Ok(InlineElementRepositoryRO::new(Box::new(
-            inline_element_table,
-        )))
     }
 
     pub fn create_list_repository(transaction: &'_ Transaction) -> Result<ListRepositoryRO<'_>> {

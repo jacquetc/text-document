@@ -2,8 +2,8 @@ extern crate text_document_editing as document_editing;
 use anyhow::Result;
 
 use test_harness::{
-    BlockRelationshipField, block_controller, export_text, get_block_ids, get_element_ids,
-    inline_element_controller, setup_with_text,
+    block_controller, export_text, get_block_ids, get_element_ids, inline_element_controller,
+    setup_with_text,
 };
 
 use document_editing::document_editing_controller;
@@ -351,11 +351,7 @@ fn test_insert_fragment_simple() -> Result<()> {
     let block_ids = get_block_ids(&db_context)?;
     let mut found_bold = false;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db_context,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
+        let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
             if let common::entities::InlineContent::Text(ref t) = elem.content
@@ -425,11 +421,7 @@ fn test_insert_markdown_code_block() -> Result<()> {
     let block_ids = get_block_ids(&db_context)?;
     let mut found_code = false;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db_context,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
+        let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
             if let common::entities::InlineContent::Text(ref t) = elem.content
@@ -467,11 +459,7 @@ fn test_insert_markdown_nested_bold_italic() -> Result<()> {
     let block_ids = get_block_ids(&db_context)?;
     let mut found_bi = false;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db_context,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
+        let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
             if elem.fmt_font_bold == Some(true) && elem.fmt_font_italic == Some(true) {
@@ -503,11 +491,7 @@ fn test_insert_html_link() -> Result<()> {
     let block_ids = get_block_ids(&db_context)?;
     let mut found_link = false;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db_context,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
+        let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?.unwrap();
             if elem.fmt_anchor_href == Some("http://example.com".to_string()) {

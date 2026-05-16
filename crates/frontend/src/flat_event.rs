@@ -34,9 +34,6 @@ pub enum FlatEventKind {
     BlockCreated,
     BlockUpdated,
     BlockRemoved,
-    InlineElementCreated,
-    InlineElementUpdated,
-    InlineElementRemoved,
     ListCreated,
     ListUpdated,
     ListRemoved,
@@ -149,15 +146,6 @@ impl From<Event> for FlatEvent {
                 DirectAccessEntity::Block(EntityEvent::Created) => FlatEventKind::BlockCreated,
                 DirectAccessEntity::Block(EntityEvent::Updated) => FlatEventKind::BlockUpdated,
                 DirectAccessEntity::Block(EntityEvent::Removed) => FlatEventKind::BlockRemoved,
-                DirectAccessEntity::InlineElement(EntityEvent::Created) => {
-                    FlatEventKind::InlineElementCreated
-                }
-                DirectAccessEntity::InlineElement(EntityEvent::Updated) => {
-                    FlatEventKind::InlineElementUpdated
-                }
-                DirectAccessEntity::InlineElement(EntityEvent::Removed) => {
-                    FlatEventKind::InlineElementRemoved
-                }
                 DirectAccessEntity::List(EntityEvent::Created) => FlatEventKind::ListCreated,
                 DirectAccessEntity::List(EntityEvent::Updated) => FlatEventKind::ListUpdated,
                 DirectAccessEntity::List(EntityEvent::Removed) => FlatEventKind::ListRemoved,
@@ -323,9 +311,6 @@ pub fn is_mutation(kind: &FlatEventKind) -> bool {
             | BlockCreated
             | BlockUpdated
             | BlockRemoved
-            | InlineElementCreated
-            | InlineElementUpdated
-            | InlineElementRemoved
             | ListCreated
             | ListUpdated
             | ListRemoved
@@ -384,10 +369,6 @@ mod tests {
         assert!(is_mutation(&FlatEventKind::BlockCreated));
         assert!(is_mutation(&FlatEventKind::BlockUpdated));
         assert!(is_mutation(&FlatEventKind::BlockRemoved));
-
-        assert!(is_mutation(&FlatEventKind::InlineElementCreated));
-        assert!(is_mutation(&FlatEventKind::InlineElementUpdated));
-        assert!(is_mutation(&FlatEventKind::InlineElementRemoved));
 
         assert!(is_mutation(&FlatEventKind::ListCreated));
         assert!(is_mutation(&FlatEventKind::ListUpdated));

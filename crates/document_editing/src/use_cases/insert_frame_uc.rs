@@ -28,7 +28,6 @@ pub trait InsertFrameUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 pub trait InsertFrameUnitOfWorkTrait: CommandUnitOfWork {}
 
 pub struct InsertFrameUseCase {
@@ -147,7 +146,6 @@ fn execute_insert_frame(
         id: 0,
         created_at: now,
         updated_at: now,
-        elements: vec![],
         list: None,
         text_length: 0,
         document_position: dto.position,
@@ -156,16 +154,6 @@ fn execute_insert_frame(
     };
 
     let created_block = uow.create_block(&new_block, created_frame.id, -1)?;
-
-    // Create an empty inline element in the new block
-    let empty_elem = InlineElement {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        content: InlineContent::Empty,
-        ..Default::default()
-    };
-    uow.create_inline_element(&empty_elem, created_block.id, -1)?;
 
     // Update the new frame's child_order with its block
     let mut updated_new_frame = created_frame.clone();

@@ -102,7 +102,6 @@ impl CommandUnitOfWork for InsertListUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "List", action = "Create")]
 impl InsertListUnitOfWorkTrait for InsertListUnitOfWork {}
 

@@ -32,16 +32,11 @@ impl<'a> BlockHashMapTable<'a> {
         field: &BlockRelationshipField,
     ) -> &RwLock<HashMap<EntityId, Vec<EntityId>>> {
         match field {
-            BlockRelationshipField::Elements => &self.store.jn_inline_element_from_block_elements,
             BlockRelationshipField::List => &self.store.jn_list_from_block_list,
         }
     }
 
     fn hydrate(&self, entity: &mut Block) {
-        entity.elements = junction_get(
-            &self.store.jn_inline_element_from_block_elements,
-            &entity.id,
-        );
         entity.list = junction_get(&self.store.jn_list_from_block_list, &entity.id)
             .into_iter()
             .next();
@@ -77,11 +72,6 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
 
             block_map.insert(new_entity.id, new_entity.clone());
 
-            junction_set(
-                &self.store.jn_inline_element_from_block_elements,
-                new_entity.id,
-                new_entity.elements.clone(),
-            );
             junction_set(
                 &self.store.jn_list_from_block_list,
                 new_entity.id,
@@ -157,11 +147,6 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
             block_map.insert(entity.id, entity.clone());
 
             junction_set(
-                &self.store.jn_inline_element_from_block_elements,
-                entity.id,
-                entity.elements.clone(),
-            );
-            junction_set(
                 &self.store.jn_list_from_block_list,
                 entity.id,
                 entity.list.into_iter().collect::<Vec<EntityId>>(),
@@ -184,7 +169,6 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
 
             // Remove forward junction entries
 
-            junction_remove(&self.store.jn_inline_element_from_block_elements, id);
             junction_remove(&self.store.jn_list_from_block_list, id);
 
             // Clean up backward references (uses the owning entity's forward junction)
@@ -211,16 +195,11 @@ impl<'a> BlockHashMapTableRO<'a> {
         field: &BlockRelationshipField,
     ) -> &RwLock<HashMap<EntityId, Vec<EntityId>>> {
         match field {
-            BlockRelationshipField::Elements => &self.store.jn_inline_element_from_block_elements,
             BlockRelationshipField::List => &self.store.jn_list_from_block_list,
         }
     }
 
     fn hydrate(&self, entity: &mut Block) {
-        entity.elements = junction_get(
-            &self.store.jn_inline_element_from_block_elements,
-            &entity.id,
-        );
         entity.list = junction_get(&self.store.jn_list_from_block_list, &entity.id)
             .into_iter()
             .next();

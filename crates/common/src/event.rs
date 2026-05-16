@@ -46,7 +46,6 @@ pub enum DirectAccessEntity {
     Document(EntityEvent),
     Frame(EntityEvent),
     Block(EntityEvent),
-    InlineElement(EntityEvent),
     List(EntityEvent),
     Resource(EntityEvent),
     Table(EntityEvent),
@@ -148,9 +147,6 @@ impl Event {
                 }
                 DirectAccessEntity::Frame(event) => format!("direct_access_frame_{:?}", event),
                 DirectAccessEntity::Block(event) => format!("direct_access_block_{:?}", event),
-                DirectAccessEntity::InlineElement(event) => {
-                    format!("direct_access_inline_element_{:?}", event)
-                }
                 DirectAccessEntity::List(event) => format!("direct_access_list_{:?}", event),
                 DirectAccessEntity::Resource(event) => {
                     format!("direct_access_resource_{:?}", event)

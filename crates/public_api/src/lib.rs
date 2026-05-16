@@ -42,7 +42,7 @@ mod text_table;
 pub use frontend::block::dtos::{Alignment, MarkerType};
 pub use frontend::document::dtos::{TextDirection, WrapMode};
 pub use frontend::frame::dtos::FramePosition;
-pub use frontend::inline_element::dtos::{CharVerticalAlignment, InlineContent, UnderlineStyle};
+pub use frontend::block::dtos::{CharVerticalAlignment, InlineContent, UnderlineStyle};
 pub use frontend::list::dtos::ListStyle;
 pub use frontend::resource::dtos::ResourceType;
 

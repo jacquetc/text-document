@@ -27,7 +27,6 @@ pub use flat_event::{FlatEvent, FlatEventKind};
 pub use direct_access::block;
 pub use direct_access::document;
 pub use direct_access::frame;
-pub use direct_access::inline_element;
 pub use direct_access::list;
 pub use direct_access::resource;
 pub use direct_access::root;

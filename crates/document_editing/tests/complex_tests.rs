@@ -16,8 +16,8 @@ use document_editing::{
 use test_harness::{
     DocumentRelationshipField, RootRelationshipField, block_controller, document_controller,
     export_text, frame_controller, get_all_block_ids, get_block_ids, get_document_stats,
-    get_sorted_cells, get_table_ids, inline_element_controller, root_controller, setup_with_text,
-    table_controller,
+    get_element_ids, get_sorted_cells, get_table_ids, inline_element_controller, root_controller,
+    setup_with_text, table_controller,
 };
 
 use test_harness::list_controller;
@@ -1264,11 +1264,7 @@ fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
     // No image inline elements should remain
     let remaining_bids = get_all_block_ids(&db)?;
     for bid in &remaining_bids {
-        let elem_ids = block_controller::get_relationship(
-            &db,
-            bid,
-            &test_harness::BlockRelationshipField::Elements,
-        )?;
+        let elem_ids = get_element_ids(&db, bid)?;
         for eid in &elem_ids {
             let elem = inline_element_controller::get(&db, eid)?.expect("Element should exist");
             assert!(

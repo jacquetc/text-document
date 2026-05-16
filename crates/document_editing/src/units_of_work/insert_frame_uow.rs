@@ -99,7 +99,6 @@ impl CommandUnitOfWork for InsertFrameUnitOfWork {
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 impl InsertFrameUnitOfWorkTrait for InsertFrameUnitOfWork {}
 
 pub struct InsertFrameUnitOfWorkFactory {
