@@ -4,13 +4,13 @@
 //! `Vec<InlineSegment>` view used by export, fragments, cursor, and
 //! tests.
 
-use crate::database::hashmap_store::HashMapStore;
+use crate::database::Store;
 use crate::format_runs::{FormatRun, ImageAnchor, InlineSegment, inline_segments_view};
 use crate::types::EntityId;
 
 /// Fetch the format runs for a block. Returns an empty Vec if the block
 /// has no runs (treated the same as a missing entry).
-pub fn get_format_runs(store: &HashMapStore, block_id: EntityId) -> Vec<FormatRun> {
+pub fn get_format_runs(store: &Store, block_id: EntityId) -> Vec<FormatRun> {
     store
         .format_runs
         .read()
@@ -21,7 +21,7 @@ pub fn get_format_runs(store: &HashMapStore, block_id: EntityId) -> Vec<FormatRu
 }
 
 /// Fetch the image anchors for a block.
-pub fn get_block_images(store: &HashMapStore, block_id: EntityId) -> Vec<ImageAnchor> {
+pub fn get_block_images(store: &Store, block_id: EntityId) -> Vec<ImageAnchor> {
     store
         .block_images
         .read()
@@ -39,7 +39,7 @@ pub fn get_block_images(store: &HashMapStore, block_id: EntityId) -> Vec<ImageAn
 /// This is the Phase 1.14b-and-forward reader function. Returns segments
 /// in document order.
 pub fn inline_segments_for_block(
-    store: &HashMapStore,
+    store: &Store,
     block_id: EntityId,
     block_plain_text: &str,
 ) -> Vec<InlineSegment> {

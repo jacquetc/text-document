@@ -2,10 +2,7 @@
 // Phase 2: hand-edited to allow `Store` to be cfg-swapped between
 // HashMapStore (default) and RopeStore (under `rope_backend`).
 
-#[cfg(not(feature = "rope_backend"))]
-use crate::database::hashmap_store::HashMapStore as Store;
-#[cfg(feature = "rope_backend")]
-use crate::database::rope_store::RopeStore as Store;
+use crate::database::Store;
 
 use std::sync::Arc;
 

@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use common::database::hashmap_store::HashMapStore;
+use common::database::Store;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::entities::{Block, Frame};
 use common::format_runs::{InlineContent, InlineSegment};
@@ -13,7 +13,7 @@ pub trait CellFrameCreator {
     fn cfc_create_frame(&mut self, frame: &Frame, owner_id: EntityId, index: i32) -> Result<Frame>;
     fn cfc_create_block(&mut self, block: &Block, owner_id: EntityId, index: i32) -> Result<Block>;
     fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame>;
-    fn cfc_store(&self) -> Arc<HashMapStore>;
+    fn cfc_store(&self) -> Arc<Store>;
 }
 
 /// Implement `CellFrameCreator` for a `Box<dyn UowTrait>` where the UoW trait has the needed methods.
@@ -39,7 +39,7 @@ macro_rules! impl_cell_frame_creator {
             fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame> {
                 (**self).update_frame(frame)
             }
-            fn cfc_store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+            fn cfc_store(&self) -> std::sync::Arc<common::database::Store> {
                 (**self).store()
             }
         }

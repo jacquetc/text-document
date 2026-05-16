@@ -92,7 +92,7 @@ impl CommandUnitOfWork for ListWriteUoW {
         Ok(())
     }
 
-    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
         self.context.get_store().clone()
     }
 }
@@ -255,7 +255,7 @@ impl QueryUnitOfWork for ListReadUoW {
         Ok(())
     }
 
-    fn store(&self) -> std::sync::Arc<common::database::hashmap_store::HashMapStore> {
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
         self.context.get_store().clone()
     }
 }
