@@ -424,6 +424,60 @@ fn paste_multi_block_fragment_mirrors_to_rope() {
     assert_eq!(rope_text, "B2A1\nB2\nC3");
 }
 
+/// Phase 2 step 5.6b: pasting a table-only fragment (cell selection
+/// → copy → paste elsewhere) exercises insert_table_fragment. The
+/// rope mirror must insert the anchor sentinel and place each cell's
+/// blocks at the containing top-level frame's end.
+#[test]
+fn paste_table_fragment_mirrors_to_rope() {
+    // Build a doc containing a 2x2 table by importing HTML.
+    let src = TextDocument::new();
+    src.set_html("<p>before</p><table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table><p>after</p>")
+        .expect("set_html").wait().expect("wait");
+
+    // Select the entire table by selecting from inside the first cell
+    // to inside the last cell.
+    use text_document::FlowElement;
+    let mut table_id_opt: Option<usize> = None;
+    for elem in src.flow() {
+        if let FlowElement::Table(t) = elem {
+            table_id_opt = Some(t.id());
+            break;
+        }
+    }
+    let table_id = table_id_opt.expect("table");
+
+    let cur = src.cursor_at(0);
+    cur.select_cell_range(table_id, 0, 0, 1, 1);
+    let frag = cur.selection();
+
+    // Paste into a fresh doc.
+    let dst = TextDocument::new();
+    dst.set_plain_text("dst").unwrap();
+    let paste = dst.cursor_at(3);
+    paste.insert_fragment(&frag).unwrap();
+
+    // The rope should contain at least the original "dst" plus the
+    // U+FFFC table-anchor sentinel and the cell contents A, B, C, D
+    // somewhere in the cell area.
+    let store = dst.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    let rope_text = rope.to_string();
+    assert!(
+        rope_text.contains('\u{FFFC}'),
+        "rope should contain table-anchor sentinel, got {:?}",
+        rope_text
+    );
+    for cell_text in &["A", "B", "C", "D"] {
+        assert!(
+            rope_text.contains(cell_text),
+            "rope should contain cell text {:?}, got {:?}",
+            cell_text,
+            rope_text
+        );
+    }
+}
+
 /// Phase 2 step 5.6b: pasting a fragment that spans multiple blocks
 /// exercises the block-splitting path of insert_fragment_uc. The
 /// rope mirror must coordinate the head sync + middle/tail block

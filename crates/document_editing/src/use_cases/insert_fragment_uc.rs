@@ -7,8 +7,8 @@ use crate::InsertFragmentResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::database::rope_helpers::{
-    rope_append_block, rope_delete_in_block, rope_insert_block_boundary, rope_insert_in_block,
-    rope_split_block,
+    rope_append_block, rope_delete_in_block, rope_insert_block_at, rope_insert_block_boundary,
+    rope_insert_in_block, rope_insert_table_anchor, rope_split_block, top_level_frame_end_byte,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
@@ -442,10 +442,36 @@ fn insert_table_fragment(
     let mut current_child_idx = child_order_insert_idx;
     let mut current_pos = insert_pos;
 
+    // For the rope mirror at the end: per table, remember
+    //   (created_table_id, target_block_id, anchor_after,
+    //    cell_payload: Vec<Vec<(block_id, plain_text)>>)
+    // so we can replay the same shape into the rope after entity mutations.
+    type CellPayload = Vec<(EntityId, String)>;
+    type TableMirror = (EntityId, EntityId, bool, Vec<CellPayload>);
+    let mut table_mirror: Vec<TableMirror> = Vec::new();
+
     for frag_table in &fragment_data.tables {
         if frag_table.rows == 0 || frag_table.columns == 0 || frag_table.cells.is_empty() {
             continue;
         }
+
+        // Per-table rope-mirror info. We capture cell payloads as the
+        // entity mutations proceed so the rope replay below has the
+        // exact IDs to wire up.
+        let mut this_table_cells: Vec<CellPayload> = Vec::new();
+        // Determine the target block + anchor side for this table.
+        let (anchor_target, anchor_after) = if let Some(first) = blocks.first() {
+            // Find the block currently at `insert_pos` (or fall back to
+            // the first block) and decide before/after based on offset.
+            match find_block_at_position(&blocks, insert_pos) {
+                Ok((tb, _, offset)) => (tb.id, offset >= tb.text_length),
+                Err(_) => (first.id, false),
+            }
+        } else {
+            // Empty-frame edge case: defer the rope mirror for this
+            // table (no rope target exists to anchor against).
+            (0, false)
+        };
 
         let table = Table {
             id: 0,
@@ -471,6 +497,7 @@ fn insert_table_fragment(
 
         for frag_cell in &frag_table.cells {
             let (cell_frame_id, created_block) = create_cell_frame(uow, doc_id, now)?;
+            let mut this_cell_blocks: CellPayload = Vec::new();
 
             if !frag_cell.blocks.is_empty() {
                 let first_frag = &frag_cell.blocks[0];
@@ -485,6 +512,7 @@ fn insert_table_fragment(
                 updated_block.updated_at = now;
                 cell_blocks_to_update.push(updated_block);
                 write_block_state(uow, created_block.id, &first_frag.plain_text, runs, images);
+                this_cell_blocks.push((created_block.id, first_frag.plain_text.clone()));
 
                 current_pos += first_len + 1;
                 total_blocks_added += 1;
@@ -506,6 +534,7 @@ fn insert_table_fragment(
                     };
                     let created_extra = uow.create_block(&extra_block, cell_frame_id, -1)?;
                     write_block_state(uow, created_extra.id, &extra_frag.plain_text, xruns, ximages);
+                    this_cell_blocks.push((created_extra.id, extra_frag.plain_text.clone()));
                     current_pos += extra_len + 1;
                     total_blocks_added += 1;
                     total_chars_added += extra_len;
@@ -515,9 +544,11 @@ fn insert_table_fragment(
                 updated_block.document_position = current_pos;
                 updated_block.updated_at = now;
                 cell_blocks_to_update.push(updated_block);
+                this_cell_blocks.push((created_block.id, String::new()));
                 current_pos += 1;
                 total_blocks_added += 1;
             }
+            this_table_cells.push(this_cell_blocks);
 
             let cell = TableCell {
                 id: 0,
@@ -574,6 +605,45 @@ fn insert_table_fragment(
         uow.update_frame(&updated_parent)?;
 
         current_child_idx += 1;
+
+        // Remember this table for the rope mirror at the end (only if
+        // we have a valid anchor target — empty-frame edge case skipped).
+        if anchor_target != 0 {
+            table_mirror.push((created_table.id, anchor_target, anchor_after, this_table_cells));
+        }
+    }
+
+    // ── Rope mirror (insert_table_fragment) ──
+    // For each table created above, insert its anchor sentinel in the
+    // rope and place each cell's block(s) at the end of the containing
+    // top-level frame's range, splitting subsequent cell-internal
+    // blocks off the first cell block.
+    // No-op under default backend.
+    {
+        let store = uow.store();
+        for (table_id, target_block_id, after, cells) in &table_mirror {
+            rope_insert_table_anchor(&store, *table_id, *target_block_id, *after);
+            for cell_blocks in cells {
+                let mut iter = cell_blocks.iter();
+                if let Some((first_id, first_text)) = iter.next() {
+                    // First cell-block goes at top_level_frame_end_byte
+                    // of the table's parent frame (= frame_id, the
+                    // document's top-level frame in this UC).
+                    let pos = top_level_frame_end_byte(&store, frame_id);
+                    rope_insert_block_at(&store, pos, *first_id, first_text);
+                    let mut prev_id = *first_id;
+                    let mut prev_byte_len = first_text.len() as u32;
+                    for (extra_id, extra_text) in iter {
+                        rope_split_block(&store, prev_id, prev_byte_len, *extra_id);
+                        if !extra_text.is_empty() {
+                            rope_insert_in_block(&store, *extra_id, 0, extra_text);
+                        }
+                        prev_id = *extra_id;
+                        prev_byte_len = extra_text.len() as u32;
+                    }
+                }
+            }
+        }
     }
 
     let pos_shift = current_pos - insert_pos;
