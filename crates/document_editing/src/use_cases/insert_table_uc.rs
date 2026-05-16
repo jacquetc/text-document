@@ -239,14 +239,22 @@ fn execute_insert_table(
 
     // Mirror cell-block creation into the global rope. Per plan §1.6
     // cells of a table live AT THE END of the containing top-level
-    // frame's rope range — BEFORE any following top-level frame's
-    // content. Each cell is preceded by a `\n` boundary.
+    // frame's rope range — ideally BEFORE any following top-level
+    // frame's content. Each cell is preceded by a `\n` boundary.
     //
     // The anchor sentinel was just inserted, so the top-level frame's
     // current end byte (computed fresh from block_offsets, not from
     // the stale Frame.byte_range) already includes that sentinel.
-    // Each rope_insert_block_at advances the position by (1 + text.len())
-    // so the next cell lands immediately after the previous one.
+    //
+    // LIMITATION (deferred): when a following top-level frame's content
+    // coincides with frame 1's end byte (typical when the following
+    // frame's first block is empty), `rope_insert_block_at`'s shift
+    // semantics leave the following entry at the colliding byte and
+    // place the cell at byte_pos+1 — so cells end up AFTER the
+    // following frame in the rope. Real public-API workloads do not
+    // currently produce multi-top-level-frame docs, so this layout
+    // anomaly is invisible to users.
+    //
     // No-op under default backend.
     {
         let store = uow.store();
