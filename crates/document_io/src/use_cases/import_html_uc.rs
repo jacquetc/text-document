@@ -3,6 +3,7 @@ use crate::ImportHtmlDto;
 use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{rope_append_block, rope_insert_block_boundary, rope_reset};
 use common::entities::{Block, Document, Frame, FramePosition, List, Resource, Root, Table, TableCell};
 
 use common::long_operation::LongOperation;
@@ -114,6 +115,10 @@ impl LongOperation for ImportHtmlUseCase {
         let new_frame = Frame::default();
         let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
+        // Importers replace the entire document — reset the rope+
+        // block_offsets. No-op under default backend.
+        rope_reset(&uow.store());
+
         // Step 4: Create blocks with format runs and image anchors
         // Track blockquote frame stack
         let total_elements = parsed_elements.len();
@@ -132,6 +137,10 @@ impl LongOperation for ImportHtmlUseCase {
         }];
         let mut current_bq_depth: u32 = 0;
         let mut list_grouper = ListGrouper::new();
+        // Same intent as in import_markdown_uc: rope inter-block
+        // boundaries go between main-flow blocks, not before the
+        // first and not for table-cell blocks (deferred to step 5.5).
+        let mut emitted_any_main_block = false;
 
         for (i, parsed_element) in parsed_elements.iter().enumerate() {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -202,6 +211,14 @@ impl LongOperation for ImportHtmlUseCase {
                     };
 
                     let created_block = uow.create_block(&block, current_frame_id, -1)?;
+
+                    // Mirror into the global rope. Inter-block `\n`
+                    // before every block after the first.
+                    if emitted_any_main_block {
+                        rope_insert_block_boundary(&uow.store());
+                    }
+                    rope_append_block(&uow.store(), created_block.id, &plain_text);
+                    emitted_any_main_block = true;
 
                     // Write format_runs directly; block_images stays empty for
                     // HTML import (parser does not surface inline images today).

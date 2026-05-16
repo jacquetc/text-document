@@ -27,28 +27,19 @@ pub fn rope_reset(store: &Store) {
 }
 
 /// Append `text` to the end of the rope and register `block_id` at
-/// the byte position where the text starts. If `with_newline_separator`
-/// is true, an additional `\n` is appended after the text (the
-/// inter-block boundary newline per plan §1.4).
+/// the byte position where the text starts. Returns that byte offset.
 ///
-/// Returns the byte offset at which the block's text begins.
+/// Callers are responsible for inserting an inter-block `\n`
+/// (`rope_insert_block_boundary`) before each block AFTER the first
+/// in a contiguous frame.
 #[allow(unused_variables)]
-pub fn rope_append_block(
-    store: &Store,
-    block_id: EntityId,
-    text: &str,
-    with_newline_separator: bool,
-) -> u32 {
+pub fn rope_append_block(store: &Store, block_id: EntityId, text: &str) -> u32 {
     #[cfg(feature = "rope_backend")]
     {
         let mut rope = store.rope.write().unwrap();
         let byte_start = rope.len_bytes() as u32;
         let char_end = rope.len_chars();
         rope.insert(char_end, text);
-        if with_newline_separator {
-            let char_end = rope.len_chars();
-            rope.insert(char_end, "\n");
-        }
         let new_total = rope.len_bytes() as u32;
         drop(rope);
 
@@ -60,5 +51,22 @@ pub fn rope_append_block(
     #[cfg(not(feature = "rope_backend"))]
     {
         0
+    }
+}
+
+/// Append a single `\n` inter-block boundary character to the end of
+/// the rope. Does NOT register a block — this is the sentinel between
+/// two adjacent blocks within the same frame (plan §1.4).
+#[allow(unused_variables)]
+pub fn rope_insert_block_boundary(store: &Store) {
+    #[cfg(feature = "rope_backend")]
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_end = rope.len_chars();
+        rope.insert(char_end, "\n");
+        let new_total = rope.len_bytes() as u32;
+        drop(rope);
+
+        store.block_offsets.write().unwrap().set_total_bytes(new_total);
     }
 }

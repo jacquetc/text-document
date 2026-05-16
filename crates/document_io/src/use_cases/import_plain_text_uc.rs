@@ -1,7 +1,7 @@
 use crate::ImportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{rope_append_block, rope_reset};
+use common::database::rope_helpers::{rope_append_block, rope_insert_block_boundary, rope_reset};
 use common::entities::{Block, Document, Frame, Root};
 
 use common::types::{EntityId, ROOT_ENTITY_ID};
@@ -87,10 +87,12 @@ impl ImportPlainTextUseCase {
             // absent or empty run vector means "default format everywhere".
 
             // Mirror the block's text into the global rope (no-op under
-            // default; real append under rope_backend). The newline
-            // separator goes between blocks, not after the last one.
-            let with_separator = i < lines.len() - 1;
-            rope_append_block(&uow.store(), created_block.id, line, with_separator);
+            // default; real append under rope_backend). Insert an
+            // inter-block `\n` before every block after the first.
+            if i > 0 {
+                rope_insert_block_boundary(&uow.store());
+            }
+            rope_append_block(&uow.store(), created_block.id, line);
 
             block_ids.push(created_block.id as i64);
             total_chars += line_chars;

@@ -3,6 +3,7 @@ use crate::ImportMarkdownDto;
 use crate::ImportMarkdownResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{rope_append_block, rope_insert_block_boundary, rope_reset};
 use common::entities::{Block, Document, Frame, FramePosition, List, Root, Table, TableCell};
 
 use common::long_operation::LongOperation;
@@ -99,6 +100,11 @@ fn import_parsed_elements(
     let new_frame = Frame::default();
     let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
+    // Reset the rope+block_offsets before populating new content
+    // (importers replace the entire document). No-op under default
+    // backend.
+    rope_reset(&uow.store());
+
     // Step 4: Create blocks with format runs and image anchors
     let total_elements = parsed_elements.len();
     let mut total_chars: i64 = 0;
@@ -117,6 +123,12 @@ fn import_parsed_elements(
     }];
     let mut current_bq_depth: u32 = 0;
     let mut list_grouper = ListGrouper::new();
+    // Tracks whether at least one main-flow block has been appended
+    // to the rope. Used to decide when to emit an inter-block `\n`
+    // boundary (between blocks, not before the first). Table-cell
+    // blocks are NOT counted — they live in separate rope ranges
+    // per plan §1.6 and are deferred to step 5.5.
+    let mut emitted_any_main_block = false;
 
     for (i, parsed_element) in parsed_elements.iter().enumerate() {
         if cancel_flag.load(Ordering::Relaxed) {
@@ -183,6 +195,15 @@ fn import_parsed_elements(
                 };
 
                 let created_block = uow.create_block(&block, current_frame_id, -1)?;
+
+                // Mirror into the global rope (no-op under default).
+                // Insert an inter-block `\n` before every block after
+                // the first.
+                if emitted_any_main_block {
+                    rope_insert_block_boundary(&uow.store());
+                }
+                rope_append_block(&uow.store(), created_block.id, &plain_text);
+                emitted_any_main_block = true;
 
                 {
                     let store = uow.store();
