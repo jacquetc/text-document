@@ -1,9 +1,7 @@
 use crate::ImportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{
-    recompute_all_frame_byte_ranges, rope_append_block, rope_insert_block_boundary, rope_reset,
-};
+use common::database::rope_helpers::{rope_append_block, rope_insert_block_boundary, rope_reset};
 use common::entities::{Block, Document, Frame, Root};
 
 use common::types::{EntityId, ROOT_ENTITY_ID};
@@ -117,10 +115,8 @@ impl ImportPlainTextUseCase {
         updated_doc.block_count = num_blocks;
         uow.update_document(&updated_doc)?;
 
-        // Plan §1.6: Frame.byte_range maintenance after rope population.
-        // No-op under default backend.
-        recompute_all_frame_byte_ranges(&uow.store());
-
+        // Plan §1.6 Frame.byte_range maintenance happens centrally in
+        // Transaction::commit — no explicit call needed.
         uow.commit()?;
         Ok(())
     }

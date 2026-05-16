@@ -37,6 +37,9 @@ impl Transaction {
         if !self.is_write {
             bail!("Cannot commit a read transaction");
         }
+        // Plan §1.6: refresh Frame.byte_range from current rope state
+        // before the mutations become permanent. No-op under default.
+        crate::database::rope_helpers::recompute_all_frame_byte_ranges(&self.store);
         // Discard the auto-savepoint — mutations are now permanent
         if let Some(sp) = self.savepoint.take() {
             self.store.discard_savepoint(sp);

@@ -2,7 +2,7 @@ use crate::InsertFrameDto;
 use crate::InsertFrameResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{recompute_all_frame_byte_ranges, rope_append_empty_block};
+use common::database::rope_helpers::rope_append_empty_block;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -188,6 +188,7 @@ fn execute_insert_frame(
     // Plan §1.6: mirror to rope. Top-level (parent=None) frames
     // append at rope end with a `\n` boundary; the new empty block is
     // registered in block_offsets so subsequent edits can find it.
+    // Frame.byte_range is recomputed centrally in Transaction::commit.
     //
     // Nested (parent=Some) frames are NOT mirrored here — their
     // position depends on parent.child_order interleaving with sibling
@@ -198,7 +199,6 @@ fn execute_insert_frame(
     if parent_frame_id.is_none() {
         rope_append_empty_block(&uow.store(), created_block.id);
     }
-    recompute_all_frame_byte_ranges(&uow.store());
 
     Ok((
         InsertFrameResultDto {

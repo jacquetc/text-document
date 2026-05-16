@@ -165,6 +165,35 @@ fn import_plain_text_sets_root_frame_byte_range() -> Result<()> {
     Ok(())
 }
 
+/// After import, the root frame's byte_range covers the entire
+/// rope including any trailing inter-block boundaries (since
+/// BlockOffsetIndex.range_of extends each entry to the next).
+#[test]
+fn import_plain_text_byte_range_matches_total_bytes() -> Result<()> {
+    let (db_context, event_hub, _undo_redo_manager) = setup()?;
+
+    document_io_controller::import_plain_text(
+        &db_context,
+        &event_hub,
+        &ImportPlainTextDto {
+            plain_text: "a\nb\nc".to_string(),
+        },
+    )?;
+
+    let store = db_context.get_store();
+    let total = store.rope.read().unwrap().len_bytes() as u32;
+    let frames = store.frames.read().unwrap();
+    let top = frames
+        .values()
+        .find(|f| f.parent_frame.is_none())
+        .expect("top-level frame");
+    // Three blocks at byte_starts 0, 2, 4; range_of(last) extends to
+    // total_bytes (5). Root frame covers (0, 5).
+    assert_eq!(top.byte_range, (0, total));
+
+    Ok(())
+}
+
 /// Re-import must reset the byte_range to cover the new content
 /// (not the union of old + new).
 #[test]
