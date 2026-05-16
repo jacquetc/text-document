@@ -5,6 +5,16 @@ pub mod db_context;
 pub mod hashmap_store;
 pub mod rope_store;
 pub mod transactions;
+
+/// Active storage backend. Cfg-swapped between `HashMapStore` (default)
+/// and `RopeStore` (under `rope_backend`) for the duration of the
+/// Phase 2 migration. Becomes a regular re-export once the gate is
+/// removed in §8.3.
+#[cfg(not(feature = "rope_backend"))]
+pub use self::hashmap_store::HashMapStore as Store;
+#[cfg(feature = "rope_backend")]
+pub use self::rope_store::RopeStore as Store;
+
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -14,13 +24,13 @@ pub trait CommandUnitOfWork {
     fn rollback(&mut self) -> Result<()>;
     fn create_savepoint(&self) -> Result<types::Savepoint>;
     fn restore_to_savepoint(&mut self, savepoint: types::Savepoint) -> Result<()>;
-    fn store(&self) -> Arc<hashmap_store::HashMapStore>;
+    fn store(&self) -> Arc<Store>;
 }
 
 pub trait QueryUnitOfWork {
     fn begin_transaction(&self) -> Result<()>;
     fn end_transaction(&self) -> Result<()>;
-    fn store(&self) -> Arc<hashmap_store::HashMapStore>;
+    fn store(&self) -> Arc<Store>;
 }
 
 use crate::types;

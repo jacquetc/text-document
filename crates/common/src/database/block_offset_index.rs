@@ -10,7 +10,7 @@
 //! - No two entries share the same `byte_start` (blocks are disjoint).
 //! - The last entry's `byte_start ≤ total_bytes`.
 //! - Empty `entries` ⟺ no blocks in the document.
-
+//!
 use crate::types::EntityId;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

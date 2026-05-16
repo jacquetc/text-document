@@ -1,4 +1,4 @@
-//! Ropey-backed storage backend (Phase 2 skeleton).
+//! Ropey-backed storage backend.
 //!
 //! Mirrors the shape of [`HashMapStore`](super::hashmap_store::HashMapStore)
 //! but replaces per-block `plain_text: String` with a single
@@ -6,13 +6,10 @@
 //! into inline `Vec<EntityId>` fields on parent entities (see the
 //! migration plan §1.5).
 //!
-//! **Status (Phase 2 step 1)**: skeleton only. Every method body is
-//! `unimplemented!()`. Nothing in the workspace uses this type yet —
-//! `DbContext` continues to wrap `HashMapStore`. Steps 2–4 implement
-//! the snapshot/savepoint methods, wire `BlockOffsetIndex`, and start
-//! swapping use cases over. Step 7 deletes `HashMapStore`.
-
-#![allow(dead_code)]
+//! Always compiled (the `rope_backend` cargo feature gates only the
+//! DbContext/Store wiring, not the type definition). The wiring gate
+//! goes away at the end of Phase 2 (§8.3) once `RopeStore` is the
+//! only backend.
 
 use crate::database::block_offset_index::BlockOffsetIndex;
 use crate::entities::*;

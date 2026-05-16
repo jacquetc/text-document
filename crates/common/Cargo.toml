@@ -33,6 +33,16 @@ scraper = "0.26.0"
 ego-tree = "0.11.0"
 ropey = "1.6"
 
+[features]
+default = []
+# Phase 2 internal scaffolding: routes DbContext and the Store type
+# alias through RopeStore instead of HashMapStore. The RopeStore type
+# itself is always compiled (gating only the wiring lets tests for
+# the new data structures run regardless of feature state). The gate
+# goes away at the end of Phase 2 (§8.3) once RopeStore is the only
+# backend.
+rope_backend = []
+
 [dev-dependencies]
 proptest = "1"
 
