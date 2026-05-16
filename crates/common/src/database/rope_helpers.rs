@@ -56,6 +56,31 @@ pub fn rope_append_block(store: &Store, block_id: EntityId, text: &str) -> u32 {
     }
 }
 
+/// Append a new empty block to the end of the rope, separating it
+/// from any prior content with a `\n` boundary (only if the rope is
+/// already non-empty). Registers `block_id` at the resulting byte
+/// position. Returns that byte position. Used when `insert_frame_uc`
+/// creates a new top-level frame with a single empty block.
+#[allow(unused_variables)]
+pub fn rope_append_empty_block(store: &Store, block_id: EntityId) -> u32 {
+    #[cfg(feature = "rope_backend")]
+    {
+        let was_empty = store.rope.read().unwrap().len_bytes() == 0;
+        if !was_empty {
+            rope_insert_block_boundary(store);
+        }
+        let pos = store.rope.read().unwrap().len_bytes() as u32;
+        let mut offsets = store.block_offsets.write().unwrap();
+        offsets.push_block(block_id, pos);
+        offsets.set_total_bytes(pos);
+        return pos;
+    }
+    #[cfg(not(feature = "rope_backend"))]
+    {
+        0
+    }
+}
+
 /// Append a single `\n` inter-block boundary character to the end of
 /// the rope. Does NOT register a block — this is the sentinel between
 /// two adjacent blocks within the same frame (plan §1.4).
@@ -524,5 +549,96 @@ pub fn rope_delete_in_block(
             .write()
             .unwrap()
             .shift_after(block_byte_start + 1, -(deleted_bytes as i32));
+    }
+}
+
+/// Recompute `Frame.byte_range` for every frame in `store.frames`
+/// based on current `block_offsets` and the frame tree structure.
+/// Plan §1.6 invariant: each frame's byte_range is the (min_start,
+/// max_end) over all its descendant blocks, sub-frames, and table
+/// anchors+cells. No-op under default backend.
+///
+/// Call this after any mutation that affects rope byte positions.
+/// O(F + B) where F = frames, B = blocks in the document.
+#[allow(unused_variables)]
+pub fn recompute_all_frame_byte_ranges(store: &Store) {
+    #[cfg(feature = "rope_backend")]
+    {
+        let frame_ids: Vec<EntityId> = {
+            let frames = store.frames.read().unwrap();
+            frames.keys().copied().collect()
+        };
+        for fid in frame_ids {
+            let new_range = compute_frame_byte_range_recursive(store, fid);
+            let mut frames = store.frames.write().unwrap();
+            if let Some(f) = frames.get(&fid).cloned() {
+                if f.byte_range != new_range {
+                    let mut updated = f;
+                    updated.byte_range = new_range;
+                    frames.insert(fid, updated);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "rope_backend")]
+fn compute_frame_byte_range_recursive(store: &Store, frame_id: EntityId) -> (u32, u32) {
+    let mut bounds: Option<(u32, u32)> = None;
+    walk_frame_bounds(store, frame_id, &mut bounds);
+    bounds.unwrap_or((0, 0))
+}
+
+#[cfg(feature = "rope_backend")]
+fn walk_frame_bounds(store: &Store, frame_id: EntityId, bounds: &mut Option<(u32, u32)>) {
+    fn merge(bounds: &mut Option<(u32, u32)>, s: u32, e: u32) {
+        *bounds = Some(match *bounds {
+            None => (s, e),
+            Some((min, max)) => (min.min(s), max.max(e)),
+        });
+    }
+
+    let (blocks, child_order, table_id) = {
+        let frames = store.frames.read().unwrap();
+        let Some(f) = frames.get(&frame_id) else {
+            return;
+        };
+        (f.blocks.clone(), f.child_order.clone(), f.table)
+    };
+
+    {
+        let offsets = store.block_offsets.read().unwrap();
+        for bid in &blocks {
+            if let Some((s, e)) = offsets.range_of_block(*bid) {
+                merge(bounds, s, e);
+            }
+        }
+        if let Some(tid) = table_id {
+            if let Some((s, e)) = offsets.range_of(OffsetMarker::TableAnchor(tid)) {
+                merge(bounds, s, e);
+            }
+        }
+    }
+
+    for entry in &child_order {
+        if *entry < 0 {
+            walk_frame_bounds(store, (-*entry) as EntityId, bounds);
+        }
+    }
+
+    if let Some(tid) = table_id {
+        let cell_ids: Vec<EntityId> = {
+            let tables = store.tables.read().unwrap();
+            tables.get(&tid).map(|t| t.cells.clone()).unwrap_or_default()
+        };
+        for cell_id in &cell_ids {
+            let cell_frame_id = {
+                let cells = store.table_cells.read().unwrap();
+                cells.get(cell_id).and_then(|c| c.cell_frame)
+            };
+            if let Some(cfid) = cell_frame_id {
+                walk_frame_bounds(store, cfid, bounds);
+            }
+        }
     }
 }

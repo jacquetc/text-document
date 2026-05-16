@@ -3,7 +3,9 @@ use crate::ImportHtmlDto;
 use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{rope_append_block, rope_insert_block_boundary, rope_reset};
+use common::database::rope_helpers::{
+    recompute_all_frame_byte_ranges, rope_append_block, rope_insert_block_boundary, rope_reset,
+};
 use common::entities::{Block, Document, Frame, FramePosition, List, Resource, Root, Table, TableCell};
 
 use common::long_operation::LongOperation;
@@ -409,6 +411,9 @@ impl LongOperation for ImportHtmlUseCase {
             uow.rollback()?;
             return Err(anyhow!("Operation was cancelled"));
         }
+
+        // Plan §1.6: Frame.byte_range maintenance.
+        recompute_all_frame_byte_ranges(&uow.store());
 
         uow.commit()?;
 

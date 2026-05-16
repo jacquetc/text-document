@@ -134,3 +134,66 @@ fn import_unicode_text_uses_byte_offsets() -> Result<()> {
 
     Ok(())
 }
+
+/// Plan §1.6 maintenance: after `import_plain_text`, the root
+/// frame's `byte_range` must cover the entire imported content.
+#[test]
+fn import_plain_text_sets_root_frame_byte_range() -> Result<()> {
+    let (db_context, event_hub, _undo_redo_manager) = setup()?;
+
+    document_io_controller::import_plain_text(
+        &db_context,
+        &event_hub,
+        &ImportPlainTextDto {
+            plain_text: "first\nsecond\nthird".to_string(),
+        },
+    )?;
+
+    let store = db_context.get_store();
+    let total = store.rope.read().unwrap().len_bytes() as u32;
+    assert_eq!(total, 18);
+
+    // Exactly one top-level frame; find it.
+    let frames = store.frames.read().unwrap();
+    let top_level: Vec<_> = frames
+        .values()
+        .filter(|f| f.parent_frame.is_none())
+        .collect();
+    assert_eq!(top_level.len(), 1);
+    assert_eq!(top_level[0].byte_range, (0, 18));
+
+    Ok(())
+}
+
+/// Re-import must reset the byte_range to cover the new content
+/// (not the union of old + new).
+#[test]
+fn second_import_resets_root_frame_byte_range() -> Result<()> {
+    let (db_context, event_hub, _undo_redo_manager) = setup()?;
+
+    document_io_controller::import_plain_text(
+        &db_context,
+        &event_hub,
+        &ImportPlainTextDto {
+            plain_text: "first import that is longer".to_string(),
+        },
+    )?;
+    document_io_controller::import_plain_text(
+        &db_context,
+        &event_hub,
+        &ImportPlainTextDto {
+            plain_text: "short".to_string(),
+        },
+    )?;
+
+    let store = db_context.get_store();
+    let frames = store.frames.read().unwrap();
+    let top_level: Vec<_> = frames
+        .values()
+        .filter(|f| f.parent_frame.is_none())
+        .collect();
+    assert_eq!(top_level.len(), 1);
+    assert_eq!(top_level[0].byte_range, (0, 5));
+
+    Ok(())
+}
