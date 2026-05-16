@@ -1,0 +1,31 @@
+Sample markdown: 2997 bytes (2983 chars)
+
+  Scenario                                        Live (after build)      Peak during build
+  ----------------------------------------------------------------------------------------------
+  A. baseline doc (undo cleared)                  live =   132.82 KiB    peak =   192.96 KiB
+  B. + 10 single-char inserts (undo kept)         live =   143.13 KiB    peak =   202.73 KiB
+  B'. same, then clear_undo_redo                  live =   160.32 KiB    peak =   221.01 KiB
+  C. select-all + copy + paste-at-end (undo kept)  live =   368.21 KiB    peak =   494.38 KiB
+  C'. same, then clear_undo_redo                  live =   241.05 KiB    peak =   477.89 KiB
+  D. 2× content built directly (undo cleared)     live =   267.95 KiB    peak =   357.52 KiB
+  E. empty doc (TextDocument::new only)           live =    68.84 KiB    peak =   116.34 KiB
+  F. 1 MB plain text, no format (undo cleared)    live =     1.02 MiB    peak =     6.77 MiB
+  G. 100 blocks × 1 KB each (undo cleared)        live =   513.97 KiB    peak =   973.63 KiB
+  H. 3 KB doc with bold every 5 chars (undo cleared)  live =   250.81 KiB    peak =     7.32 MiB
+  I. 10×10 table filled with 20-char cells (undo cleared)  live =     1.19 MiB    peak =     1.38 MiB
+  J. 100 KB doc + 1000 small inserts (undo KEPT)  live =    96.64 MiB    peak =    97.51 MiB
+
+Residual heap after all docs dropped:     1.66 KiB
+
+Deltas:
+  undo cost, 10 small ops    B - B'      = -  17.19 KiB
+  undo cost, 1 paste op      C - C'      =   127.17 KiB
+  data cost of 2× content    D - A       =   135.13 KiB
+  paste residue vs raw 2×    C' - D      = -  26.90 KiB
+  10 small ops residual data B' - A      =    27.50 KiB
+  empty doc floor            E           =    68.84 KiB
+  data + structure 1MB plain F           =     1.02 MiB
+  100×1KB blocks             G           =   513.97 KiB
+  format-run-heavy 3KB doc   H - A       =   117.99 KiB
+  100-cell table cost        I - E       =     1.12 MiB
+  1000 inserts undo cost     J (live)    =    96.64 MiB
