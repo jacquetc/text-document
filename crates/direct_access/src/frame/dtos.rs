@@ -47,6 +47,7 @@ impl From<FrameDto> for Frame {
             fmt_position: dto.fmt_position,
             fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
+            byte_range: (0, 0),
         }
     }
 }
@@ -71,6 +72,7 @@ impl From<&FrameDto> for Frame {
             fmt_position: dto.fmt_position.clone(),
             fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
+            byte_range: (0, 0),
         }
     }
 }
@@ -139,6 +141,7 @@ impl From<CreateFrameDto> for Frame {
             fmt_position: dto.fmt_position,
             fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
+            byte_range: (0, 0),
         }
     }
 }
@@ -163,6 +166,7 @@ impl From<&CreateFrameDto> for Frame {
             fmt_position: dto.fmt_position.clone(),
             fmt_is_blockquote: dto.fmt_is_blockquote,
             table: dto.table,
+            byte_range: (0, 0),
         }
     }
 }
@@ -228,6 +232,7 @@ impl From<UpdateFrameDto> for Frame {
             parent_frame: Default::default(),
             blocks: Default::default(),
             table: Default::default(),
+            byte_range: Default::default(),
         }
     }
 }
@@ -252,6 +257,7 @@ impl From<&UpdateFrameDto> for Frame {
             parent_frame: Default::default(),
             blocks: Default::default(),
             table: Default::default(),
+            byte_range: Default::default(),
         }
     }
 }

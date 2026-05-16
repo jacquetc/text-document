@@ -554,6 +554,7 @@ fn insert_table_fragment(
             fmt_position: None,
             fmt_is_blockquote: None,
             table: Some(created_table.id),
+            byte_range: (0, 0),
         };
         let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
 
@@ -1092,6 +1093,7 @@ fn insert_mixed_fragment(
                     fmt_position: None,
                     fmt_is_blockquote: None,
                     table: Some(created_table.id),
+                    byte_range: (0, 0),
                 };
                 let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
                 new_child_order_entries.push(-(created_anchor.id as i64));

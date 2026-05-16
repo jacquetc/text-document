@@ -197,6 +197,7 @@ fn execute_insert_table(
         fmt_position: None,
         fmt_is_blockquote: None,
         table: Some(created_table.id),
+        byte_range: (0, 0),
     };
     let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
 

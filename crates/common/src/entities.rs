@@ -79,6 +79,13 @@ pub struct Frame {
     pub fmt_position: Option<FramePosition>,
     pub fmt_is_blockquote: Option<bool>,
     pub table: Option<EntityId>,
+    /// Rope byte range occupied by this frame's contents under the
+    /// `rope_backend`. Plan §1.6 invariant: all blocks in
+    /// `Frame.blocks` have byte ranges contained within this range,
+    /// and no two frames' ranges overlap. Empty/unset = `(0, 0)`.
+    /// Internal field — not surfaced through DTOs.
+    #[serde(default)]
+    pub byte_range: (u32, u32),
 }
 
 impl HasId for Frame {

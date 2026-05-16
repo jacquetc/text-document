@@ -146,6 +146,12 @@ entities:
         entity: Table
         relationship: many_to_one
         optional: true
+      # ── byte_range: (u32, u32) — hand-maintained, not codegen-friendly. ──
+      # Plan §1.6 rope-backed storage invariant: rope byte range
+      # occupied by this frame's contents (blocks + nested frame
+      # ranges). All entities in `Frame.blocks` have byte ranges
+      # contained within this range; no two frames' ranges overlap.
+      # Internal-only — excluded from DTOs.
 
   # ── Block (paragraph-level container) ─
   # Phase 1.14: per-character formatting and inline images moved off the
