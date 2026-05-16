@@ -3,7 +3,9 @@ use crate::ReplaceResultDto;
 use crate::ReplaceTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{rope_delete_in_block, rope_insert_in_block};
+use common::database::rope_helpers::{
+    block_content_via_store, rope_delete_in_block, rope_insert_in_block,
+};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -114,22 +116,22 @@ fn replace_in_block(
         .get(&block.id)
         .cloned()
         .unwrap_or_default();
+    let block_text = block_content_via_store(block, &store);
 
-    let byte_start =
-        logical_offset_to_byte(&block.plain_text, &images_before, char_start as i64);
-    let byte_end = logical_offset_to_byte(&block.plain_text, &images_before, char_end as i64);
+    let byte_start = logical_offset_to_byte(&block_text, &images_before, char_start as i64);
+    let byte_end = logical_offset_to_byte(&block_text, &images_before, char_end as i64);
 
     // First splice the existing range out, then insert the replacement.
-    let mut new_plain =
-        String::with_capacity(block.plain_text.len() - (byte_end - byte_start) as usize
-            + replacement.len());
-    new_plain.push_str(&block.plain_text[..byte_start as usize]);
+    let mut new_plain = String::with_capacity(
+        block_text.len() - (byte_end - byte_start) as usize + replacement.len(),
+    );
+    new_plain.push_str(&block_text[..byte_start as usize]);
     new_plain.push_str(replacement);
-    new_plain.push_str(&block.plain_text[byte_end as usize..]);
+    new_plain.push_str(&block_text[byte_end as usize..]);
 
     let inserted_byte_len = replacement.len() as u32;
     let replacement_char_len = replacement.chars().count() as i64;
-    let removed_text_chars = block.plain_text[byte_start as usize..byte_end as usize]
+    let removed_text_chars = block_text[byte_start as usize..byte_end as usize]
         .chars()
         .count() as i64;
 

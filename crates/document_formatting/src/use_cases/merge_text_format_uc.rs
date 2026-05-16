@@ -1,6 +1,7 @@
 use crate::MergeTextFormatDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -151,20 +152,20 @@ fn execute_merge_text_format(
         let local_char_end =
             std::cmp::min(block.text_length, range_end - block_start) as usize;
 
-        let plain_text_len = block.plain_text.chars().count();
+        let store = uow.store();
+        let block_text = block_content_via_store(block, &store);
+        let plain_text_len = block_text.chars().count();
         let text_char_start = std::cmp::min(local_char_start, plain_text_len);
         let text_char_end = std::cmp::min(local_char_end, plain_text_len);
-        let byte_start = char_to_byte(&block.plain_text, text_char_start);
-        let byte_end = char_to_byte(&block.plain_text, text_char_end);
-
-        let store = uow.store();
+        let byte_start = char_to_byte(&block_text, text_char_start);
+        let byte_end = char_to_byte(&block_text, text_char_end);
 
         if byte_start < byte_end {
             let mut runs_map = store.format_runs.write().unwrap();
             let runs = runs_map.entry(block.id).or_default();
             let replacement = build_replacement_runs(runs, byte_start, byte_end, dto);
             splice_range(runs, byte_start..byte_end, replacement);
-            debug_assert_well_formed(runs, block.plain_text.len());
+            debug_assert_well_formed(runs, block_text.len());
         }
 
         // Update image anchor formats inside the selected byte range.
