@@ -346,12 +346,10 @@ proptest! {
 // back a block-creating edit, the next block-creating edit must
 // receive an ID strictly greater than the rolled-back one.
 //
-// This guards the contract of `HashMapStore::restore_without_counters`
-// (counters are NOT restored on undo). The same contract will hold
-// after the rope backend migration — `RopeStore::restore_without_counters`
-// is required to preserve it. A regression here means entity IDs can
-// collide across undo/redo cycles, corrupting any reference held by
-// a still-open handle.
+// This guards the contract of `RopeStore::restore_without_counters`
+// (counters are NOT restored on undo). A regression here means
+// entity IDs can collide across undo/redo cycles, corrupting any
+// reference held by a still-open handle.
 
 proptest! {
     #[test]

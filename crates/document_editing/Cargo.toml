@@ -26,12 +26,6 @@ uuid = { workspace = true }
 [dev-dependencies]
 test_harness = { workspace = true }
 
-[features]
-default = []
-# Pass-through for test code that needs to query rope/block_offsets
-# fields that only exist on RopeStore. See document_io for rationale.
-rope_backend = ["common/rope_backend"]
-
 [lints]
 workspace = true
 

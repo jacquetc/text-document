@@ -28,12 +28,6 @@ unicode-segmentation = { workspace = true }
 [dev-dependencies]
 test_harness = { workspace = true }
 
-[features]
-default = []
-# Pass-through for tests that query rope/block_offsets fields on
-# RopeStore. See document_io for rationale.
-rope_backend = ["common/rope_backend"]
-
 [lints]
 workspace = true
 

@@ -28,15 +28,6 @@ docx-rs = "0.4"
 [dev-dependencies]
 test_harness = { workspace = true }
 
-[features]
-default = []
-# Pass-through for test code that needs to query the rope/block_offsets
-# fields that only exist on RopeStore. Equivalent to enabling
-# text-document-common/rope_backend; this lets per-crate tests
-# `#[cfg(feature = "rope_backend")]` work without a top-level
-# `--features text-document-common/rope_backend` invocation.
-rope_backend = ["common/rope_backend"]
-
 [lints]
 workspace = true
 

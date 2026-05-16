@@ -52,8 +52,7 @@ struct UndoData {
     doc_id: EntityId,
     original_character_count: i64,
     /// Byte range in the block where the text was inserted. Used by
-    /// undo to delete those bytes from the rope (under rope_backend
-    /// only; ignored otherwise).
+    /// undo to delete those bytes from the rope.
     inserted_byte_offset: u32,
     inserted_byte_len: u32,
 }

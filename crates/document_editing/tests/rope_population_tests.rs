@@ -1,8 +1,5 @@
 //! Phase 2 step 5.5e/4: verify document_editing use cases mirror to
-//! the global rope under `rope_backend`. Skipped under the default
-//! backend.
-
-#![cfg(feature = "rope_backend")]
+//! the global rope.
 
 extern crate text_document_editing as document_editing;
 

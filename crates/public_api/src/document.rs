@@ -38,11 +38,8 @@ pub struct TextDocument {
     pub(crate) inner: Arc<Mutex<TextDocumentInner>>,
 }
 
-/// Test-only accessor for the underlying rope-backed store. Gated by
-/// the `rope_backend` cargo feature; not part of the stable public
-/// API. Will be removed in step 7 when the feature flag goes away
-/// (post-migration the rope is accessible through normal methods).
-#[cfg(feature = "rope_backend")]
+/// Test-only accessor for the underlying rope-backed store. Not part
+/// of the stable public API.
 impl TextDocument {
     #[doc(hidden)]
     pub fn rope_store_for_test(&self) -> std::sync::Arc<common::database::Store> {

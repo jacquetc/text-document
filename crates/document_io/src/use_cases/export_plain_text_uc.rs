@@ -51,9 +51,8 @@ impl ExportPlainTextUseCase {
             &common::direct_access::document::DocumentRelationshipField::Frames,
         )?;
 
-        // Step 3: Collect all block plain_text from all frames. Under
-        // rope_backend, content is read from the global rope via
-        // `block_content_via_store` (preparation for step 7).
+        // Step 3: Collect block content from all frames, reading from
+        // the global rope via `block_content_via_store`.
         let mut all_plain_texts: Vec<String> = Vec::new();
         let store = uow.store();
 

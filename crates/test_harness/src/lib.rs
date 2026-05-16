@@ -172,13 +172,10 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
     Ok((db_context, event_hub, undo_redo_manager))
 }
 
-/// Like `setup_with_text`, but also seeds the global rope under the
-/// `rope_backend` feature so tests can observe rope state directly.
-///
-/// Under the default backend this is identical to `setup_with_text`
-/// (the rope helpers are no-ops). Under `rope_backend` it appends each
-/// block's text into the rope and registers an entry in the offset
-/// index, mirroring what `document_io::import_plain_text` would do.
+/// Like `setup_with_text`, but also seeds the global rope so tests
+/// can observe rope state directly. Appends each block's text into
+/// the rope and registers an entry in the offset index, mirroring
+/// what `document_io::import_plain_text` would do.
 ///
 /// Returns `(DbContext, Arc<EventHub>, UndoRedoManager)`.
 pub fn setup_with_imported_text(
@@ -188,11 +185,10 @@ pub fn setup_with_imported_text(
         rope_append_block, rope_insert_block_boundary, rope_reset,
     };
 
-    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text(text)?;
+    let (db_context, event_hub, undo_redo_manager) = setup_with_text(text)?;
 
     // Replay block content into the rope. Reset first to handle the
-    // setup-created blank-block case cleanly. No-op under default
-    // backend.
+    // setup-created blank-block case cleanly.
     rope_reset(db_context.get_store());
 
     let block_ids = get_block_ids(&db_context)?;

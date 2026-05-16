@@ -7,25 +7,13 @@ use common::entities::Block;
 use regex::RegexBuilder;
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Build the full document text by concatenating block plain_text with '\n' separators.
-/// Blocks must already be sorted by `document_position`.
-/// Returns the concatenated text string.
-pub fn build_full_text_from_blocks(blocks: &[Block]) -> String {
-    blocks
-        .iter()
-        .map(|b| b.plain_text.as_str())
-        .collect::<Vec<&str>>()
-        .join("\n")
-}
-
-/// Build the full document text from main-flow blocks. Under
-/// `rope_backend`, reads content from the global rope via
-/// `block_offsets` (preparation for step 7 where `Block.plain_text`
-/// is removed). Under the default backend, falls back to
-/// `build_full_text_from_blocks` (= `Block.plain_text` concatenation).
+/// Build the full document text from main-flow blocks by reading
+/// content from the global rope via `block_offsets`. Falls back to
+/// `Block.plain_text` for blocks whose content isn't in the rope
+/// (e.g. table-cell blocks) — see `block_content_via_store`.
 ///
-/// In both cases the returned string has main-flow blocks joined by
-/// single `\n` separators — matching the position semantics that
+/// The returned string has main-flow blocks joined by single `\n`
+/// separators — matching the position semantics that
 /// `document_position` is computed against.
 ///
 /// Blocks must be sorted by `document_position` (caller's

@@ -1,9 +1,6 @@
 //! Phase 2 step 5: verify markdown/html importers (which run via the
 //! long-operation manager and so live behind the public API) populate
-//! the global rope under `rope_backend`. Skipped under the default
-//! backend (rope doesn't exist there).
-
-#![cfg(feature = "rope_backend")]
+//! the global rope.
 
 use text_document::TextDocument;
 

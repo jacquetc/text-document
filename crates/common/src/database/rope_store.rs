@@ -1,15 +1,11 @@
 //! Ropey-backed storage backend.
 //!
-//! Mirrors the shape of [`HashMapStore`](super::hashmap_store::HashMapStore)
-//! but replaces per-block `plain_text: String` with a single
-//! document-wide `ropey::Rope`, and collapses the 12 junction tables
-//! into inline `Vec<EntityId>` fields on parent entities (see the
-//! migration plan §1.5).
-//!
-//! Always compiled (the `rope_backend` cargo feature gates only the
-//! DbContext/Store wiring, not the type definition). The wiring gate
-//! goes away at the end of Phase 2 (§8.3) once `RopeStore` is the
-//! only backend.
+//! Holds character data in a single document-wide `ropey::Rope`,
+//! with structural entities (Frames, Tables, Lists, Resources) in
+//! `im::HashMap` tables and per-block character formatting in
+//! `format_runs`. See the migration plan §1.5 for the relationship
+//! inlining and §1.6 for the rope layout (block boundary `\n` +
+//! U+FFFC table anchor).
 
 use crate::database::block_offset_index::BlockOffsetIndex;
 use crate::entities::*;

@@ -60,8 +60,7 @@ impl ImportPlainTextUseCase {
         let new_frame = Frame::default();
         let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
-        // Under rope_backend, reset the rope+block_offsets before
-        // appending the new content. No-op under default.
+        // Reset the rope+block_offsets before appending the new content.
         rope_reset(&uow.store());
 
         let normalized = dto.plain_text.replace("\r\n", "\n").replace('\r', "\n");
@@ -86,8 +85,7 @@ impl ImportPlainTextUseCase {
             // format_runs / block_images stay empty for plain-text import: an
             // absent or empty run vector means "default format everywhere".
 
-            // Mirror the block's text into the global rope (no-op under
-            // default; real append under rope_backend). Insert an
+            // Mirror the block's text into the global rope. Insert an
             // inter-block `\n` before every block after the first.
             if i > 0 {
                 rope_insert_block_boundary(&uow.store());

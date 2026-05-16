@@ -1,79 +1,58 @@
 //! Helpers for writing the global character rope from use cases.
 //!
-//! Phase 2 step 5 (use-case migration). Each helper has two bodies:
-//! - Under `rope_backend`: real ropey/BlockOffsetIndex updates
-//! - Under default: no-op
-//!
-//! Callers invoke them unconditionally. The `Store` type alias
-//! resolves to the right backend at compile time; the cfg-gated
-//! function body only touches `store.rope` / `store.block_offsets`
-//! when those fields exist.
-//!
-//! When step 7 drops the `rope_backend` feature gate, the no-op
-//! branches go away and the helper bodies become unconditional.
+//! Each helper mutates `store.rope` and `store.block_offsets`
+//! together so callers can stay oblivious to the underlying layout.
+//! Read helpers (`block_content_via_store`) prefer rope bytes but
+//! fall back to `Block.plain_text` when the rope is stale (e.g.
+//! after an unmirrored use case). The fallback goes away in step
+//! 7c when `Block.plain_text` is removed.
 
 use crate::database::Store;
-#[cfg(feature = "rope_backend")]
 use crate::database::block_offset_index::OffsetMarker;
 use crate::entities::Block;
 use crate::types::EntityId;
 
-/// Read a block's plain-text content. Under `rope_backend`, prefers
-/// the bytes from the global rope via `block_offsets` (stripping the
-/// trailing `\n` boundary that `range_of` includes for non-last
-/// entries). Falls back to `block.plain_text` when the rope range is
-/// missing OR when it disagrees with `block.plain_text` (which
-/// happens for use cases that mutate plain_text without mirroring to
-/// the rope — e.g. `insert_html_at_position_uc`).
+/// Read a block's plain-text content. Prefers bytes from the global
+/// rope via `block_offsets` (stripping the trailing `\n` boundary that
+/// `range_of` includes for non-last entries). Falls back to
+/// `block.plain_text` when the rope range is missing OR when its
+/// content disagrees with `block.plain_text` (which happens for use
+/// cases that mutate plain_text without mirroring to the rope — e.g.
+/// `insert_html_at_position_uc`).
 ///
-/// Under the default backend, always clones `block.plain_text`.
-///
-/// Read-side preparation for step 7 (when `Block.plain_text` is
-/// removed); call this from exporters and search helpers instead of
-/// `block.plain_text.clone()`.
-#[allow(unused_variables)]
+/// After step 7c (when `Block.plain_text` is removed) the fallback
+/// goes away and this becomes a pure rope read.
 pub fn block_content_via_store(block: &Block, store: &Store) -> String {
-    #[cfg(feature = "rope_backend")]
-    {
-        let offsets = store.block_offsets.read().unwrap();
-        if let Some((bs, be)) = offsets.range_of_block(block.id) {
-            let rope = store.rope.read().unwrap();
-            let slice = rope.byte_slice(bs as usize..be as usize).to_string();
-            // Strip the trailing inter-block `\n` if present. The
-            // last block in the rope has no trailing `\n`, so this is
-            // a no-op for it.
-            let rope_text = slice
-                .strip_suffix('\n')
-                .map(|s| s.to_string())
-                .unwrap_or(slice);
-            // Divergence guard: if the rope content disagrees with
-            // `block.plain_text` (a use case mutated plain_text
-            // without mirroring), trust plain_text. After step 7 this
-            // branch goes away — plain_text won't exist.
-            if rope_text.len() != block.plain_text.len() {
-                return block.plain_text.clone();
-            }
-            return rope_text;
+    let offsets = store.block_offsets.read().unwrap();
+    if let Some((bs, be)) = offsets.range_of_block(block.id) {
+        let rope = store.rope.read().unwrap();
+        let slice = rope.byte_slice(bs as usize..be as usize).to_string();
+        // Strip the trailing inter-block `\n` if present. The last
+        // block in the rope has no trailing `\n`, so this is a no-op
+        // for it.
+        let rope_text = slice
+            .strip_suffix('\n')
+            .map(|s| s.to_string())
+            .unwrap_or(slice);
+        // Divergence guard: content-equality (not just length) — a
+        // same-length replacement under an unmirrored use case would
+        // otherwise return stale rope bytes silently. After step 7c
+        // this branch goes away — plain_text won't exist.
+        if rope_text != block.plain_text {
+            return block.plain_text.clone();
         }
-        // Fallback to plain_text (e.g. unmirrored cell blocks).
-        return block.plain_text.clone();
+        return rope_text;
     }
-    #[cfg(not(feature = "rope_backend"))]
-    {
-        let _ = store;
-        block.plain_text.clone()
-    }
+    // Fallback to plain_text (e.g. unmirrored cell blocks).
+    block.plain_text.clone()
 }
 
 /// Reset the rope to empty and clear `block_offsets`. Called by
 /// importers when they replace the entire document content.
-#[allow(unused_variables)]
 pub fn rope_reset(store: &Store) {
-    #[cfg(feature = "rope_backend")]
-    {
-        *store.rope.write().unwrap() = ropey::Rope::new();
-        *store.block_offsets.write().unwrap() = crate::database::block_offset_index::BlockOffsetIndex::new();
-    }
+    *store.rope.write().unwrap() = ropey::Rope::new();
+    *store.block_offsets.write().unwrap() =
+        crate::database::block_offset_index::BlockOffsetIndex::new();
 }
 
 /// Append `text` to the end of the rope and register `block_id` at
@@ -82,26 +61,18 @@ pub fn rope_reset(store: &Store) {
 /// Callers are responsible for inserting an inter-block `\n`
 /// (`rope_insert_block_boundary`) before each block AFTER the first
 /// in a contiguous frame.
-#[allow(unused_variables)]
 pub fn rope_append_block(store: &Store, block_id: EntityId, text: &str) -> u32 {
-    #[cfg(feature = "rope_backend")]
-    {
-        let mut rope = store.rope.write().unwrap();
-        let byte_start = rope.len_bytes() as u32;
-        let char_end = rope.len_chars();
-        rope.insert(char_end, text);
-        let new_total = rope.len_bytes() as u32;
-        drop(rope);
+    let mut rope = store.rope.write().unwrap();
+    let byte_start = rope.len_bytes() as u32;
+    let char_end = rope.len_chars();
+    rope.insert(char_end, text);
+    let new_total = rope.len_bytes() as u32;
+    drop(rope);
 
-        let mut offsets = store.block_offsets.write().unwrap();
-        offsets.push_block(block_id, byte_start);
-        offsets.set_total_bytes(new_total);
-        return byte_start;
-    }
-    #[cfg(not(feature = "rope_backend"))]
-    {
-        0
-    }
+    let mut offsets = store.block_offsets.write().unwrap();
+    offsets.push_block(block_id, byte_start);
+    offsets.set_total_bytes(new_total);
+    byte_start
 }
 
 /// Insert `text` as a new block at `byte_pos` in the rope, prepending
@@ -121,39 +92,34 @@ pub fn rope_append_block(store: &Store, block_id: EntityId, text: &str) -> u32 {
 ///
 /// When `byte_pos == total_bytes`, behaves like
 /// `rope_insert_block_boundary` followed by `rope_append_block`.
-/// No-op under default backend.
-#[allow(unused_variables)]
 pub fn rope_insert_block_at(store: &Store, byte_pos: u32, block_id: EntityId, text: &str) {
-    #[cfg(feature = "rope_backend")]
+    let delta = (1 + text.len()) as i32;
+    // Vec position: insert AFTER any entry at byte_pos itself
+    // (those represent earlier empty blocks whose `\n` boundary
+    // we are placing now). Only entries strictly past byte_pos
+    // come after our new entry in the Vec.
+    let new_entry_vec_pos = {
+        let offsets = store.block_offsets.read().unwrap();
+        offsets
+            .entries
+            .iter()
+            .position(|(_, bs)| *bs > byte_pos)
+            .unwrap_or(offsets.entries.len())
+    };
     {
-        let delta = (1 + text.len()) as i32;
-        // Vec position: insert AFTER any entry at byte_pos itself
-        // (those represent earlier empty blocks whose `\n` boundary
-        // we are placing now). Only entries strictly past byte_pos
-        // come after our new entry in the Vec.
-        let new_entry_vec_pos = {
-            let offsets = store.block_offsets.read().unwrap();
-            offsets
-                .entries
-                .iter()
-                .position(|(_, bs)| *bs > byte_pos)
-                .unwrap_or(offsets.entries.len())
-        };
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_idx = rope.byte_to_char(byte_pos as usize);
-            let mut combined = String::with_capacity(1 + text.len());
-            combined.push('\n');
-            combined.push_str(text);
-            rope.insert(char_idx, &combined);
-        }
-        let mut offsets = store.block_offsets.write().unwrap();
-        // Shift entries strictly past byte_pos. Entries AT byte_pos
-        // (the prior empty block) stay where they are — the new `\n`
-        // is conceptually "after" them.
-        offsets.shift_after(byte_pos + 1, delta);
-        offsets.insert_at(new_entry_vec_pos, OffsetMarker::Block(block_id), byte_pos + 1);
+        let mut rope = store.rope.write().unwrap();
+        let char_idx = rope.byte_to_char(byte_pos as usize);
+        let mut combined = String::with_capacity(1 + text.len());
+        combined.push('\n');
+        combined.push_str(text);
+        rope.insert(char_idx, &combined);
     }
+    let mut offsets = store.block_offsets.write().unwrap();
+    // Shift entries strictly past byte_pos. Entries AT byte_pos
+    // (the prior empty block) stay where they are — the new `\n`
+    // is conceptually "after" them.
+    offsets.shift_after(byte_pos + 1, delta);
+    offsets.insert_at(new_entry_vec_pos, OffsetMarker::Block(block_id), byte_pos + 1);
 }
 
 /// Walks up `frame.parent_frame` to find the top-level ancestor of
@@ -166,32 +132,22 @@ pub fn rope_insert_block_at(store: &Store, byte_pos: u32, block_id: EntityId, te
 /// Reads `block_offsets`/`frames`/`tables`/`table_cells` directly, so
 /// the result is fresh even when `Frame.byte_range` has not yet been
 /// recomputed at commit time.
-///
-/// Returns 0 under default backend.
-#[allow(unused_variables)]
 pub fn top_level_frame_end_byte(store: &Store, frame_id: EntityId) -> u32 {
-    #[cfg(feature = "rope_backend")]
-    {
-        let top_id = {
-            let frames = store.frames.read().unwrap();
-            let mut current = frame_id;
-            loop {
-                let Some(f) = frames.get(&current) else {
-                    return 0;
-                };
-                match f.parent_frame {
-                    None => break current,
-                    Some(p) => current = p,
-                }
+    let top_id = {
+        let frames = store.frames.read().unwrap();
+        let mut current = frame_id;
+        loop {
+            let Some(f) = frames.get(&current) else {
+                return 0;
+            };
+            match f.parent_frame {
+                None => break current,
+                Some(p) => current = p,
             }
-        };
-        let (_min, max) = compute_frame_byte_range_recursive(store, top_id);
-        return max;
-    }
-    #[cfg(not(feature = "rope_backend"))]
-    {
-        0
-    }
+        }
+    };
+    let (_min, max) = compute_frame_byte_range_recursive(store, top_id);
+    max
 }
 
 /// Append a new empty block to the end of the rope, separating it
@@ -199,41 +155,29 @@ pub fn top_level_frame_end_byte(store: &Store, frame_id: EntityId) -> u32 {
 /// already non-empty). Registers `block_id` at the resulting byte
 /// position. Returns that byte position. Used when `insert_frame_uc`
 /// creates a new top-level frame with a single empty block.
-#[allow(unused_variables)]
 pub fn rope_append_empty_block(store: &Store, block_id: EntityId) -> u32 {
-    #[cfg(feature = "rope_backend")]
-    {
-        let was_empty = store.rope.read().unwrap().len_bytes() == 0;
-        if !was_empty {
-            rope_insert_block_boundary(store);
-        }
-        let pos = store.rope.read().unwrap().len_bytes() as u32;
-        let mut offsets = store.block_offsets.write().unwrap();
-        offsets.push_block(block_id, pos);
-        offsets.set_total_bytes(pos);
-        return pos;
+    let was_empty = store.rope.read().unwrap().len_bytes() == 0;
+    if !was_empty {
+        rope_insert_block_boundary(store);
     }
-    #[cfg(not(feature = "rope_backend"))]
-    {
-        0
-    }
+    let pos = store.rope.read().unwrap().len_bytes() as u32;
+    let mut offsets = store.block_offsets.write().unwrap();
+    offsets.push_block(block_id, pos);
+    offsets.set_total_bytes(pos);
+    pos
 }
 
 /// Append a single `\n` inter-block boundary character to the end of
 /// the rope. Does NOT register a block — this is the sentinel between
 /// two adjacent blocks within the same frame (plan §1.4).
-#[allow(unused_variables)]
 pub fn rope_insert_block_boundary(store: &Store) {
-    #[cfg(feature = "rope_backend")]
-    {
-        let mut rope = store.rope.write().unwrap();
-        let char_end = rope.len_chars();
-        rope.insert(char_end, "\n");
-        let new_total = rope.len_bytes() as u32;
-        drop(rope);
+    let mut rope = store.rope.write().unwrap();
+    let char_end = rope.len_chars();
+    rope.insert(char_end, "\n");
+    let new_total = rope.len_bytes() as u32;
+    drop(rope);
 
-        store.block_offsets.write().unwrap().set_total_bytes(new_total);
-    }
+    store.block_offsets.write().unwrap().set_total_bytes(new_total);
 }
 
 /// Insert `text` at `byte_offset_in_block` inside the block identified
@@ -244,41 +188,37 @@ pub fn rope_insert_block_boundary(store: &Store) {
 /// Silently no-ops if the block is not registered in the offset index
 /// (this can happen for blocks whose content lives outside the global
 /// rope, e.g. table cells until step 5.5).
-#[allow(unused_variables)]
 pub fn rope_insert_in_block(
     store: &Store,
     block_id: EntityId,
     byte_offset_in_block: u32,
     text: &str,
 ) {
-    #[cfg(feature = "rope_backend")]
-    {
-        let inserted_bytes = text.len() as u32;
-        if inserted_bytes == 0 {
-            return;
-        }
-        let block_byte_start = {
-            let offsets = store.block_offsets.read().unwrap();
-            let Some((start, _end)) = offsets.range_of_block(block_id) else {
-                return;
-            };
-            start
-        };
-        let rope_byte = block_byte_start + byte_offset_in_block;
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_idx = rope.byte_to_char(rope_byte as usize);
-            rope.insert(char_idx, text);
-        }
-        // Shift entries past this block by inserted_bytes. Threshold
-        // is one byte past block_byte_start so the current block's own
-        // entry isn't moved.
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .shift_after(block_byte_start + 1, inserted_bytes as i32);
+    let inserted_bytes = text.len() as u32;
+    if inserted_bytes == 0 {
+        return;
     }
+    let block_byte_start = {
+        let offsets = store.block_offsets.read().unwrap();
+        let Some((start, _end)) = offsets.range_of_block(block_id) else {
+            return;
+        };
+        start
+    };
+    let rope_byte = block_byte_start + byte_offset_in_block;
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_idx = rope.byte_to_char(rope_byte as usize);
+        rope.insert(char_idx, text);
+    }
+    // Shift entries past this block by inserted_bytes. Threshold
+    // is one byte past block_byte_start so the current block's own
+    // entry isn't moved.
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .shift_after(block_byte_start + 1, inserted_bytes as i32);
 }
 
 /// Split an existing block in the rope at `byte_offset_in_block`:
@@ -292,54 +232,50 @@ pub fn rope_insert_in_block(
 /// `byte_offset_in_block` may be 0 (split before first char of block,
 /// i.e. insert empty block before this one) or equal to the block's
 /// byte length (split after last char, i.e. insert empty block after).
-#[allow(unused_variables)]
 pub fn rope_split_block(
     store: &Store,
     current_block_id: EntityId,
     byte_offset_in_block: u32,
     new_block_id: EntityId,
 ) {
-    #[cfg(feature = "rope_backend")]
-    {
-        let current_marker = OffsetMarker::Block(current_block_id);
-        let (block_start, current_idx) = {
-            let offsets = store.block_offsets.read().unwrap();
-            let Some((start, _end)) = offsets.range_of(current_marker) else {
-                return;
-            };
-            let idx = offsets
-                .entries
-                .iter()
-                .position(|(m, _)| *m == current_marker)
-                .unwrap();
-            (start, idx)
+    let current_marker = OffsetMarker::Block(current_block_id);
+    let (block_start, current_idx) = {
+        let offsets = store.block_offsets.read().unwrap();
+        let Some((start, _end)) = offsets.range_of(current_marker) else {
+            return;
         };
-        let split_byte = block_start + byte_offset_in_block;
+        let idx = offsets
+            .entries
+            .iter()
+            .position(|(m, _)| *m == current_marker)
+            .unwrap();
+        (start, idx)
+    };
+    let split_byte = block_start + byte_offset_in_block;
 
-        // 1. Insert the `\n` boundary at the split point.
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_idx = rope.byte_to_char(split_byte as usize);
-            rope.insert(char_idx, "\n");
-        }
-
-        // 2. Shift entries past the split (and total_bytes) by +1.
-        //    Threshold > split_byte so the new entry we insert next
-        //    isn't double-shifted.
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .shift_after(split_byte + 1, 1);
-
-        // 3. Register the new block at `split_byte + 1`, immediately
-        //    after the original in the entries Vec.
-        store.block_offsets.write().unwrap().insert_at(
-            current_idx + 1,
-            OffsetMarker::Block(new_block_id),
-            split_byte + 1,
-        );
+    // 1. Insert the `\n` boundary at the split point.
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_idx = rope.byte_to_char(split_byte as usize);
+        rope.insert(char_idx, "\n");
     }
+
+    // 2. Shift entries past the split (and total_bytes) by +1.
+    //    Threshold > split_byte so the new entry we insert next
+    //    isn't double-shifted.
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .shift_after(split_byte + 1, 1);
+
+    // 3. Register the new block at `split_byte + 1`, immediately
+    //    after the original in the entries Vec.
+    store.block_offsets.write().unwrap().insert_at(
+        current_idx + 1,
+        OffsetMarker::Block(new_block_id),
+        split_byte + 1,
+    );
 }
 
 /// Merge `start_block` and `end_block` by deleting the rope range
@@ -354,7 +290,6 @@ pub fn rope_split_block(
 /// No-op if `start_block` is not in the index. Skipped for any
 /// intermediate block id whose range is missing from the index (e.g.
 /// table cells until step 5.5e).
-#[allow(unused_variables)]
 pub fn rope_merge_block_range(
     store: &Store,
     start_block_id: EntityId,
@@ -362,66 +297,63 @@ pub fn rope_merge_block_range(
     end_block_id: EntityId,
     byte_eo_in_end: u32,
 ) {
-    #[cfg(feature = "rope_backend")]
-    {
-        let start_marker = OffsetMarker::Block(start_block_id);
-        let end_marker = OffsetMarker::Block(end_block_id);
-        let (start_block_byte, end_block_byte, start_idx, end_idx) = {
-            let offsets = store.block_offsets.read().unwrap();
-            let Some((sb, _)) = offsets.range_of(start_marker) else {
-                return;
-            };
-            let Some((eb, _)) = offsets.range_of(end_marker) else {
-                return;
-            };
-            let si = offsets
-                .entries
-                .iter()
-                .position(|(m, _)| *m == start_marker)
-                .unwrap();
-            let ei = offsets
-                .entries
-                .iter()
-                .position(|(m, _)| *m == end_marker)
-                .unwrap();
-            (sb, eb, si, ei)
+    let start_marker = OffsetMarker::Block(start_block_id);
+    let end_marker = OffsetMarker::Block(end_block_id);
+    let (start_block_byte, end_block_byte, start_idx, end_idx) = {
+        let offsets = store.block_offsets.read().unwrap();
+        let Some((sb, _)) = offsets.range_of(start_marker) else {
+            return;
         };
-        if end_idx <= start_idx {
+        let Some((eb, _)) = offsets.range_of(end_marker) else {
             return;
-        }
-
-        let delete_start = start_block_byte + byte_so_in_start;
-        let delete_end = end_block_byte + byte_eo_in_end;
-        if delete_end <= delete_start {
-            return;
-        }
-        let deleted_bytes = delete_end - delete_start;
-
-        // 1. Remove the rope range.
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_start = rope.byte_to_char(delete_start as usize);
-            let char_end = rope.byte_to_char(delete_end as usize);
-            rope.remove(char_start..char_end);
-        }
-
-        // 2. Remove block_offsets entries for [start_idx+1 ..= end_idx].
-        //    Vec::drain handles this in one go.
-        {
-            let mut offsets = store.block_offsets.write().unwrap();
-            offsets.entries.drain((start_idx + 1)..=end_idx);
-        }
-
-        // 3. Shift any remaining entries past the deletion by -deleted_bytes.
-        //    Threshold > delete_start because start_block's own entry
-        //    sits at delete_start - byte_so_in_start (≤ delete_start)
-        //    and must not move.
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .shift_after(delete_start + 1, -(deleted_bytes as i32));
+        };
+        let si = offsets
+            .entries
+            .iter()
+            .position(|(m, _)| *m == start_marker)
+            .unwrap();
+        let ei = offsets
+            .entries
+            .iter()
+            .position(|(m, _)| *m == end_marker)
+            .unwrap();
+        (sb, eb, si, ei)
+    };
+    if end_idx <= start_idx {
+        return;
     }
+
+    let delete_start = start_block_byte + byte_so_in_start;
+    let delete_end = end_block_byte + byte_eo_in_end;
+    if delete_end <= delete_start {
+        return;
+    }
+    let deleted_bytes = delete_end - delete_start;
+
+    // 1. Remove the rope range.
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_start = rope.byte_to_char(delete_start as usize);
+        let char_end = rope.byte_to_char(delete_end as usize);
+        rope.remove(char_start..char_end);
+    }
+
+    // 2. Remove block_offsets entries for [start_idx+1 ..= end_idx].
+    //    Vec::drain handles this in one go.
+    {
+        let mut offsets = store.block_offsets.write().unwrap();
+        offsets.entries.drain((start_idx + 1)..=end_idx);
+    }
+
+    // 3. Shift any remaining entries past the deletion by -deleted_bytes.
+    //    Threshold > delete_start because start_block's own entry
+    //    sits at delete_start - byte_so_in_start (≤ delete_start)
+    //    and must not move.
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .shift_after(delete_start + 1, -(deleted_bytes as i32));
 }
 
 /// Insert a U+FFFC OBJECT REPLACEMENT CHARACTER sentinel in the rope
@@ -446,86 +378,82 @@ pub fn rope_merge_block_range(
 /// table *presence* (3-byte sentinel) only.
 ///
 /// No-op if `target_block_id` is not in the index.
-#[allow(unused_variables)]
 pub fn rope_insert_table_anchor(
     store: &Store,
     table_id: EntityId,
     target_block_id: EntityId,
     after: bool,
 ) {
-    #[cfg(feature = "rope_backend")]
-    {
-        const SENTINEL: &str = "\u{FFFC}"; // 3 bytes
-        const SENTINEL_BYTES: u32 = 3;
+    const SENTINEL: &str = "\u{FFFC}"; // 3 bytes
+    const SENTINEL_BYTES: u32 = 3;
 
-        let (insert_pos, target_idx, target_is_last) = {
-            let offsets = store.block_offsets.read().unwrap();
-            let target_marker = OffsetMarker::Block(target_block_id);
-            let Some((start, end)) = offsets.range_of(target_marker) else {
-                return;
-            };
-            let idx = offsets
-                .entries
-                .iter()
-                .position(|(m, _)| *m == target_marker)
-                .unwrap();
-            let is_last = idx + 1 == offsets.entries.len();
-            let pos = if after { end } else { start };
-            (pos, idx, is_last)
+    let (insert_pos, target_idx, target_is_last) = {
+        let offsets = store.block_offsets.read().unwrap();
+        let target_marker = OffsetMarker::Block(target_block_id);
+        let Some((start, end)) = offsets.range_of(target_marker) else {
+            return;
+        };
+        let idx = offsets
+            .entries
+            .iter()
+            .position(|(m, _)| *m == target_marker)
+            .unwrap();
+        let is_last = idx + 1 == offsets.entries.len();
+        let pos = if after { end } else { start };
+        (pos, idx, is_last)
+    };
+
+    // Insertion strategy:
+    let (rope_inserted, marker_byte_start, new_entry_pos, shift_threshold, shift_delta) =
+        if !after {
+            // Before target: "\u{FFFC}\n" at target.byte_start
+            ("\u{FFFC}\n", insert_pos, target_idx, insert_pos, 4i32)
+        } else if !target_is_last {
+            // After target, with following entries: "\u{FFFC}\n"
+            // at target.byte_end. The TableAnchor sits where the
+            // next block USED to start; that following entry
+            // shifts by 4.
+            (
+                "\u{FFFC}\n",
+                insert_pos,
+                target_idx + 1,
+                insert_pos,
+                4i32,
+            )
+        } else {
+            // After target which is last: "\n\u{FFFC}" appended.
+            // TableAnchor's byte_start sits 1 past the original
+            // total (after the new `\n`).
+            ("\n\u{FFFC}", insert_pos + 1, target_idx + 1, insert_pos, 4i32)
         };
 
-        // Insertion strategy:
-        let (rope_inserted, marker_byte_start, new_entry_pos, shift_threshold, shift_delta) =
-            if !after {
-                // Before target: "\u{FFFC}\n" at target.byte_start
-                ("\u{FFFC}\n", insert_pos, target_idx, insert_pos, 4i32)
-            } else if !target_is_last {
-                // After target, with following entries: "\u{FFFC}\n"
-                // at target.byte_end. The TableAnchor sits where the
-                // next block USED to start; that following entry
-                // shifts by 4.
-                (
-                    "\u{FFFC}\n",
-                    insert_pos,
-                    target_idx + 1,
-                    insert_pos,
-                    4i32,
-                )
-            } else {
-                // After target which is last: "\n\u{FFFC}" appended.
-                // TableAnchor's byte_start sits 1 past the original
-                // total (after the new `\n`).
-                ("\n\u{FFFC}", insert_pos + 1, target_idx + 1, insert_pos, 4i32)
-            };
-
-        // 1. Splice the literal bytes into the rope.
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_idx = rope.byte_to_char(insert_pos as usize);
-            rope.insert(char_idx, rope_inserted);
-        }
-
-        // 2. Shift entries past the insertion point. Use shift_after
-        //    BEFORE inserting our new entry so we don't double-shift.
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .shift_after(shift_threshold, shift_delta);
-
-        // 3. Register the TableAnchor at the resolved byte position
-        //    and the resolved Vec position.
-        store.block_offsets.write().unwrap().insert_at(
-            new_entry_pos,
-            OffsetMarker::TableAnchor(table_id),
-            marker_byte_start,
-        );
-
-        // Note: SENTINEL_BYTES is part of `shift_delta` (3 for the
-        // sentinel + 1 for the `\n`).
-        let _ = SENTINEL;
-        let _ = SENTINEL_BYTES;
+    // 1. Splice the literal bytes into the rope.
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_idx = rope.byte_to_char(insert_pos as usize);
+        rope.insert(char_idx, rope_inserted);
     }
+
+    // 2. Shift entries past the insertion point. Use shift_after
+    //    BEFORE inserting our new entry so we don't double-shift.
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .shift_after(shift_threshold, shift_delta);
+
+    // 3. Register the TableAnchor at the resolved byte position
+    //    and the resolved Vec position.
+    store.block_offsets.write().unwrap().insert_at(
+        new_entry_pos,
+        OffsetMarker::TableAnchor(table_id),
+        marker_byte_start,
+    );
+
+    // Note: SENTINEL_BYTES is part of `shift_delta` (3 for the
+    // sentinel + 1 for the `\n`).
+    let _ = SENTINEL;
+    let _ = SENTINEL_BYTES;
 }
 
 /// Remove a TableAnchor sentinel from the rope, undoing the effect
@@ -536,53 +464,49 @@ pub fn rope_insert_table_anchor(
 /// entries by -4.
 ///
 /// No-op if no TableAnchor for `table_id` exists.
-#[allow(unused_variables)]
 pub fn rope_remove_table_anchor(store: &Store, table_id: EntityId) {
-    #[cfg(feature = "rope_backend")]
+    let anchor_marker = OffsetMarker::TableAnchor(table_id);
+    let (anchor_byte_start, anchor_idx, anchor_is_last, has_predecessor) = {
+        let offsets = store.block_offsets.read().unwrap();
+        let Some((start, _end)) = offsets.range_of(anchor_marker) else {
+            return;
+        };
+        let idx = offsets
+            .entries
+            .iter()
+            .position(|(m, _)| *m == anchor_marker)
+            .unwrap();
+        let is_last = idx + 1 == offsets.entries.len();
+        let has_pred = idx > 0;
+        (start, idx, is_last, has_pred)
+    };
+
+    // Symmetric to insert_table_anchor. The 4 bytes to remove are:
+    // - if anchor is last: [byte_start - 1 .. byte_start + 3) — the
+    //   preceding `\n` + the 3-byte sentinel
+    // - otherwise: [byte_start .. byte_start + 4) — the sentinel
+    //   + the following `\n`
+    let (remove_start, remove_end) = if anchor_is_last && has_predecessor {
+        (anchor_byte_start - 1, anchor_byte_start + 3)
+    } else {
+        (anchor_byte_start, anchor_byte_start + 4)
+    };
+
     {
-        let anchor_marker = OffsetMarker::TableAnchor(table_id);
-        let (anchor_byte_start, anchor_idx, anchor_is_last, has_predecessor) = {
-            let offsets = store.block_offsets.read().unwrap();
-            let Some((start, _end)) = offsets.range_of(anchor_marker) else {
-                return;
-            };
-            let idx = offsets
-                .entries
-                .iter()
-                .position(|(m, _)| *m == anchor_marker)
-                .unwrap();
-            let is_last = idx + 1 == offsets.entries.len();
-            let has_pred = idx > 0;
-            (start, idx, is_last, has_pred)
-        };
-
-        // Symmetric to insert_table_anchor. The 4 bytes to remove are:
-        // - if anchor is last: [byte_start - 1 .. byte_start + 3) — the
-        //   preceding `\n` + the 3-byte sentinel
-        // - otherwise: [byte_start .. byte_start + 4) — the sentinel
-        //   + the following `\n`
-        let (remove_start, remove_end) = if anchor_is_last && has_predecessor {
-            (anchor_byte_start - 1, anchor_byte_start + 3)
-        } else {
-            (anchor_byte_start, anchor_byte_start + 4)
-        };
-
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_start = rope.byte_to_char(remove_start as usize);
-            let char_end = rope.byte_to_char(remove_end as usize);
-            rope.remove(char_start..char_end);
-        }
-        {
-            let mut offsets = store.block_offsets.write().unwrap();
-            offsets.entries.remove(anchor_idx);
-        }
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .shift_after(remove_start, -4);
+        let mut rope = store.rope.write().unwrap();
+        let char_start = rope.byte_to_char(remove_start as usize);
+        let char_end = rope.byte_to_char(remove_end as usize);
+        rope.remove(char_start..char_end);
     }
+    {
+        let mut offsets = store.block_offsets.write().unwrap();
+        offsets.entries.remove(anchor_idx);
+    }
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .shift_after(remove_start, -4);
 }
 
 /// Remove a registered block from the rope: drops its content bytes
@@ -595,139 +519,125 @@ pub fn rope_remove_table_anchor(store: &Store, table_id: EntityId) {
 /// case of a single-block document being asked to remove its sole
 /// block (we'd produce an empty rope but the block itself is being
 /// cascaded by the caller).
-#[allow(unused_variables)]
 pub fn rope_remove_block(store: &Store, block_id: EntityId) {
-    #[cfg(feature = "rope_backend")]
-    {
-        let block_marker = OffsetMarker::Block(block_id);
-        let (block_start, block_end, idx, is_last, has_pred) = {
-            let offsets = store.block_offsets.read().unwrap();
-            let Some((start, end)) = offsets.range_of(block_marker) else {
-                return;
-            };
-            let idx = offsets
-                .entries
-                .iter()
-                .position(|(m, _)| *m == block_marker)
-                .unwrap();
-            let is_last = idx + 1 == offsets.entries.len();
-            let has_pred = idx > 0;
-            (start, end, idx, is_last, has_pred)
-        };
-
-        // Determine the byte range to delete:
-        // - if there's a successor: [block_start..block_end) — the
-        //   block's content INCLUDING its trailing boundary `\n`
-        //   (which is the byte at block_end - 1)
-        // - if last and has predecessor: [block_start - 1..block_end)
-        //   — also delete the LEADING boundary `\n` that the previous
-        //   entry placed before us
-        // - if last and no predecessor (sole entry): just delete
-        //   [block_start..block_end) (no boundary `\n` exists)
-        let (remove_start, remove_end) = if is_last && has_pred {
-            (block_start.saturating_sub(1), block_end)
-        } else {
-            (block_start, block_end)
-        };
-        if remove_end <= remove_start {
-            // Drop the entry only; nothing to remove from the rope.
-            store.block_offsets.write().unwrap().entries.remove(idx);
+    let block_marker = OffsetMarker::Block(block_id);
+    let (block_start, block_end, idx, is_last, has_pred) = {
+        let offsets = store.block_offsets.read().unwrap();
+        let Some((start, end)) = offsets.range_of(block_marker) else {
             return;
-        }
-        let deleted_bytes = remove_end - remove_start;
+        };
+        let idx = offsets
+            .entries
+            .iter()
+            .position(|(m, _)| *m == block_marker)
+            .unwrap();
+        let is_last = idx + 1 == offsets.entries.len();
+        let has_pred = idx > 0;
+        (start, end, idx, is_last, has_pred)
+    };
 
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_start = rope.byte_to_char(remove_start as usize);
-            let char_end = rope.byte_to_char(remove_end as usize);
-            rope.remove(char_start..char_end);
-        }
+    // Determine the byte range to delete:
+    // - if there's a successor: [block_start..block_end) — the
+    //   block's content INCLUDING its trailing boundary `\n`
+    //   (which is the byte at block_end - 1)
+    // - if last and has predecessor: [block_start - 1..block_end)
+    //   — also delete the LEADING boundary `\n` that the previous
+    //   entry placed before us
+    // - if last and no predecessor (sole entry): just delete
+    //   [block_start..block_end) (no boundary `\n` exists)
+    let (remove_start, remove_end) = if is_last && has_pred {
+        (block_start.saturating_sub(1), block_end)
+    } else {
+        (block_start, block_end)
+    };
+    if remove_end <= remove_start {
+        // Drop the entry only; nothing to remove from the rope.
         store.block_offsets.write().unwrap().entries.remove(idx);
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .shift_after(remove_start, -(deleted_bytes as i32));
+        return;
     }
+    let deleted_bytes = remove_end - remove_start;
+
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_start = rope.byte_to_char(remove_start as usize);
+        let char_end = rope.byte_to_char(remove_end as usize);
+        rope.remove(char_start..char_end);
+    }
+    store.block_offsets.write().unwrap().entries.remove(idx);
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .shift_after(remove_start, -(deleted_bytes as i32));
 }
 
 /// Delete bytes `[byte_start_in_block..byte_end_in_block)` from inside
 /// the block identified by `block_id`. Shifts subsequent block offsets
 /// by the deleted byte length. No-op for blocks not in the index.
-#[allow(unused_variables)]
 pub fn rope_delete_in_block(
     store: &Store,
     block_id: EntityId,
     byte_start_in_block: u32,
     byte_end_in_block: u32,
 ) {
-    #[cfg(feature = "rope_backend")]
-    {
-        if byte_end_in_block <= byte_start_in_block {
-            return;
-        }
-        let deleted_bytes = byte_end_in_block - byte_start_in_block;
-        let block_byte_start = {
-            let offsets = store.block_offsets.read().unwrap();
-            let Some((start, _end)) = offsets.range_of_block(block_id) else {
-                return;
-            };
-            start
-        };
-        let rope_byte_start = block_byte_start + byte_start_in_block;
-        let rope_byte_end = block_byte_start + byte_end_in_block;
-        {
-            let mut rope = store.rope.write().unwrap();
-            let char_start = rope.byte_to_char(rope_byte_start as usize);
-            let char_end = rope.byte_to_char(rope_byte_end as usize);
-            rope.remove(char_start..char_end);
-        }
-        store
-            .block_offsets
-            .write()
-            .unwrap()
-            .shift_after(block_byte_start + 1, -(deleted_bytes as i32));
+    if byte_end_in_block <= byte_start_in_block {
+        return;
     }
+    let deleted_bytes = byte_end_in_block - byte_start_in_block;
+    let block_byte_start = {
+        let offsets = store.block_offsets.read().unwrap();
+        let Some((start, _end)) = offsets.range_of_block(block_id) else {
+            return;
+        };
+        start
+    };
+    let rope_byte_start = block_byte_start + byte_start_in_block;
+    let rope_byte_end = block_byte_start + byte_end_in_block;
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_start = rope.byte_to_char(rope_byte_start as usize);
+        let char_end = rope.byte_to_char(rope_byte_end as usize);
+        rope.remove(char_start..char_end);
+    }
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .shift_after(block_byte_start + 1, -(deleted_bytes as i32));
 }
 
 /// Recompute `Frame.byte_range` for every frame in `store.frames`
 /// based on current `block_offsets` and the frame tree structure.
 /// Plan §1.6 invariant: each frame's byte_range is the (min_start,
 /// max_end) over all its descendant blocks, sub-frames, and table
-/// anchors+cells. No-op under default backend.
+/// anchors+cells.
 ///
 /// Call this after any mutation that affects rope byte positions.
 /// O(F + B) where F = frames, B = blocks in the document.
-#[allow(unused_variables)]
 pub fn recompute_all_frame_byte_ranges(store: &Store) {
-    #[cfg(feature = "rope_backend")]
-    {
-        let frame_ids: Vec<EntityId> = {
-            let frames = store.frames.read().unwrap();
-            frames.keys().copied().collect()
-        };
-        for fid in frame_ids {
-            let new_range = compute_frame_byte_range_recursive(store, fid);
-            let mut frames = store.frames.write().unwrap();
-            if let Some(f) = frames.get(&fid).cloned() {
-                if f.byte_range != new_range {
-                    let mut updated = f;
-                    updated.byte_range = new_range;
-                    frames.insert(fid, updated);
-                }
+    let frame_ids: Vec<EntityId> = {
+        let frames = store.frames.read().unwrap();
+        frames.keys().copied().collect()
+    };
+    for fid in frame_ids {
+        let new_range = compute_frame_byte_range_recursive(store, fid);
+        let mut frames = store.frames.write().unwrap();
+        if let Some(f) = frames.get(&fid).cloned() {
+            if f.byte_range != new_range {
+                let mut updated = f;
+                updated.byte_range = new_range;
+                frames.insert(fid, updated);
             }
         }
     }
 }
 
-#[cfg(feature = "rope_backend")]
 fn compute_frame_byte_range_recursive(store: &Store, frame_id: EntityId) -> (u32, u32) {
     let mut bounds: Option<(u32, u32)> = None;
     walk_frame_bounds(store, frame_id, &mut bounds);
     bounds.unwrap_or((0, 0))
 }
 
-#[cfg(feature = "rope_backend")]
 fn walk_frame_bounds(store: &Store, frame_id: EntityId, bounds: &mut Option<(u32, u32)>) {
     fn merge(bounds: &mut Option<(u32, u32)>, s: u32, e: u32) {
         *bounds = Some(match *bounds {

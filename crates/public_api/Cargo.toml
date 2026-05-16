@@ -27,12 +27,6 @@ common = { workspace = true }
 # Backend (frontend re-exports all backend crates)
 frontend = { workspace = true }
 
-[features]
-default = []
-# Pass-through for tests that inspect rope/block_offsets fields on
-# RopeStore. Equivalent to enabling text-document-common/rope_backend.
-rope_backend = ["common/rope_backend"]
-
 [dev-dependencies]
 proptest = "1"
 criterion = { version = "0.8.2", features = ["html_reports"] }

@@ -85,9 +85,9 @@ impl GetDocumentStatsUseCase {
         let blocks_opt = uow.get_block_multi(&all_block_ids)?;
         let blocks: Vec<&Block> = blocks_opt.iter().filter_map(|b| b.as_ref()).collect();
 
-        // Word count: iterate all blocks, split content by whitespace.
-        // Under rope_backend, content is read from the rope via
-        // `block_content_via_store` (preparation for step 7).
+        // Word count: iterate all blocks, split content by whitespace
+        // (content is read from the global rope via
+        // `block_content_via_store`).
         let store = uow.store();
         let mut word_count: i64 = 0;
         for block in &blocks {
