@@ -3,7 +3,7 @@ use crate::InsertTableResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::database::rope_helpers::{
-    rope_append_block, rope_insert_block_boundary, rope_insert_table_anchor,
+    rope_insert_block_at, rope_insert_table_anchor, top_level_frame_end_byte,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
@@ -237,18 +237,23 @@ fn execute_insert_table(
         uow.update_block_multi(&blocks_to_update)?;
     }
 
-    // Mirror cell-block creation into the global rope. Cells live
-    // AFTER the main flow in the rope's linear layout (plan §1.6
-    // simplified: single-top-level-frame). Each cell entry needs a
-    // boundary `\n` before it — the table anchor that precedes the
-    // first cell ends without a trailing newline, and inter-cell
-    // boundaries follow the same convention as inter-block ones.
+    // Mirror cell-block creation into the global rope. Per plan §1.6
+    // cells of a table live AT THE END of the containing top-level
+    // frame's rope range — BEFORE any following top-level frame's
+    // content. Each cell is preceded by a `\n` boundary.
+    //
+    // The anchor sentinel was just inserted, so the top-level frame's
+    // current end byte (computed fresh from block_offsets, not from
+    // the stale Frame.byte_range) already includes that sentinel.
+    // Each rope_insert_block_at advances the position by (1 + text.len())
+    // so the next cell lands immediately after the previous one.
     // No-op under default backend.
     {
         let store = uow.store();
+        let mut next_byte = top_level_frame_end_byte(&store, parent_frame_id);
         for cell_block in &cell_blocks {
-            rope_insert_block_boundary(&store);
-            rope_append_block(&store, cell_block.id, &cell_block.plain_text);
+            rope_insert_block_at(&store, next_byte, cell_block.id, &cell_block.plain_text);
+            next_byte += 1 + cell_block.plain_text.len() as u32;
         }
     }
 

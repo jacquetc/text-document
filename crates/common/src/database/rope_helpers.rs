@@ -56,6 +56,96 @@ pub fn rope_append_block(store: &Store, block_id: EntityId, text: &str) -> u32 {
     }
 }
 
+/// Insert `text` as a new block at `byte_pos` in the rope, prepending
+/// a `\n` boundary. Used by `insert_table_uc` to place cell blocks at
+/// the end of their containing top-level frame's range (plan §1.6),
+/// rather than always at rope end.
+///
+/// Total bytes inserted: `1 + text.len()`. The block's content
+/// occupies `[byte_pos + 1, byte_pos + 1 + text.len())`. The block
+/// entry is registered at `byte_pos + 1` in `block_offsets`.
+///
+/// Existing entries with `byte_start == byte_pos` (e.g. a previous
+/// empty block whose end coincides with this insertion point) are
+/// kept BEFORE the new entry in the Vec, since the inserted `\n`
+/// boundary belongs after them. Entries strictly past `byte_pos`
+/// shift forward by `(1 + text.len())` bytes.
+///
+/// When `byte_pos == total_bytes`, behaves like
+/// `rope_insert_block_boundary` followed by `rope_append_block`.
+/// No-op under default backend.
+#[allow(unused_variables)]
+pub fn rope_insert_block_at(store: &Store, byte_pos: u32, block_id: EntityId, text: &str) {
+    #[cfg(feature = "rope_backend")]
+    {
+        let delta = (1 + text.len()) as i32;
+        // Vec position: insert AFTER any entry at byte_pos itself
+        // (those represent earlier empty blocks whose `\n` boundary
+        // we are placing now). Only entries strictly past byte_pos
+        // come after our new entry in the Vec.
+        let new_entry_vec_pos = {
+            let offsets = store.block_offsets.read().unwrap();
+            offsets
+                .entries
+                .iter()
+                .position(|(_, bs)| *bs > byte_pos)
+                .unwrap_or(offsets.entries.len())
+        };
+        {
+            let mut rope = store.rope.write().unwrap();
+            let char_idx = rope.byte_to_char(byte_pos as usize);
+            let mut combined = String::with_capacity(1 + text.len());
+            combined.push('\n');
+            combined.push_str(text);
+            rope.insert(char_idx, &combined);
+        }
+        let mut offsets = store.block_offsets.write().unwrap();
+        // Shift entries strictly past byte_pos. Entries AT byte_pos
+        // (the prior empty block) stay where they are — the new `\n`
+        // is conceptually "after" them.
+        offsets.shift_after(byte_pos + 1, delta);
+        offsets.insert_at(new_entry_vec_pos, OffsetMarker::Block(block_id), byte_pos + 1);
+    }
+}
+
+/// Walks up `frame.parent_frame` to find the top-level ancestor of
+/// the given frame, then returns the end byte of that top-level
+/// frame's current rope range — i.e. the byte position where blocks
+/// belonging to that frame's subtree (e.g. table cells per plan §1.6)
+/// should be inserted so they land BEFORE any following top-level
+/// frame's content.
+///
+/// Reads `block_offsets`/`frames`/`tables`/`table_cells` directly, so
+/// the result is fresh even when `Frame.byte_range` has not yet been
+/// recomputed at commit time.
+///
+/// Returns 0 under default backend.
+#[allow(unused_variables)]
+pub fn top_level_frame_end_byte(store: &Store, frame_id: EntityId) -> u32 {
+    #[cfg(feature = "rope_backend")]
+    {
+        let top_id = {
+            let frames = store.frames.read().unwrap();
+            let mut current = frame_id;
+            loop {
+                let Some(f) = frames.get(&current) else {
+                    return 0;
+                };
+                match f.parent_frame {
+                    None => break current,
+                    Some(p) => current = p,
+                }
+            }
+        };
+        let (_min, max) = compute_frame_byte_range_recursive(store, top_id);
+        return max;
+    }
+    #[cfg(not(feature = "rope_backend"))]
+    {
+        0
+    }
+}
+
 /// Append a new empty block to the end of the rope, separating it
 /// from any prior content with a `\n` boundary (only if the rope is
 /// already non-empty). Registers `block_id` at the resulting byte
