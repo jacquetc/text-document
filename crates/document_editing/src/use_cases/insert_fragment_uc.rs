@@ -1949,6 +1949,7 @@ fn execute_insert_fragment(
             let mut blocks_added: i64 = 0;
             #[allow(unused_assignments)]
             let mut tail_text_len: i64 = 0;
+            let mut created_tail_id_overwrite: Option<EntityId> = None;
 
             if !skip_tail {
                 let tail_text_length = text_after_chars + right_image_count;
@@ -1982,6 +1983,7 @@ fn execute_insert_fragment(
                     uow.create_block(&tail_block, frame_id, (block_idx + 1) as i32)?;
                 tail_text_len = created_tail.text_length;
                 blocks_added = 1;
+                created_tail_id_overwrite = Some(created_tail.id);
                 write_block_state(
                     uow,
                     created_tail.id,
@@ -2001,6 +2003,32 @@ fn execute_insert_fragment(
                 uow.update_frame(&updated_frame)?;
 
                 running_position += tail_text_len + 1;
+            }
+
+            // ── Rope mirror (single-block-with-formatting, overwrite_head) ──
+            // Current block's content went from text_after (= original full
+            // block text, since text_before was empty) to frag_block.plain_text.
+            // Optionally a tail block holding text_after is appended.
+            {
+                let store = uow.store();
+                let text_after_bytes = text_after.len() as u32;
+                if text_after_bytes > 0 {
+                    rope_delete_in_block(&store, current_block.id, 0, text_after_bytes);
+                }
+                if !frag_block.plain_text.is_empty() {
+                    rope_insert_in_block(&store, current_block.id, 0, &frag_block.plain_text);
+                }
+                if let Some(tail_id) = created_tail_id_overwrite {
+                    rope_split_block(
+                        &store,
+                        current_block.id,
+                        frag_block.plain_text.len() as u32,
+                        tail_id,
+                    );
+                    if !text_after.is_empty() {
+                        rope_insert_in_block(&store, tail_id, 0, &text_after);
+                    }
+                }
             }
 
             let original_next_pos =
@@ -2172,6 +2200,41 @@ fn execute_insert_fragment(
             updated_doc.character_count += block_text_len;
             updated_doc.updated_at = now;
             uow.update_document(&updated_doc)?;
+
+            // ── Rope mirror (single-block-with-formatting, normal path) ──
+            // Current block now holds text_before only. Two new blocks were
+            // created: the middle block (= frag_block.plain_text) and the
+            // tail block (= text_after). Splice the rope to match.
+            {
+                let store = uow.store();
+                let text_after_bytes = text_after.len() as u32;
+                if text_after_bytes > 0 {
+                    rope_delete_in_block(
+                        &store,
+                        current_block.id,
+                        byte_offset,
+                        byte_offset + text_after_bytes,
+                    );
+                }
+                rope_split_block(
+                    &store,
+                    current_block.id,
+                    text_before.len() as u32,
+                    created_block.id,
+                );
+                if !frag_block.plain_text.is_empty() {
+                    rope_insert_in_block(&store, created_block.id, 0, &frag_block.plain_text);
+                }
+                rope_split_block(
+                    &store,
+                    created_block.id,
+                    frag_block.plain_text.len() as u32,
+                    created_tail.id,
+                );
+                if !text_after.is_empty() {
+                    rope_insert_in_block(&store, created_tail.id, 0, &text_after);
+                }
+            }
 
             Ok((
                 InsertFragmentResultDto {
