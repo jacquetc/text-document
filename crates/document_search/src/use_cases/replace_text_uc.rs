@@ -3,6 +3,7 @@ use crate::ReplaceResultDto;
 use crate::ReplaceTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{rope_delete_in_block, rope_insert_in_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -159,6 +160,12 @@ fn replace_in_block(
     updated_block.text_length += net_chars_delta;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
+
+    // Mirror the in-block splice into the global rope: delete the old
+    // byte range, then insert the replacement at the same position.
+    // No-op under default backend.
+    rope_delete_in_block(&store, block.id, byte_start as u32, byte_end as u32);
+    rope_insert_in_block(&store, block.id, byte_start as u32, replacement);
 
     Ok(())
 }

@@ -1698,7 +1698,6 @@ dependencies = [
  "serde",
  "serde_json",
  "text-document-common",
- "text-document-io",
  "text-document-macros",
  "text-document-test-harness",
  "uuid",

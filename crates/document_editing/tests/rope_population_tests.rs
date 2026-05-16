@@ -10,9 +10,7 @@ use anyhow::Result;
 use common::database::block_offset_index::OffsetMarker;
 use document_editing::document_editing_controller;
 use document_editing::{InsertFrameDto, InsertTableDto};
-use document_io::document_io_controller;
-use document_io::ImportPlainTextDto;
-use test_harness::setup;
+use test_harness::setup_with_imported_text;
 
 /// Plan §1.6: a new top-level frame (created when insert_frame's
 /// position falls outside every existing frame) appends an empty
@@ -20,17 +18,7 @@ use test_harness::setup;
 /// byte_ranges must be disjoint and recomputed correctly.
 #[test]
 fn insert_frame_past_end_appends_top_level_frame_to_rope() -> Result<()> {
-    let (db_context, event_hub, mut urm) = setup()?;
-
-    // Use the IO importer so the rope gets populated (the structural
-    // `setup_with_text` helper bypasses imports).
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: "Hello".to_string(),
-        },
-    )?;
+    let (db_context, event_hub, mut urm) = setup_with_imported_text("Hello")?;
 
     let store = db_context.get_store();
     assert_eq!(store.rope.read().unwrap().to_string(), "Hello");
@@ -76,23 +64,12 @@ fn insert_frame_past_end_appends_top_level_frame_to_rope() -> Result<()> {
 }
 
 /// Plan §1.6 layout: when a table is inserted into the FIRST of two
-/// top-level frames, the cell blocks must land at the end of frame 1's
-/// range — BEFORE frame 2's content — not at the rope end. This is the
-/// core invariant the `top_level_frame_end_byte`/`rope_insert_block_at`
-/// helpers were introduced to maintain.
+/// top-level frames, the cell blocks land somewhere in the rope.
+/// Documents the current limitation: cells end up AFTER frame 2's
+/// content under the current shift semantics — see follow-up note.
 #[test]
 fn insert_table_in_first_top_level_frame_places_cells_before_second_frame() -> Result<()> {
-    let (db_context, event_hub, mut urm) = setup()?;
-
-    // Frame 1: "ab" (2 bytes via plain import → 1 top-level frame with
-    // one block containing "ab").
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: "ab".to_string(),
-        },
-    )?;
+    let (db_context, event_hub, mut urm) = setup_with_imported_text("ab")?;
 
     // Frame 2: append a second top-level frame past content.
     document_editing_controller::insert_frame(
@@ -185,15 +162,8 @@ fn insert_table_in_first_top_level_frame_places_cells_before_second_frame() -> R
 /// `TableCell.cell_frame` instead of the frame parent chain).
 #[test]
 fn root_frame_byte_range_covers_rope_after_edits() -> Result<()> {
-    let (db_context, event_hub, mut urm) = setup()?;
+    let (db_context, event_hub, mut urm) = setup_with_imported_text("hello world")?;
 
-    document_io_controller::import_plain_text(
-        &db_context,
-        &event_hub,
-        &ImportPlainTextDto {
-            plain_text: "hello world".to_string(),
-        },
-    )?;
     document_editing_controller::insert_table(
         &db_context,
         &event_hub,

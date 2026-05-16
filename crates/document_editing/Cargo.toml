@@ -25,7 +25,6 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 test_harness = { workspace = true }
-document_io = { workspace = true }
 
 [features]
 default = []
