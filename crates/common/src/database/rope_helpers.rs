@@ -70,3 +70,87 @@ pub fn rope_insert_block_boundary(store: &Store) {
         store.block_offsets.write().unwrap().set_total_bytes(new_total);
     }
 }
+
+/// Insert `text` at `byte_offset_in_block` inside the block identified
+/// by `block_id`. Looks up the block's start in the rope via
+/// `block_offsets.range_of()`, splices into the rope, and shifts
+/// subsequent block offsets by the inserted byte length.
+///
+/// Silently no-ops if the block is not registered in the offset index
+/// (this can happen for blocks whose content lives outside the global
+/// rope, e.g. table cells until step 5.5).
+#[allow(unused_variables)]
+pub fn rope_insert_in_block(
+    store: &Store,
+    block_id: EntityId,
+    byte_offset_in_block: u32,
+    text: &str,
+) {
+    #[cfg(feature = "rope_backend")]
+    {
+        let inserted_bytes = text.len() as u32;
+        if inserted_bytes == 0 {
+            return;
+        }
+        let block_byte_start = {
+            let offsets = store.block_offsets.read().unwrap();
+            let Some((start, _end)) = offsets.range_of(block_id) else {
+                return;
+            };
+            start
+        };
+        let rope_byte = block_byte_start + byte_offset_in_block;
+        {
+            let mut rope = store.rope.write().unwrap();
+            let char_idx = rope.byte_to_char(rope_byte as usize);
+            rope.insert(char_idx, text);
+        }
+        // Shift entries past this block by inserted_bytes. Threshold
+        // is one byte past block_byte_start so the current block's own
+        // entry isn't moved.
+        store
+            .block_offsets
+            .write()
+            .unwrap()
+            .shift_after(block_byte_start + 1, inserted_bytes as i32);
+    }
+}
+
+/// Delete bytes `[byte_start_in_block..byte_end_in_block)` from inside
+/// the block identified by `block_id`. Shifts subsequent block offsets
+/// by the deleted byte length. No-op for blocks not in the index.
+#[allow(unused_variables)]
+pub fn rope_delete_in_block(
+    store: &Store,
+    block_id: EntityId,
+    byte_start_in_block: u32,
+    byte_end_in_block: u32,
+) {
+    #[cfg(feature = "rope_backend")]
+    {
+        if byte_end_in_block <= byte_start_in_block {
+            return;
+        }
+        let deleted_bytes = byte_end_in_block - byte_start_in_block;
+        let block_byte_start = {
+            let offsets = store.block_offsets.read().unwrap();
+            let Some((start, _end)) = offsets.range_of(block_id) else {
+                return;
+            };
+            start
+        };
+        let rope_byte_start = block_byte_start + byte_start_in_block;
+        let rope_byte_end = block_byte_start + byte_end_in_block;
+        {
+            let mut rope = store.rope.write().unwrap();
+            let char_start = rope.byte_to_char(rope_byte_start as usize);
+            let char_end = rope.byte_to_char(rope_byte_end as usize);
+            rope.remove(char_start..char_end);
+        }
+        store
+            .block_offsets
+            .write()
+            .unwrap()
+            .shift_after(block_byte_start + 1, -(deleted_bytes as i32));
+    }
+}

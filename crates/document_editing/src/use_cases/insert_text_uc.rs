@@ -3,6 +3,7 @@ use crate::InsertTextDto;
 use crate::InsertTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{rope_delete_in_block, rope_insert_in_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
@@ -107,6 +108,9 @@ fn delete_range_in_block(
         let images = images_map.entry(block.id).or_default();
         shift_images_for_delete(images, byte_start, byte_end) as i64
     };
+
+    // Mirror the delete into the global rope (no-op under default).
+    rope_delete_in_block(&store, block.id, byte_start, byte_end);
 
     let positions_removed = removed_text_chars + images_removed;
 
@@ -236,9 +240,8 @@ fn execute_insert_with_selection(
         }
     }
 
-    // Reverse-sync: rebuild inline_elements from the new (plain_text +
-    // format_runs + block_images) state so legacy readers / writers see a
-    // consistent view.
+    // Mirror the insert into the global rope (no-op under default).
+    rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for b in &blocks[(block_idx + 1)..] {
@@ -354,6 +357,8 @@ fn execute_insert_simple(
         }
     }
 
+    // Mirror the insert into the global rope (no-op under default).
+    rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
     let mut updated_doc = document.clone();
     updated_doc.character_count += inserted_char_len;

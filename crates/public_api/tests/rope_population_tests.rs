@@ -50,6 +50,93 @@ fn set_html_populates_rope() {
 }
 
 #[test]
+fn insert_text_at_position_mirrors_to_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world").unwrap();
+
+    let cursor = doc.cursor_at(5);
+    cursor.insert_text(",").unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert_eq!(rope.to_string(), "hello, world");
+}
+
+#[test]
+fn insert_text_at_end_mirrors_to_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+
+    let cursor = doc.cursor_at(5);
+    cursor.insert_text(" world").unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert_eq!(rope.to_string(), "hello world");
+}
+
+#[test]
+fn insert_text_into_block_other_than_first_shifts_offsets() {
+    // Multi-block doc; insert into block 2; verify block_offsets
+    // for block 3 shift by inserted length.
+    let doc = TextDocument::new();
+    doc.set_plain_text("aaa\nbbb\nccc").unwrap();
+
+    // block 0 [0..3), block 1 [4..7), block 2 [8..11)
+    // Insert "XX" at char position 5 (inside block 1, after "b")
+    let cursor = doc.cursor_at(5);
+    cursor.insert_text("XX").unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert_eq!(rope.to_string(), "aaa\nbXXbb\nccc");
+
+    let offsets = store.block_offsets.read().unwrap();
+    assert_eq!(offsets.entries.len(), 3);
+    assert_eq!(offsets.entries[0].1, 0);
+    assert_eq!(offsets.entries[1].1, 4);
+    assert_eq!(offsets.entries[2].1, 10); // was 8, shifted by 2
+    assert_eq!(offsets.total_bytes(), 13);
+}
+
+#[test]
+fn delete_within_block_mirrors_to_rope() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello, world").unwrap();
+
+    // Delete the comma + space at positions 5..7
+    let cursor = doc.cursor_at(5);
+    cursor.set_position(7, text_document::MoveMode::KeepAnchor);
+    cursor.remove_selected_text().unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert_eq!(rope.to_string(), "helloworld");
+}
+
+#[test]
+fn delete_within_middle_block_shifts_subsequent_offsets() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("aaa\nbbbbb\nccc").unwrap();
+
+    // block 0 [0..3), block 1 [4..9), block 2 [10..13)
+    // Delete chars 5..7 ("bb") inside block 1.
+    let cursor = doc.cursor_at(5);
+    cursor.set_position(7, text_document::MoveMode::KeepAnchor);
+    cursor.remove_selected_text().unwrap();
+
+    let store = doc.rope_store_for_test();
+    let rope = store.rope.read().unwrap();
+    assert_eq!(rope.to_string(), "aaa\nbbb\nccc");
+
+    let offsets = store.block_offsets.read().unwrap();
+    assert_eq!(offsets.entries[0].1, 0);
+    assert_eq!(offsets.entries[1].1, 4);
+    assert_eq!(offsets.entries[2].1, 8); // was 10, shifted by -2
+    assert_eq!(offsets.total_bytes(), 11);
+}
+
+#[test]
 fn set_html_table_cells_not_in_main_rope() {
     // Step 5.5 will properly add cell content to separate byte ranges.
     // For now, top-level prose is in the rope; cell-internal blocks

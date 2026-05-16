@@ -591,6 +591,17 @@ fn execute_delete(
             shift_images_for_delete(images, byte_so, byte_eo) as i64
         };
 
+        // Mirror the same-block delete into the global rope (no-op under
+        // default). Cross-block delete is handled below — its rope sync
+        // is deferred to step 5.5 (the structural-ops migration) since
+        // it removes whole blocks plus their boundary newlines.
+        common::database::rope_helpers::rope_delete_in_block(
+            &store,
+            start_block.id,
+            byte_so,
+            byte_eo,
+        );
+
         let mut updated_block = start_block.clone();
         updated_block.plain_text = new_plain.clone();
         updated_block.text_length -= delete_len;
