@@ -99,7 +99,7 @@ fn import_parsed_elements(
     let new_frame = Frame::default();
     let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
-    // Step 4: Create blocks with inline elements
+    // Step 4: Create blocks with format runs and image anchors
     let total_elements = parsed_elements.len();
     let mut total_chars: i64 = 0;
     let mut total_block_count: i64 = 0;

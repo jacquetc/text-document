@@ -231,9 +231,9 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
 
     // Verify bold formatting is preserved across the paste: count
     // occurrences of "bold text" that sit inside a bold-formatted
-    // inline element. Under the format_runs model, adjacent equal-
-    // format spans coalesce into one run / one inline element, so we
-    // count substring occurrences rather than element count.
+    // segment. Adjacent equal-format spans coalesce into one run /
+    // one segment, so we count substring occurrences rather than
+    // segment count.
     let block_ids = get_block_ids(&db_context)?;
     let mut bold_substring_count = 0;
     for block_id in &block_ids {

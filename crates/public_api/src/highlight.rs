@@ -2,8 +2,8 @@
 //!
 //! Provides a [`SyntaxHighlighter`] trait inspired by Qt's `QSyntaxHighlighter`.
 //! Implementors produce shadow formatting that is merged into
-//! [`FragmentContent`] at layout time but never
-//! touches the stored `InlineElement` entities — export, cursor, undo, and
+//! [`FragmentContent`] at layout time but never touches the stored
+//! `format_runs` / `block_images` tables — export, cursor, undo, and
 //! search remain unaffected.
 
 use std::any::Any;
@@ -380,13 +380,13 @@ pub(crate) fn merge_highlight_spans(
                         length: sub_len,
                         // All sub-fragments split from one source
                         // `FragmentContent::Text` reference the same
-                        // underlying inline element — only the
-                        // highlight formatting differs. Sharing the
-                        // id is correct for accessibility (the
-                        // underlying text belongs to one stable
-                        // element) at the cost that synthetic
-                        // NodeIds for highlighted sub-runs collide
-                        // unless the caller further disambiguates.
+                        // underlying format run — only the highlight
+                        // formatting differs. Sharing the id is
+                        // correct for accessibility (the underlying
+                        // text belongs to one stable run) at the cost
+                        // that synthetic NodeIds for highlighted
+                        // sub-runs collide unless the caller further
+                        // disambiguates.
                         // The fern-widgets layer handles that by
                         // mixing the `offset` into the synthetic-id
                         // hash alongside `element_id`.

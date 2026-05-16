@@ -195,7 +195,7 @@ fn insert_empty_string_is_noop() {
 
 #[test]
 fn insert_text_with_newline_inserts_literal() {
-    // insert_text inserts into the current block's inline elements;
+    // insert_text inserts into the current block's plain_text;
     // newlines do not create new blocks (use insert_block for that)
     let doc = new_doc("AC");
     let cursor = doc.cursor_at(1);

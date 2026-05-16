@@ -1091,8 +1091,7 @@ pub fn parse_html_elements(html: &str) -> Vec<ParsedElement> {
 
 /// Convert a `ParsedSpan` (parser output) into the `CharacterFormat` used by
 /// `FormatRun`. `is_code_block` forces `monospace` as the font family for
-/// every span inside a code block, matching the legacy
-/// `create_inline_element_from_span` behavior.
+/// every span inside a code block.
 pub fn character_format_from_span(
     span: &ParsedSpan,
     is_code_block: bool,

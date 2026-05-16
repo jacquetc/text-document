@@ -13,7 +13,7 @@ Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architectu
 
 ## Features
 
-- **Rich text model**: Frames, Blocks, InlineElements with `InlineContent::Text | Image`
+- **Rich text model**: Frames, Blocks with per-block `plain_text` + byte-ranged `FormatRun`s + `ImageAnchor`s (`InlineContent::Text | Image`)
 - **Multi-cursor editing**: Qt-style cursors with automatic position adjustment
 - **Full undo/redo**: Snapshot-based, with composite grouping (`begin_edit_block` / `end_edit_block`)
 - **Import/Export**: Plain text, Markdown, HTML, LaTeX, DOCX
@@ -218,25 +218,24 @@ Supported formats:
 Root
  +-- Document
      +-- Frame (root frame)
-     |   +-- Block
-     |   |   +-- InlineElement (Text "Hello ")
-     |   |   +-- InlineElement (Text "world" with bold)
-     |   |   +-- InlineElement (Image { name, width, height })
-     |   +-- Block
-     |       +-- InlineElement (Text "Second paragraph")
+     |   +-- Block { plain_text: "Hello world" }
+     |   |     format_runs:  [(6..11, bold)]            // "world" is bold
+     |   |     block_images: [(byte_offset: 11, image)] // image after "world"
+     |   +-- Block { plain_text: "Second paragraph" }
      +-- Table (rows: 2, columns: 3)
      |   +-- TableCell (row: 0, col: 0)
      |   |   +-- Frame (cell frame)
-     |   |       +-- Block
-     |   |           +-- InlineElement (Text "Cell content")
+     |   |       +-- Block { plain_text: "Cell content" }
      |   +-- TableCell (row: 0, col: 1) ...
      +-- List (style: Decimal, indent: 1)
      +-- Resource (image data, stylesheets)
 ```
 
 - **Frame**: contains Blocks and child Frames. `child_order` interleaves them (positive = block ID, negative = sub-frame ID).
-- **Block**: a paragraph. Contains InlineElements. Has `document_position` for O(log n) lookup.
-- **InlineElement**: either `Text(String)`, `Image { name, width, height, quality }`, or `Empty`.
+- **Block**: a paragraph. Carries its own `plain_text: String`; per-character formatting lives in a sorted, non-overlapping `Vec<FormatRun>` keyed by block id in `RopeStore.format_runs`. Images are anchored at byte offsets in `RopeStore.block_images`. Has `document_position` for O(log n) lookup.
+- **FormatRun**: `{ byte_start, byte_end, format: CharacterFormat }` — one entry per contiguous span of identical formatting. Adjacent equal-format runs are coalesced.
+- **ImageAnchor**: `{ byte_offset, name, width, height, quality, format }` — image attached to a specific byte position inside a block.
+- **InlineSegment** (`common::format_runs::InlineSegment`): transient view type synthesized on demand from `(plain_text, format_runs, block_images)` for readers (export, fragments, cursor); never stored.
 - **List**: styling for list items (Disc, Decimal, LowerAlpha, ...). Blocks reference lists via weak relationship.
 - **Table**: grid of TableCells, each with an optional cell frame containing Blocks.
 - **Resource**: binary data (images, stylesheets) stored as base64.

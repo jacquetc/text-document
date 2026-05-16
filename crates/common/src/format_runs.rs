@@ -1,9 +1,14 @@
 //! Per-block character formatting as sorted, non-overlapping byte spans.
 //!
-//! Phase 1 of the rope migration: replaces the `InlineElement`-per-run
-//! model. Each block carries a `Vec<FormatRun>` (formatting) and a
+//! Each block carries a `Vec<FormatRun>` (formatting) and a
 //! `Vec<ImageAnchor>` (image positions). The block's `plain_text` is
 //! the authoritative character source for byte offsets used by both.
+//! Replaces the pre-Phase-1 model where every formatted run and every
+//! inline image was a row in the now-deleted `inline_elements` entity
+//! table; the [`InlineSegment`] type in this module is a transient
+//! view synthesized from `(plain_text, format_runs, block_images)`
+//! for readers (export, fragments, cursor) that still consume a
+//! per-segment shape.
 //!
 //! Invariants are documented on [`FormatRun`] and enforced by
 //! [`debug_assert_well_formed`] and by [`splice_range`] / [`shift_after`]
@@ -27,12 +32,13 @@ pub enum InlineContent {
 }
 
 /// A lean view type representing one inline segment (text or image) with its
-/// associated formatting. Replaces the legacy `InlineElement` entity struct
-/// (which included id, created_at, updated_at). Used by readers to consume
-/// per-element data synthesized from `(plain_text, format_runs, block_images)`.
+/// associated formatting. Used by readers (export, fragments, cursor) to
+/// consume per-segment data synthesized from `(plain_text, format_runs,
+/// block_images)` via [`crate::format_runs_query::inline_segments_for_block`].
+/// Never stored — synthesized on demand.
 ///
-/// Fields mirror the old `InlineElement.fmt_*` naming for backward compatibility
-/// in reader logic.
+/// The `fmt_*` field names match those on `Block` and on `FragmentElement`
+/// so readers can copy fields verbatim across the three types.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct InlineSegment {
     pub content: InlineContent,
@@ -54,11 +60,10 @@ pub struct InlineSegment {
     pub fmt_vertical_alignment: Option<CharVerticalAlignment>,
 }
 
-/// Character-level formatting for a contiguous byte span.
-///
-/// Field names mirror `InlineElement.fmt_*` from `entities.rs` so callers
-/// can move between the old per-element model and this per-run model
-/// without renaming.
+/// Character-level formatting for a contiguous byte span. One per
+/// [`FormatRun`]; one per [`ImageAnchor`]. Fields mirror the `fmt_*`
+/// set on [`InlineSegment`] and on `FragmentElement` so values copy
+/// across types verbatim.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CharacterFormat {
     pub font_family: Option<String>,
@@ -245,11 +250,13 @@ pub fn shift_after(runs: &mut Vec<FormatRun>, threshold: u32, delta: i32) {
 }
 
 /// Synthesize a stable per-fragment id from a block id and byte offset
-/// within that block. Used to preserve the `element_id` field in
-/// `FragmentContent::{Text, Image}` once the InlineElement entity is
-/// removed. Two fragments at the same (block_id, byte_start) always
-/// produce the same id; a fragment that moves to a new byte_start
-/// (e.g. due to an insert upstream) gets a new id.
+/// within that block. Populates the `element_id` field in
+/// `FragmentContent::{Text, Image}` (the public layout-engine type),
+/// giving callers a stable handle across renders even though the
+/// underlying [`InlineSegment`]s are never stored. Two segments at the
+/// same `(block_id, byte_start)` always produce the same id; a segment
+/// that moves to a new byte_start (e.g. due to an insert upstream)
+/// gets a new id.
 ///
 /// Bit layout (u64): bit 62 = synth tag (so synthesized ids never
 /// collide with real entity ids issued by the store's counter, which
@@ -454,7 +461,7 @@ pub fn split_images_at(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Bridge helpers between the legacy InlineElement model and the new
+// View synthesis: build a Vec<InlineSegment> from format_runs + images.
 // ─────────────────────────────────────────────────────────────────────
 
 /// Copy the `fmt_*` fields of an `InlineSegment` into a `CharacterFormat`.
@@ -501,10 +508,13 @@ pub fn apply_character_format_to_segment(seg: &mut InlineSegment, fmt: &Characte
 
 /// Synthesize a `Vec<InlineSegment>` view of a block from its
 /// `plain_text`, `format_runs`, and `block_images`. Returns segments
-/// in document order.
+/// in document order: a Text segment per format run (with a fallback
+/// default-format segment for any uncovered bytes), and an Image
+/// segment per anchor at its byte offset.
 ///
-/// This is the Phase 1.14b-and-forward reader function for access to
-/// per-element data without requiring the (now-deleted) inline_elements table.
+/// The canonical reader-side accessor for per-segment data — there is
+/// no persistent inline-element table; this view is computed fresh
+/// each call.
 pub fn inline_segments_view(
     plain_text: &str,
     runs: &[FormatRun],

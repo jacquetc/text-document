@@ -1,9 +1,8 @@
 //! Store-aware readers that synthesize inline content views from
-//! per-block `format_runs` + `block_images`.
-//!
-//! Phase 1.14b and forward: use [`inline_segments_for_block`] to get
-//! `Vec<InlineSegment>`. Pre-1.14b callers used
-//! `synthesize_block_inline_elements` (deprecated).
+//! per-block `format_runs` + `block_images`. The canonical entry
+//! point is [`inline_segments_for_block`], which returns the
+//! `Vec<InlineSegment>` view used by export, fragments, cursor, and
+//! tests.
 
 use crate::database::hashmap_store::HashMapStore;
 use crate::format_runs::{FormatRun, ImageAnchor, InlineSegment, inline_segments_view};

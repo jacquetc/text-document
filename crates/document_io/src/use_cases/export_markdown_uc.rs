@@ -296,7 +296,7 @@ impl ExportMarkdownUseCase {
             return Ok((code_block, false));
         }
 
-        // Get inline elements
+        // Synthesize inline segments view
         let elements = common::format_runs_query::inline_segments_for_block(
             &uow.store(),
             block.id,
@@ -317,7 +317,7 @@ impl ExportMarkdownUseCase {
         let is_list_item = list.is_some();
 
         // Build inline markdown text
-        let inline_md = self.render_inline_elements(&elements)?;
+        let inline_md = self.render_inline_segments(&elements)?;
 
         // Build the block line
         let block_line = if let Some(level) = block.fmt_heading_level {
@@ -354,8 +354,8 @@ impl ExportMarkdownUseCase {
         Ok((block_line, is_list_item))
     }
 
-    /// Render inline elements into markdown text with formatting.
-    fn render_inline_elements(&self, elements: &[InlineSegment]) -> Result<String> {
+    /// Render inline segments into markdown text with formatting.
+    fn render_inline_segments(&self, elements: &[InlineSegment]) -> Result<String> {
         let mut inline_md = String::new();
         for elem in elements {
             let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
@@ -496,7 +496,7 @@ impl ExportMarkdownUseCase {
             &block.plain_text,
         );
 
-        self.render_inline_elements(&elements)
+        self.render_inline_segments(&elements)
     }
 }
 

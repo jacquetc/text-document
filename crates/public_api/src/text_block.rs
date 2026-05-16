@@ -224,7 +224,7 @@ impl TextBlock {
     }
 
     /// Character format at a block-relative character offset. **O(k)**
-    /// where k = number of InlineElements.
+    /// where k = format runs + image anchors in this block.
     ///
     /// Returns the [`TextFormat`] of the fragment containing the given
     /// offset. Returns `None` if the offset is out of range or the
@@ -260,7 +260,8 @@ impl TextBlock {
 
     // ── Fragments ───────────────────────────────────────────
 
-    /// All formatting runs in one call. O(k) where k = number of InlineElements.
+    /// All formatting runs in one call. O(k) where k = format runs +
+    /// image anchors in this block.
     pub fn fragments(&self) -> Vec<FragmentContent> {
         let inner = self.doc.lock();
         build_fragments(&inner, self.block_id as u64)
@@ -392,8 +393,8 @@ fn compute_block_number(inner: &TextDocumentInner, block_id: u64) -> usize {
     sorted.iter().position(|b| b.id == block_id).unwrap_or(0)
 }
 
-/// Build fragments for a block from its InlineElements, with highlight
-/// spans merged in when a syntax highlighter is attached.
+/// Build fragments for a block from its format runs and image anchors,
+/// with highlight spans merged in when a syntax highlighter is attached.
 pub(crate) fn build_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<FragmentContent> {
     let fragments = build_raw_fragments(inner, block_id);
 

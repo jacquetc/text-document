@@ -374,11 +374,12 @@ impl TextDocument {
         Ok(result.text)
     }
 
-    /// Find the inline element containing `position` and return its
-    /// stable entity id together with the element's absolute start
-    /// position and the character offset of `position` within the
-    /// element. Used by accessibility layers to convert a
-    /// document-absolute character position into the
+    /// Find the inline segment containing `position` and return its
+    /// stable element id (synthesized from `(block_id, byte_start)`
+    /// via [`common::format_runs::synth_element_id`]) together with the
+    /// segment's absolute start position and the character offset of
+    /// `position` within the segment. Used by accessibility layers to
+    /// convert a document-absolute character position into the
     /// `(element_id, character_index_in_run)` coordinate space
     /// AccessKit's `TextPosition` expects.
     ///
@@ -500,8 +501,8 @@ impl TextDocument {
 
     /// Build a single `BlockSnapshot` for the block at the given position.
     ///
-    /// This is O(k) where k = inline elements in that block, compared to
-    /// `snapshot_flow()` which is O(n) over the entire document.
+    /// This is O(k) where k = format runs + image anchors in that block,
+    /// compared to `snapshot_flow()` which is O(n) over the entire document.
     /// Use for incremental layout updates after single-block edits.
     pub fn snapshot_block_at_position(
         &self,

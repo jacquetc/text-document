@@ -1261,7 +1261,7 @@ fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
         document_controller::get_relationship(&db, &doc_id, &DocumentRelationshipField::Lists)?;
     assert_eq!(list_ids.len(), 0, "All lists should be removed");
 
-    // No image inline elements should remain
+    // No image anchors should remain
     let remaining_bids = get_all_block_ids(&db)?;
     for bid in &remaining_bids {
         let elem_ids = get_element_ids(&db, bid)?;

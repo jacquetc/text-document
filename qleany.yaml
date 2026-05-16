@@ -147,16 +147,15 @@ entities:
         relationship: many_to_one
         optional: true
 
-  # ── Block (paragraph-level container: holds inline elements) ─
+  # ── Block (paragraph-level container) ─
+  # Phase 1.14: per-character formatting and inline images moved off the
+  # entity model. They now live in `RopeStore.format_runs[block_id]` and
+  # `RopeStore.block_images[block_id]` as byte-ranged `FormatRun`s and
+  # `ImageAnchor`s — no longer modelled as a `Vec<EntityId>` relationship.
   - name: Block
     inherits_from: EntityBase
     undoable: true
     fields:
-      - name: elements
-        type: entity
-        entity: InlineElement
-        relationship: ordered_one_to_many
-        strong: true
       - name: list
         type: entity
         entity: List
@@ -234,91 +233,18 @@ entities:
         type: string
         optional: true
 
-  # ── InlineElement (text run or image within a block) ────────
-  #    The content field is a complex Rust enum that carries the
-  #    actual data: Text(String) or Image { name, width, height, quality }.
-  #    No dead fields. Block.elements (ordered_one_to_many) preserves
-  #    the interleaved visual sequence.
-  - name: InlineElement
-    inherits_from: EntityBase
-    undoable: true
-    fields:
-      # ── Content (complex enum: Text or Image) ──
-      - name: content
-        type: enum
-        enum_name: InlineContent
-        enum_values:
-          - Empty
-          - "Text(String)"
-          - "Image { name: String, width: i64, height: i64, quality: i64 }"
-      # ── CharFormat / TextFormat (all optional: None = inherit/default) ──
-      - name: fmt_font_family
-        type: string
-        optional: true
-      - name: fmt_font_point_size
-        type: integer
-        optional: true
-      - name: fmt_font_weight
-        type: integer
-        optional: true
-      - name: fmt_font_bold
-        type: boolean
-        optional: true
-      - name: fmt_font_italic
-        type: boolean
-        optional: true
-      - name: fmt_font_underline
-        type: boolean
-        optional: true
-      - name: fmt_font_overline
-        type: boolean
-        optional: true
-      - name: fmt_font_strikeout
-        type: boolean
-        optional: true
-      - name: fmt_letter_spacing
-        type: integer
-        optional: true
-      - name: fmt_word_spacing
-        type: integer
-        optional: true
-      - name: fmt_anchor_href
-        type: string
-        optional: true
-      - name: fmt_anchor_names
-        type: string
-        is_list: true
-      - name: fmt_is_anchor
-        type: boolean
-        optional: true
-      - name: fmt_tooltip
-        type: string
-        optional: true
-      - name: fmt_underline_style
-        type: enum
-        enum_name: UnderlineStyle
-        enum_values:
-          - NoUnderline
-          - SingleUnderline
-          - DashUnderline
-          - DotLine
-          - DashDotLine
-          - DashDotDotLine
-          - WaveUnderline
-          - SpellCheckUnderline
-        optional: true
-      - name: fmt_vertical_alignment
-        type: enum
-        enum_name: CharVerticalAlignment
-        enum_values:
-          - Normal
-          - SuperScript
-          - SubScript
-          - Middle
-          - Bottom
-          - Top
-          - Baseline
-        optional: true
+  # NOTE: the legacy `InlineElement` entity (one row per text run / image
+  # within a block, carrying `content: InlineContent { Empty | Text |
+  # Image }` and the full `fmt_*` set) was deleted in Phase 1.14.
+  # Per-character formatting now lives as byte-ranged `FormatRun`s in
+  # `RopeStore.format_runs[block_id]`; inline images live as
+  # `ImageAnchor`s in `RopeStore.block_images[block_id]`. The
+  # `CharacterFormat` struct (`crates/common/src/format_runs.rs`)
+  # mirrors the old `fmt_*` field set verbatim. The `InlineContent`
+  # enum survives there too as the wire format for `FragmentElement`
+  # (copy/paste). Readers that still want an InlineElement-shaped
+  # view use the transient `InlineSegment` synthesized on demand from
+  # `(plain_text, format_runs, block_images)`.
 
   # ── List (groups consecutive blocks into a numbered/bulleted list) ─
   #    Document owns all lists. Blocks reference their list via
@@ -347,9 +273,10 @@ entities:
       - name: suffix
         type: string
 
-  # ── Resource (binary/text resource referenced by name from elements) ─
-  #    Document owns all resources. InlineElement.image_name references
-  #    a resource by name. Resource types: Image, StyleSheet, etc.
+  # ── Resource (binary/text resource referenced by name) ─
+  #    Document owns all resources. `ImageAnchor.name`
+  #    (`crates/common/src/format_runs.rs`) references a resource by
+  #    name. Resource types: Image, StyleSheet, etc.
   - name: Resource
     inherits_from: EntityBase
     undoable: true
@@ -374,7 +301,9 @@ entities:
   #    Document owns all tables. A table is anchored in the
   #    document flow via a Frame (Frame.table weak reference).
   #    Each cell points to a Frame that holds its rich content
-  #    (Block → InlineElement), reusing the full editing stack.
+  #    (a Block per paragraph; per-character formatting + images live
+  #    on the block via format_runs + block_images), reusing the full
+  #    editing stack.
   - name: Table
     inherits_from: EntityBase
     undoable: true
@@ -459,7 +388,7 @@ features:
     use_cases:
       - name: insert_text
         undoable: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: InsertTextDto
           fields:
@@ -479,7 +408,7 @@ features:
 
       - name: delete_text
         undoable: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: DeleteTextDto
           fields:
@@ -497,7 +426,7 @@ features:
 
       - name: insert_block
         undoable: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: InsertBlockDto
           fields:
@@ -515,7 +444,7 @@ features:
 
       - name: insert_image
         undoable: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: InsertImageDto
           fields:
@@ -539,7 +468,7 @@ features:
 
       - name: insert_frame
         undoable: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: InsertFrameDto
           fields:
@@ -555,7 +484,7 @@ features:
 
       - name: insert_formatted_text
         undoable: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: InsertFormattedTextDto
           fields:
@@ -613,7 +542,7 @@ features:
 
       - name: insert_list
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, List]
+        entities: [Document, Frame, Block, List]
         dto_in:
           name: InsertListDto
           fields:
@@ -663,7 +592,7 @@ features:
 
       - name: insert_fragment
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Document, Frame, Block, List, Table, TableCell]
         dto_in:
           name: InsertFragmentDto
           fields:
@@ -683,7 +612,7 @@ features:
 
       - name: insert_html_at_position
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Document, Frame, Block, List, Table, TableCell]
         dto_in:
           name: InsertHtmlAtPositionDto
           fields:
@@ -703,7 +632,7 @@ features:
 
       - name: insert_markdown_at_position
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Document, Frame, Block, List, Table, TableCell]
         dto_in:
           name: InsertMarkdownAtPositionDto
           fields:
@@ -723,7 +652,7 @@ features:
 
       - name: insert_table
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: InsertTableDto
           fields:
@@ -745,7 +674,7 @@ features:
 
       - name: remove_table
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: RemoveTableDto
           fields:
@@ -754,7 +683,7 @@ features:
 
       - name: insert_table_row
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: InsertTableRowDto
           fields:
@@ -770,7 +699,7 @@ features:
 
       - name: insert_table_column
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: InsertTableColumnDto
           fields:
@@ -786,7 +715,7 @@ features:
 
       - name: remove_table_row
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: RemoveTableRowDto
           fields:
@@ -802,7 +731,7 @@ features:
 
       - name: remove_table_column
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: RemoveTableColumnDto
           fields:
@@ -818,7 +747,7 @@ features:
 
       - name: merge_table_cells
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: MergeTableCellsDto
           fields:
@@ -840,7 +769,7 @@ features:
 
       - name: split_table_cell
         undoable: true
-        entities: [Document, Frame, Block, InlineElement, Table, TableCell]
+        entities: [Document, Frame, Block, Table, TableCell]
         dto_in:
           name: SplitTableCellDto
           fields:
@@ -862,7 +791,7 @@ features:
     use_cases:
       - name: set_text_format
         undoable: true
-        entities: [Document, Block, InlineElement]
+        entities: [Document, Block]
         dto_in:
           name: SetTextFormatDto
           fields:
@@ -928,7 +857,7 @@ features:
 
       - name: merge_text_format
         undoable: true
-        entities: [Document, Block, InlineElement]
+        entities: [Document, Block]
         dto_in:
           name: MergeTextFormatDto
           fields:
@@ -1152,7 +1081,7 @@ features:
     use_cases:
       - name: import_plain_text
         undoable: false
-        entities: [Root, Document, Frame, Block, InlineElement]
+        entities: [Root, Document, Frame, Block]
         dto_in:
           name: ImportPlainTextDto
           fields:
@@ -1162,7 +1091,7 @@ features:
       - name: export_plain_text
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_out:
           name: ExportPlainTextDto
           fields:
@@ -1172,7 +1101,7 @@ features:
       - name: import_markdown
         undoable: false
         long_operation: true
-        entities: [Root, Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Root, Document, Frame, Block, List, Table, TableCell]
         dto_in:
           name: ImportMarkdownDto
           fields:
@@ -1187,7 +1116,7 @@ features:
       - name: export_markdown
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Document, Frame, Block, List, Table, TableCell]
         dto_out:
           name: ExportMarkdownDto
           fields:
@@ -1197,7 +1126,7 @@ features:
       - name: import_html
         undoable: false
         long_operation: true
-        entities: [Root, Document, Frame, Block, InlineElement, List, Resource, Table, TableCell]
+        entities: [Root, Document, Frame, Block, List, Resource, Table, TableCell]
         dto_in:
           name: ImportHtmlDto
           fields:
@@ -1212,7 +1141,7 @@ features:
       - name: export_html
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List, Resource, Table, TableCell]
+        entities: [Document, Frame, Block, List, Resource, Table, TableCell]
         dto_out:
           name: ExportHtmlDto
           fields:
@@ -1222,7 +1151,7 @@ features:
       - name: export_latex
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Document, Frame, Block, List, Table, TableCell]
         dto_in:
           name: ExportLatexDto
           fields:
@@ -1240,7 +1169,7 @@ features:
         undoable: false
         read_only: true
         long_operation: true
-        entities: [Document, Frame, Block, InlineElement, List, Resource, Table, TableCell]
+        entities: [Document, Frame, Block, List, Resource, Table, TableCell]
         dto_in:
           name: ExportDocxDto
           fields:
@@ -1260,7 +1189,7 @@ features:
       - name: find_text
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: FindTextDto
           fields:
@@ -1289,7 +1218,7 @@ features:
       - name: find_all
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: FindAllDto
           fields:
@@ -1315,7 +1244,7 @@ features:
 
       - name: replace_text
         undoable: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: ReplaceTextDto
           fields:
@@ -1345,7 +1274,7 @@ features:
       - name: get_document_stats
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Document, Frame, Block, List, Table, TableCell]
         dto_out:
           name: DocumentStatsDto
           fields:
@@ -1367,7 +1296,7 @@ features:
       - name: get_text_at_position
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: GetTextAtPositionDto
           fields:
@@ -1388,7 +1317,7 @@ features:
       - name: get_block_at_position
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement]
+        entities: [Document, Frame, Block]
         dto_in:
           name: GetBlockAtPositionDto
           fields:
@@ -1409,7 +1338,7 @@ features:
       - name: extract_fragment
         undoable: false
         read_only: true
-        entities: [Document, Frame, Block, InlineElement, List, Table, TableCell]
+        entities: [Document, Frame, Block, List, Table, TableCell]
         dto_in:
           name: ExtractFragmentDto
           fields:

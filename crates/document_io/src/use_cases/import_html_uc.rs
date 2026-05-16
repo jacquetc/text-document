@@ -114,7 +114,7 @@ impl LongOperation for ImportHtmlUseCase {
         let new_frame = Frame::default();
         let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
-        // Step 4: Create blocks with inline elements
+        // Step 4: Create blocks with format runs and image anchors
         // Track blockquote frame stack
         let total_elements = parsed_elements.len();
         let mut total_chars: i64 = 0;

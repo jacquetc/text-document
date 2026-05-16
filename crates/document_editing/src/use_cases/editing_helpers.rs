@@ -9,11 +9,6 @@ use std::sync::Arc;
 /// Trait for UoW operations needed to create a cell frame. All
 /// table-related UoW traits satisfy this via the
 /// `impl_cell_frame_creator!` macro.
-///
-/// The empty `InlineElement` that historically seeded each new cell
-/// block is now produced by reverse-syncing from the (empty) format
-/// runs via [`rebuild_block_inline_elements`], so callers no longer
-/// need to expose `create_inline_element`.
 pub trait CellFrameCreator {
     fn cfc_create_frame(&mut self, frame: &Frame, owner_id: EntityId, index: i32) -> Result<Frame>;
     fn cfc_create_block(&mut self, block: &Block, owner_id: EntityId, index: i32) -> Result<Block>;
@@ -191,8 +186,8 @@ pub fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block,
     Err(anyhow!("No blocks found in document"))
 }
 
-/// Find the inline element at a given offset within a block, and compute
-/// the offset within that element.
+/// Find the inline segment at a given character offset within a block,
+/// and compute the offset within that segment.
 ///
 /// Returns `(segment, index_in_list, offset_within_segment)`.
 pub fn find_segment_at_offset(

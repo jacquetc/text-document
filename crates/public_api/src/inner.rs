@@ -316,7 +316,7 @@ impl TextDocumentInner {
         Ok(self.plain_text_cache.as_deref().unwrap())
     }
 
-    /// Initialize the document: create Root → Document → Frame → Block → InlineElement.
+    /// Initialize the document: create Root → Document → Frame → Block.
     pub fn initialize(ctx: AppContext) -> Result<Self> {
         use frontend::block::dtos::CreateBlockDto;
         use frontend::commands::{
@@ -331,7 +331,7 @@ impl TextDocumentInner {
 
         let stack_id = undo_redo_commands::create_new_stack(&ctx);
 
-        // Create entity tree: Root → Document → Frame → Block → InlineElement
+        // Create entity tree: Root → Document → Frame → Block
         let root = root_commands::create_orphan_root(&ctx, &CreateRootDto::default())?;
         let doc = document_commands::create_document(
             &ctx,

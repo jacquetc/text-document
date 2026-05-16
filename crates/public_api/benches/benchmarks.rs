@@ -795,7 +795,7 @@ fn bench_xl_workloads(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(15));
 
-    // 1 MB plain doc construction (data + InlineElement clone cost).
+    // 1 MB plain doc construction (data + format_runs/block_images clone cost).
     group.bench_function("set_plain_text_1mb", |b| {
         b.iter_batched(
             || "a".repeat(1_000_000),

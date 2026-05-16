@@ -31,8 +31,8 @@ pub struct HashMapStore {
     pub table_cells: RwLock<HashMap<EntityId, TableCell>>,
 
     // ── Per-block character formatting + image anchors ──────────────
-    // Sorted, non-overlapping byte spans; replaces the legacy
-    // `inline_elements` table + junction (deleted in Phase 1.14).
+    // Sorted, non-overlapping byte spans keyed by block id. The single
+    // source of truth for per-character formatting and inline images.
     pub format_runs: RwLock<HashMap<EntityId, Vec<FormatRun>>>,
     pub block_images: RwLock<HashMap<EntityId, Vec<ImageAnchor>>>,
 

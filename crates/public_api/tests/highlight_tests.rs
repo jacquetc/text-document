@@ -409,7 +409,7 @@ fn highlight_partial_splits_fragment() {
 
 #[test]
 fn highlight_across_fragment_boundary() {
-    // Create a document with two different inline elements (via formatting)
+    // Create a document with two different format runs (via formatting)
     let doc = new_doc("AABB");
     let c = doc.cursor();
     c.set_position(0, MoveMode::MoveAnchor);
@@ -648,7 +648,7 @@ fn highlight_invisible_to_entity_format() {
     let read_c = doc.cursor_at(0);
     let entity_fmt = read_c.char_format().unwrap();
     assert_eq!(entity_fmt.font_bold, Some(true));
-    // char_format reads from InlineElement, not from merged fragments
+    // char_format reads from format_runs, not from merged fragments;
     // italic should NOT be there (it's shadow only)
     assert_ne!(entity_fmt.font_italic, Some(true));
 }

@@ -1820,9 +1820,7 @@ impl TextCursor {
     // ── Format queries ───────────────────────────────────────
 
     /// Get the character format at the cursor position. Reads the
-    /// covering `FormatRun` (or image anchor) from the store rather
-    /// than fetching an `InlineElement` — the InlineElement table is
-    /// scheduled for removal in Phase 1.14.
+    /// covering `FormatRun` (or image anchor) directly from the store.
     pub fn char_format(&self) -> Result<TextFormat> {
         let pos = self.position();
         let inner = self.doc.lock();

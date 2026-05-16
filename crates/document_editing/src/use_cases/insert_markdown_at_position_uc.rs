@@ -170,8 +170,8 @@ fn execute_content_insert(
         // Shift existing runs/images for the insert, then splice the parsed
         // block's runs over the inserted byte range (overriding inherited
         // format for any byte covered by a parsed run; uncovered bytes
-        // remain unformatted, matching the legacy "create a plain
-        // InlineElement for each span" behavior).
+        // remain unformatted, so they pick up the block's default format
+        // at render time).
         let mut runs = current_runs.clone();
         shift_runs_for_insert(&mut runs, byte_offset, inserted_bytes);
         let inserted_at_offset: Vec<FormatRun> = inserted_runs_at_zero
