@@ -260,8 +260,12 @@ fn execute_insert_table(
         let store = uow.store();
         let mut next_byte = top_level_frame_end_byte(&store, parent_frame_id);
         for cell_block in &cell_blocks {
-            rope_insert_block_at(&store, next_byte, cell_block.id, &cell_block.plain_text);
-            next_byte += 1 + cell_block.plain_text.len() as u32;
+            // Newly-created cells via `create_cell_frame` are empty,
+            // so we know the content is "" — no need to read from the
+            // store/entity (the block hasn't been registered in the
+            // rope yet anyway).
+            rope_insert_block_at(&store, next_byte, cell_block.id, "");
+            next_byte += 1;
         }
     }
 

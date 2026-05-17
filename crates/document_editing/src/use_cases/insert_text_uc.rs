@@ -3,7 +3,9 @@ use crate::InsertTextDto;
 use crate::InsertTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{rope_delete_in_block, rope_insert_in_block};
+use common::database::rope_helpers::{
+    block_content_via_store, rope_delete_in_block, rope_insert_in_block,
+};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
@@ -85,18 +87,19 @@ fn delete_range_in_block(
         .cloned()
         .unwrap_or_default();
 
-    let byte_start = logical_offset_to_byte(&block.plain_text, &images_before, start_offset);
-    let byte_end = logical_offset_to_byte(&block.plain_text, &images_before, end_offset);
+    let block_text = block_content_via_store(block, &store);
+    let byte_start = logical_offset_to_byte(&block_text, &images_before, start_offset);
+    let byte_end = logical_offset_to_byte(&block_text, &images_before, end_offset);
 
-    let removed_text_chars = block.plain_text[byte_start as usize..byte_end as usize]
+    let removed_text_chars = block_text[byte_start as usize..byte_end as usize]
         .chars()
         .count() as i64;
 
     let mut new_plain = String::with_capacity(
-        block.plain_text.len() - (byte_end - byte_start) as usize,
+        block_text.len() - (byte_end - byte_start) as usize,
     );
-    new_plain.push_str(&block.plain_text[..byte_start as usize]);
-    new_plain.push_str(&block.plain_text[byte_end as usize..]);
+    new_plain.push_str(&block_text[..byte_start as usize]);
+    new_plain.push_str(&block_text[byte_end as usize..]);
 
     // Mutate format_runs.
     {
@@ -218,11 +221,12 @@ fn execute_insert_with_selection(
         .get(&block.id)
         .cloned()
         .unwrap_or_default();
-    let byte_offset = logical_offset_to_byte(&block.plain_text, &images, offset);
+    let block_text = block_content_via_store(&block, &store);
+    let byte_offset = logical_offset_to_byte(&block_text, &images, offset);
     let inserted_byte_len = dto.text.len() as u32;
     let inserted_char_len = dto.text.chars().count() as i64;
 
-    let mut new_plain = block.plain_text.clone();
+    let mut new_plain = block_text.clone();
     new_plain.insert_str(byte_offset as usize, &dto.text);
 
     let mut updated_block = block.clone();
@@ -334,12 +338,13 @@ fn execute_insert_simple(
         .cloned()
         .unwrap_or_default();
 
+    let block_text = block_content_via_store(&block, &store);
     let byte_offset =
-        logical_offset_to_byte(&block.plain_text, &original_block_images, offset);
+        logical_offset_to_byte(&block_text, &original_block_images, offset);
     let inserted_byte_len = dto.text.len() as u32;
     let inserted_char_len = dto.text.chars().count() as i64;
 
-    let mut new_plain = block.plain_text.clone();
+    let mut new_plain = block_text.clone();
     new_plain.insert_str(byte_offset as usize, &dto.text);
 
     let mut updated_block = block.clone();

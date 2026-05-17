@@ -831,29 +831,30 @@ fn insert_mixed_fragment(
         .get_frame(&frame_id)?
         .ok_or_else(|| anyhow!("Frame not found"))?;
 
-    let (current_runs, current_images) = {
-        let store = uow.store();
-        (
-            store
-                .format_runs
-                .read()
-                .unwrap()
-                .get(&current_block.id)
-                .cloned()
-                .unwrap_or_default(),
-            store
-                .block_images
-                .read()
-                .unwrap()
-                .get(&current_block.id)
-                .cloned()
-                .unwrap_or_default(),
-        )
-    };
+    let store = uow.store();
+    let (current_runs, current_images) = (
+        store
+            .format_runs
+            .read()
+            .unwrap()
+            .get(&current_block.id)
+            .cloned()
+            .unwrap_or_default(),
+        store
+            .block_images
+            .read()
+            .unwrap()
+            .get(&current_block.id)
+            .cloned()
+            .unwrap_or_default(),
+    );
 
-    let byte_offset = logical_offset_to_byte(&current_block.plain_text, &current_images, offset);
-    let text_before = current_block.plain_text[..byte_offset as usize].to_string();
-    let text_after = current_block.plain_text[byte_offset as usize..].to_string();
+    let current_block_text =
+        common::database::rope_helpers::block_content_via_store(&current_block, &store);
+    let byte_offset =
+        logical_offset_to_byte(&current_block_text, &current_images, offset);
+    let text_before = current_block_text[..byte_offset as usize].to_string();
+    let text_after = current_block_text[byte_offset as usize..].to_string();
     let text_before_chars = text_before.chars().count() as i64;
 
     let (left_runs, right_runs) = split_runs_at(&current_runs, byte_offset);

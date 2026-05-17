@@ -3,7 +3,7 @@ use crate::InsertImageDto;
 use crate::InsertImageResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::rope_insert_in_block;
+use common::database::rope_helpers::{block_content_via_store, rope_insert_in_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -96,8 +96,9 @@ fn execute_insert_image(
 
     // Synthesize the inline-segment view of the target block from format_runs +
     // block_images. This is read-only — we use it to locate the byte offset
-    // inside `block.plain_text` where the new image should be anchored.
-    let segments = inline_segments_for_block(&uow.store(), block.id, &block.plain_text);
+    // inside the block's content where the new image should be anchored.
+    let block_text = block_content_via_store(&block, &uow.store());
+    let segments = inline_segments_for_block(&uow.store(), block.id, &block_text);
 
     // byte_offset = position inside `block.plain_text` where the new image is
     // anchored. Empty blocks anchor at 0. Otherwise we walk the synthesized

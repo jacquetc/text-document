@@ -5,6 +5,7 @@ use crate::DeleteTextDto;
 use crate::DeleteTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -566,19 +567,19 @@ fn execute_delete(
     if start_block_idx == end_block_idx {
         // Same-block delete: splice plain_text + format_runs + block_images.
         let (_, images) = read_block_runs_and_images(&**uow, start_block.id);
-        let byte_so = logical_offset_to_byte(&start_block.plain_text, &images, start_offset);
-        let byte_eo = logical_offset_to_byte(&start_block.plain_text, &images, end_offset);
+        let store = uow.store();
+        let start_block_text = block_content_via_store(&start_block, &store);
+        let byte_so = logical_offset_to_byte(&start_block_text, &images, start_offset);
+        let byte_eo = logical_offset_to_byte(&start_block_text, &images, end_offset);
 
-        let deleted_text: String = start_block.plain_text[byte_so as usize..byte_eo as usize]
-            .to_string();
+        let deleted_text: String =
+            start_block_text[byte_so as usize..byte_eo as usize].to_string();
 
         let mut new_plain = String::with_capacity(
-            start_block.plain_text.len() - (byte_eo - byte_so) as usize,
+            start_block_text.len() - (byte_eo - byte_so) as usize,
         );
-        new_plain.push_str(&start_block.plain_text[..byte_so as usize]);
-        new_plain.push_str(&start_block.plain_text[byte_eo as usize..]);
-
-        let store = uow.store();
+        new_plain.push_str(&start_block_text[..byte_so as usize]);
+        new_plain.push_str(&start_block_text[byte_eo as usize..]);
         {
             let mut runs_map = store.format_runs.write().unwrap();
             let runs = runs_map.entry(start_block.id).or_default();
@@ -636,24 +637,32 @@ fn execute_delete(
         let now = chrono::Utc::now();
 
         // Compute byte offsets in each affected block.
+        let store_for_text = uow.store();
+        let start_block_text = block_content_via_store(&start_block, &store_for_text);
+        let end_block_text = block_content_via_store(&end_block, &store_for_text);
+        let middle_block_texts: Vec<String> = blocks[(start_block_idx + 1)..end_block_idx]
+            .iter()
+            .map(|b| block_content_via_store(b, &store_for_text))
+            .collect();
+        drop(store_for_text);
         let (_, start_images) = read_block_runs_and_images(&**uow, start_block.id);
-        let byte_so = logical_offset_to_byte(&start_block.plain_text, &start_images, start_offset);
+        let byte_so = logical_offset_to_byte(&start_block_text, &start_images, start_offset);
         let (_, end_images) = read_block_runs_and_images(&**uow, end_block.id);
-        let byte_eo = logical_offset_to_byte(&end_block.plain_text, &end_images, end_offset);
+        let byte_eo = logical_offset_to_byte(&end_block_text, &end_images, end_offset);
 
         // Collect deleted_text for the result DTO.
         let mut deleted_text = String::new();
-        deleted_text.push_str(&start_block.plain_text[byte_so as usize..]);
-        for b in &blocks[(start_block_idx + 1)..end_block_idx] {
+        deleted_text.push_str(&start_block_text[byte_so as usize..]);
+        for mt in &middle_block_texts {
             deleted_text.push('\n');
-            deleted_text.push_str(&b.plain_text);
+            deleted_text.push_str(mt);
         }
         deleted_text.push('\n');
-        deleted_text.push_str(&end_block.plain_text[..byte_eo as usize]);
+        deleted_text.push_str(&end_block_text[..byte_eo as usize]);
 
         // Build merged plain_text: start_block[..byte_so] + end_block[byte_eo..]
-        let start_kept = &start_block.plain_text[..byte_so as usize];
-        let end_kept = &end_block.plain_text[byte_eo as usize..];
+        let start_kept = &start_block_text[..byte_so as usize];
+        let end_kept = &end_block_text[byte_eo as usize..];
         let merged_plain = format!("{}{}", start_kept, end_kept);
 
         // Compute char counts for text_length.
@@ -836,18 +845,19 @@ fn delete_char_range_in_block(
         .cloned()
         .unwrap_or_default();
 
-    let byte_start = logical_offset_to_byte(&block.plain_text, &images_before, start_offset);
-    let byte_end = logical_offset_to_byte(&block.plain_text, &images_before, end_offset);
+    let block_text = block_content_via_store(block, &store);
+    let byte_start = logical_offset_to_byte(&block_text, &images_before, start_offset);
+    let byte_end = logical_offset_to_byte(&block_text, &images_before, end_offset);
 
-    let removed_text_chars = block.plain_text[byte_start as usize..byte_end as usize]
+    let removed_text_chars = block_text[byte_start as usize..byte_end as usize]
         .chars()
         .count() as i64;
 
     let mut new_plain = String::with_capacity(
-        block.plain_text.len() - (byte_end - byte_start) as usize,
+        block_text.len() - (byte_end - byte_start) as usize,
     );
-    new_plain.push_str(&block.plain_text[..byte_start as usize]);
-    new_plain.push_str(&block.plain_text[byte_end as usize..]);
+    new_plain.push_str(&block_text[..byte_start as usize]);
+    new_plain.push_str(&block_text[byte_end as usize..]);
 
     {
         let mut runs_map = store.format_runs.write().unwrap();

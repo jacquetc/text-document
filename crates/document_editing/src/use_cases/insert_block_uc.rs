@@ -3,7 +3,7 @@ use crate::InsertBlockDto;
 use crate::InsertBlockResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::rope_split_block;
+use common::database::rope_helpers::{block_content_via_store, rope_split_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -109,9 +109,11 @@ fn execute_insert_block(
         .cloned()
         .unwrap_or_default();
 
-    let byte_split = logical_offset_to_byte(&current_block.plain_text, &current_images, offset);
-    let text_before = current_block.plain_text[..byte_split as usize].to_string();
-    let text_after = current_block.plain_text[byte_split as usize..].to_string();
+    let current_block_text = block_content_via_store(&current_block, &store);
+    let byte_split = logical_offset_to_byte(&current_block_text, &current_images, offset);
+    let text_before = current_block_text[..byte_split as usize].to_string();
+    let text_after = current_block_text[byte_split as usize..].to_string();
+    let text_after_byte_len = text_after.len();
     let text_before_chars = text_before.chars().count() as i64;
     let text_after_chars = text_after.chars().count() as i64;
 
@@ -130,7 +132,7 @@ fn execute_insert_block(
     updated_current.text_length = text_before_chars + left_image_count;
     updated_current.updated_at = now;
     uow.update_block(&updated_current)?;
-    debug_assert_well_formed(&left_runs, updated_current.plain_text.len());
+    debug_assert_well_formed(&left_runs, text_before.len());
     store
         .format_runs
         .write()
@@ -200,7 +202,7 @@ fn execute_insert_block(
     let created_block = uow.create_block(&new_block, owner_frame_id, -1)?;
 
     // Place the split format_runs / block_images on the new block.
-    debug_assert_well_formed(&right_runs, created_block.plain_text.len());
+    debug_assert_well_formed(&right_runs, text_after_byte_len);
     store
         .format_runs
         .write()
@@ -211,7 +213,6 @@ fn execute_insert_block(
         .write()
         .unwrap()
         .insert(created_block.id, right_images);
-    let _created_plain = created_block.plain_text.clone();
 
     // Mirror the split into the rope: insert `\n` boundary at the
     // split point, register the new block's start, and shift

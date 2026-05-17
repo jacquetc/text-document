@@ -3,6 +3,7 @@ use crate::InsertMarkdownAtPositionDto;
 use crate::InsertMarkdownAtPositionResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{block_content_via_store, rope_insert_in_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -125,8 +126,8 @@ fn execute_content_insert(
 
     // Snapshot the current block's format runs and images so we can split /
     // shift them without holding a long-lived borrow on the store.
+    let store = uow.store();
     let (current_runs, current_images) = {
-        let store = uow.store();
         let runs = store
             .format_runs
             .read()
@@ -144,8 +145,9 @@ fn execute_content_insert(
         (runs, images)
     };
 
+    let current_block_text = block_content_via_store(&current_block, &store);
     let byte_offset =
-        logical_offset_to_byte(&current_block.plain_text, &current_images, offset);
+        logical_offset_to_byte(&current_block_text, &current_images, offset);
 
     let now = chrono::Utc::now();
 
@@ -162,10 +164,11 @@ fn execute_content_insert(
         let inserted_bytes = inserted_plain.len() as u32;
 
         // Build the new plain_text.
-        let mut new_plain = String::with_capacity(current_block.plain_text.len() + inserted_plain.len());
-        new_plain.push_str(&current_block.plain_text[..byte_offset as usize]);
+        let mut new_plain =
+            String::with_capacity(current_block_text.len() + inserted_plain.len());
+        new_plain.push_str(&current_block_text[..byte_offset as usize]);
         new_plain.push_str(&inserted_plain);
-        new_plain.push_str(&current_block.plain_text[byte_offset as usize..]);
+        new_plain.push_str(&current_block_text[byte_offset as usize..]);
 
         // Shift existing runs/images for the insert, then splice the parsed
         // block's runs over the inserted byte range (overriding inherited
@@ -200,6 +203,9 @@ fn execute_content_insert(
 
         write_block_state(uow, current_block.id, &new_plain, runs, images);
 
+        // Mirror the inline insert into the global rope.
+        rope_insert_in_block(&store, current_block.id, byte_offset, &inserted_plain);
+
         // Shift subsequent blocks' document_position.
         let mut blocks_to_update: Vec<Block> = Vec::new();
         for b in &blocks[(block_idx + 1)..] {
@@ -221,8 +227,8 @@ fn execute_content_insert(
     }
 
     // ── Block-splitting path (multi-block or block-level formatting) ──
-    let text_before = current_block.plain_text[..byte_offset as usize].to_string();
-    let text_after = current_block.plain_text[byte_offset as usize..].to_string();
+    let text_before = current_block_text[..byte_offset as usize].to_string();
+    let text_after = current_block_text[byte_offset as usize..].to_string();
     let text_before_chars = text_before.chars().count() as i64;
     let text_after_chars = text_after.chars().count() as i64;
 
