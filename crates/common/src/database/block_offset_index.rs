@@ -197,6 +197,26 @@ impl BlockOffsetIndex {
         self.range_of(OffsetMarker::Block(block_id))
     }
 
+    /// Like `range_of`, but also reports whether the marker has a
+    /// successor entry. Callers that need to strip the trailing
+    /// inter-block `\n` boundary (e.g. `block_content_via_store`,
+    /// `block_char_length`) use this to distinguish "end == next
+    /// marker's byte_start, with a real `\n` between us" from "end
+    /// == total_bytes, no separator after".
+    ///
+    /// O(1) average via `marker_index`.
+    pub fn range_with_successor(&self, marker: OffsetMarker) -> Option<(u32, u32, bool)> {
+        let idx = *self.marker_index.get(&marker)?;
+        let start = self.entries[idx].1;
+        let has_successor = idx + 1 < self.entries.len();
+        let end = if has_successor {
+            self.entries[idx + 1].1
+        } else {
+            self.total_bytes
+        };
+        Some((start, end, has_successor))
+    }
+
     /// Marker whose byte range covers `byte`. Returns `None` if the
     /// index is empty or `byte` falls past `total_bytes`.
     ///

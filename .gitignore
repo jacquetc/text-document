@@ -186,4 +186,4 @@ tested_project
 .aider*
 .codeium/
 .continue/
-bench/results/run-log-post-phase-2.txt
+bench/results/run-log-*.txt

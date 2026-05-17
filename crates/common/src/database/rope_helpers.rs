@@ -21,31 +21,40 @@ use crate::types::EntityId;
 pub fn block_content_via_store(block: &Block, store: &Store) -> String {
     let offsets = store.block_offsets.read().unwrap();
     let marker = OffsetMarker::Block(block.id);
-    let Some(idx) = offsets.entries.iter().position(|(m, _)| *m == marker) else {
+    let Some((bs, be, has_successor)) = offsets.range_with_successor(marker) else {
         return String::new();
-    };
-    let bs = offsets.entries[idx].1;
-    let (be, has_successor) = match offsets.entries.get(idx + 1) {
-        Some((_, next_bs)) => (*next_bs, true),
-        None => (offsets.total_bytes(), false),
     };
     // Drop the trailing inter-block boundary `\n` ONLY when this block
     // has a successor entry — that one byte is the boundary `\n` between
     // this block and the next. The last entry has no trailing boundary;
     // any final `\n` is real content.
     let content_end = if has_successor && be > bs { be - 1 } else { be };
+    drop(offsets);
     let rope = store.rope.read().unwrap();
     rope.byte_slice(bs as usize..content_end as usize).to_string()
 }
 
 /// Logical character count of a block — what the old
-/// `Block.text_length` field used to cache. Computed by counting the
-/// chars in the block's rope content. Image anchors are stored as
+/// `Block.text_length` field used to cache. Image anchors are stored as
 /// `\u{FFFC}` (one char, three bytes) inside the rope content, so the
 /// char count already covers them. Returns 0 for blocks not registered
 /// in the offset index.
+///
+/// O(log n) via `ropey::Rope::byte_to_char` — does NOT materialize the
+/// block's text into a String. Replaces the prior O(L) implementation
+/// that counted chars by walking UTF-8 over a cloned slice.
 pub fn block_char_length(block: &Block, store: &Store) -> i64 {
-    block_content_via_store(block, store).chars().count() as i64
+    let offsets = store.block_offsets.read().unwrap();
+    let marker = OffsetMarker::Block(block.id);
+    let Some((bs, be, has_successor)) = offsets.range_with_successor(marker) else {
+        return 0;
+    };
+    let content_end_bytes = if has_successor && be > bs { be - 1 } else { be };
+    drop(offsets);
+    let rope = store.rope.read().unwrap();
+    let char_start = rope.byte_to_char(bs as usize);
+    let char_end = rope.byte_to_char(content_end_bytes as usize);
+    (char_end - char_start) as i64
 }
 
 /// Reset the rope to empty and clear `block_offsets`. Called by
