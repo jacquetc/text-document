@@ -9,11 +9,11 @@
 
 A rich text document model for Rust, inspired by Qt's QTextDocument/QTextCursor API. Companion crate is text-typeset, which render a document to GPU quads.
 
-Built on [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architecture, full undo/redo, and multi-cursor support.
+Built on a [ropey](https://github.com/cessen/ropey)-backed text store with a [Qleany](https://github.com/jacquetc/qleany)-generated Clean Architecture skeleton, full undo/redo, and multi-cursor support.
 
 ## Features
 
-- **Rich text model**: Frames, Blocks with per-block `plain_text` + byte-ranged `FormatRun`s + `ImageAnchor`s (`InlineContent::Text | Image`)
+- **Rich text model**: Frames, Blocks with character data in a shared `ropey::Rope`, per-block byte-ranged `FormatRun`s, and `ImageAnchor`s (`InlineContent::Text | Image`)
 - **Multi-cursor editing**: Qt-style cursors with automatic position adjustment
 - **Full undo/redo**: Snapshot-based, with composite grouping (`begin_edit_block` / `end_edit_block`)
 - **Import/Export**: Plain text, Markdown, HTML, LaTeX, DOCX
@@ -218,24 +218,25 @@ Supported formats:
 Root
  +-- Document
      +-- Frame (root frame)
-     |   +-- Block { plain_text: "Hello world" }
+     |   +-- Block          // text comes from rope[byte_range]: "Hello world"
      |   |     format_runs:  [(6..11, bold)]            // "world" is bold
-     |   |     block_images: [(byte_offset: 11, image)] // image after "world"
-     |   +-- Block { plain_text: "Second paragraph" }
+     |   |     block_images: [(byte_offset: 11, image)] // image @ U+FFFC sentinel
+     |   +-- Block          // text comes from rope[byte_range]: "Second paragraph"
      +-- Table (rows: 2, columns: 3)
      |   +-- TableCell (row: 0, col: 0)
      |   |   +-- Frame (cell frame)
-     |   |       +-- Block { plain_text: "Cell content" }
+     |   |       +-- Block  // text comes from rope[byte_range]: "Cell content"
      |   +-- TableCell (row: 0, col: 1) ...
      +-- List (style: Decimal, indent: 1)
      +-- Resource (image data, stylesheets)
 ```
 
+- **Rope**: a single `ropey::Rope` per document holds every block's character data. Block boundaries are encoded as `\n`; table positions and images are marked by the Unicode object-replacement sentinel `U+FFFC`. `BlockOffsetIndex` maps each block (and table marker) to its `(byte_start, byte_end)` range in the rope.
 - **Frame**: contains Blocks and child Frames. `child_order` interleaves them (positive = block ID, negative = sub-frame ID).
-- **Block**: a paragraph. Carries its own `plain_text: String`; per-character formatting lives in a sorted, non-overlapping `Vec<FormatRun>` keyed by block id in `RopeStore.format_runs`. Images are anchored at byte offsets in `RopeStore.block_images`. Has `document_position` for O(log n) lookup.
+- **Block**: a paragraph. Its text is a slice of the document rope; per-character formatting lives in a sorted, non-overlapping `Vec<FormatRun>` keyed by block id in `RopeStore.format_runs`. Images are anchored at byte offsets in `RopeStore.block_images`. Has `document_position` for O(log n) lookup.
 - **FormatRun**: `{ byte_start, byte_end, format: CharacterFormat }` — one entry per contiguous span of identical formatting. Adjacent equal-format runs are coalesced.
-- **ImageAnchor**: `{ byte_offset, name, width, height, quality, format }` — image attached to a specific byte position inside a block.
-- **InlineSegment** (`common::format_runs::InlineSegment`): transient view type synthesized on demand from `(plain_text, format_runs, block_images)` for readers (export, fragments, cursor); never stored.
+- **ImageAnchor**: `{ byte_offset, name, width, height, quality, format }` — image attached to a specific byte position inside a block (where the rope holds a `U+FFFC` sentinel).
+- **InlineSegment** (`common::format_runs::InlineSegment`): transient view type synthesized on demand from the rope slice + `format_runs` + `block_images` for readers (export, fragments, cursor); never stored.
 - **List**: styling for list items (Disc, Decimal, LowerAlpha, ...). Blocks reference lists via weak relationship.
 - **Table**: grid of TableCells, each with an optional cell frame containing Blocks.
 - **Resource**: binary data (images, stylesheets) stored as base64.
@@ -256,16 +257,31 @@ All format fields are `Option<T>` — `None` means "inherit from parent/default"
 
 All handles are `Clone + Send + Sync` (backed by `Arc<Mutex<...>>` + entity ID).
 
+## Storage backend
+
+Character data is held in a single `ropey::Rope` per document — an Arc-shared
+B+ tree that makes cloning O(1) and undo snapshots near-free regardless of
+document size. Block boundaries are encoded as `\n` in the rope; images and
+table positions use the Unicode object-replacement sentinel (U+FFFC).
+Per-character formatting is stored as sorted, non-overlapping byte-ranged
+`FormatRun`s on each block. The structural tree (Frames, Tables, Lists,
+Resources) is held in `im::HashMap` tables, also O(1) to clone for snapshots.
+
+The full undo / redo stack continues to use snapshot-based commands for
+structural operations and hand-rolled inverse commands for high-frequency
+edits (single-character insert, character format toggle). Both rely on the
+backend's O(1) snapshot guarantee.
+
 ## Architecture
 
-Generated by [Qleany](https://github.com/jacquetc/qleany) v1.5.1, following Clean Architecture with Package by Feature (Vertical Slice):
+Generated by [Qleany](https://github.com/jacquetc/qleany), following Clean Architecture with Package by Feature (Vertical Slice). Character data lives in a `ropey::Rope`; structural entities (frames, blocks, tables, lists, resources) form a slim tree on top.
 
 ```
 crates/
 +-- public_api/       # TextDocument, TextCursor, DocumentEvent (the public crate)
 +-- cli/              # Command-line tool
 +-- frontend/         # AppContext, commands, event hub client
-+-- common/           # Entities, database (redb), events, undo/redo, repositories
++-- common/           # Entities, RopeStore (rope + structural entities), events, undo/redo, repositories
 +-- macros/           # #[uow_action] proc macro
 +-- direct_access/    # Entity CRUD controllers + DTOs
 +-- document_editing/ # 19 use cases (insert, delete, block, image, frame, list, fragment, table CRUD, merge/split cells, ...)
@@ -276,7 +292,7 @@ crates/
 +-- test_harness/       # Shared test setup utilities
 ```
 
-Data flow: `TextDocument / TextCursor -> frontend::commands -> controllers -> use cases -> UoW -> repositories -> redb`
+Data flow: `TextDocument / TextCursor -> frontend::commands -> controllers -> use cases -> UoW -> RopeStore (rope + structural entities)`
 
 ## License
 
