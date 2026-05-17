@@ -3,6 +3,7 @@ use crate::ReplaceResultDto;
 use crate::ReplaceTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::database::rope_helpers::{
     block_content_via_store, rope_delete_in_block, rope_insert_in_block,
 };
@@ -69,10 +70,14 @@ fn fetch_blocks_and_build_text(
     Ok((full_text, blocks))
 }
 
-fn find_block_for_position(blocks: &[Block], position: usize) -> Option<(usize, usize)> {
+fn find_block_for_position(
+    blocks: &[Block],
+    position: usize,
+    store: &common::database::Store,
+) -> Option<(usize, usize)> {
     for (i, block) in blocks.iter().enumerate() {
         let block_start = block.document_position as usize;
-        let block_end = block_start + block.text_length as usize;
+        let block_end = block_start + block_char_length(block, store) as usize;
         if position >= block_start && position < block_end {
             let offset = position - block_start;
             return Some((i, offset));
@@ -85,10 +90,11 @@ fn match_in_single_block(
     blocks: &[Block],
     match_pos: usize,
     match_len: usize,
+    store: &common::database::Store,
 ) -> Option<(usize, usize)> {
-    if let Some((block_idx, offset)) = find_block_for_position(blocks, match_pos) {
+    if let Some((block_idx, offset)) = find_block_for_position(blocks, match_pos, store) {
         let block = &blocks[block_idx];
-        let block_end_offset = block.text_length as usize;
+        let block_end_offset = block_char_length(block, store) as usize;
         if offset + match_len <= block_end_offset {
             return Some((block_idx, offset));
         }
@@ -156,9 +162,7 @@ fn replace_in_block(
         removed as i64
     };
 
-    let net_chars_delta = replacement_char_len - removed_text_chars - images_removed;
     let mut updated_block = block.clone();
-    updated_block.text_length += net_chars_delta;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -207,9 +211,10 @@ fn execute_replace(
 
     let mut valid_matches: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut skipped_cross_block: i64 = 0;
+    let store = uow.store();
     for &(match_pos, match_len) in &all_matches {
         if let Some((block_idx, block_offset)) =
-            match_in_single_block(&blocks, match_pos, match_len)
+            match_in_single_block(&blocks, match_pos, match_len, &store)
         {
             valid_matches.push((match_pos, match_len, block_idx, block_offset));
         } else {

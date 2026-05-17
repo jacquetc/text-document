@@ -121,7 +121,6 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
         let line_len = line.chars().count() as i64;
 
         let block_dto = CreateBlockDto {
-            text_length: line_len,
             document_position,
             ..Default::default()
         };
@@ -588,11 +587,13 @@ pub fn create_list(
 
     // Find overlapping blocks and assign them to the list
     let all_bids = get_all_block_ids(db_context)?;
+    let store = db_context.get_store();
     for bid in &all_bids {
         let b = block_controller::get(db_context, bid)?
             .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
         let block_start = b.document_position;
-        let block_end = block_start + b.text_length;
+        let block_end = block_start
+            + common::database::rope_helpers::block_char_length(&b.clone().into(), store);
         if block_end >= sel_start && block_start <= sel_end {
             block_controller::set_relationship(
                 db_context,
@@ -647,11 +648,13 @@ pub fn insert_image(
     }
     blocks.sort_by_key(|b| b.document_position);
 
+    let store = db_context.get_store();
     let (target_block, offset) = blocks
         .iter()
         .find_map(|b| {
             let s = b.document_position;
-            let e = s + b.text_length;
+            let e = s
+                + common::database::rope_helpers::block_char_length(&b.clone().into(), store);
             if position >= s && position <= e {
                 Some((b.clone(), position - s))
             } else {
@@ -700,7 +703,6 @@ pub fn insert_image(
     // Update block text_length (+1 for the new image's logical position)
     // and shift subsequent blocks.
     let mut upd_block = target_block.clone();
-    upd_block.text_length += 1;
     block_controller::update(
         db_context,
         event_hub,

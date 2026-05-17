@@ -7,7 +7,7 @@ use common::direct_access::document::document_repository::DocumentRelationshipFi
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, Root, TableCell};
-use common::database::rope_helpers::{
+use common::database::rope_helpers::{block_char_length, 
     block_content_via_store, rope_delete_in_block, rope_insert_in_block,
 };
 use common::format_runs::{
@@ -141,7 +141,6 @@ fn delete_range_in_block(
 
     let positions_removed = removed_text_chars + images_removed;
     let mut updated_block = block.clone();
-    updated_block.text_length -= positions_removed;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
     Ok(positions_removed)
@@ -168,13 +167,11 @@ fn insert_formatted_at(
     let byte_offset =
         logical_offset_to_byte(&block_text, &images_before, char_offset);
     let inserted_byte_len = dto.text.len() as u32;
-    let inserted_char_len = dto.text.chars().count() as i64;
 
     let mut new_plain = block_text.clone();
     new_plain.insert_str(byte_offset as usize, &dto.text);
 
     let mut updated_block = block.clone();
-    updated_block.text_length += inserted_char_len;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -342,9 +339,9 @@ fn execute_insert_simple(
 
     let (block, _block_idx, block_pos) =
         find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
-    let offset = (position - block_pos).clamp(0, block.text_length);
-
     let store = uow.store();
+    let offset = (position - block_pos).clamp(0, block_char_length(&block, &store));
+
     let original_block = block.clone();
     let original_format_runs = store
         .format_runs
@@ -398,12 +395,13 @@ fn find_block_at_position_sequential(
         return Err(anyhow!("No blocks in document"));
     }
 
+    let store = uow.store();
     let mut running_pos: i64 = 0;
     for (idx, &block_id) in ordered_block_ids.iter().enumerate() {
         let block = uow
             .get_block(&block_id)?
             .ok_or_else(|| anyhow!("Block not found"))?;
-        let block_end = running_pos + block.text_length;
+        let block_end = running_pos + block_char_length(&block, &store);
 
         if position >= running_pos && position <= block_end {
             return Ok((block, idx, running_pos));
@@ -418,7 +416,7 @@ fn find_block_at_position_sequential(
     let mut pos: i64 = 0;
     for &id in &ordered_block_ids[..last_idx] {
         if let Some(b) = uow.get_block(&id)? {
-            pos += b.text_length + 1;
+            pos += block_char_length(&b, &store) + 1;
         }
     }
     Ok((block, last_idx, pos))

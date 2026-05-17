@@ -92,7 +92,7 @@ fn execute_insert_image(
     blocks.sort_by_key(|b| b.document_position);
 
     // Find block at position
-    let (block, block_idx, offset) = find_block_at_position(&blocks, position)?;
+    let (block, block_idx, offset) = find_block_at_position(&blocks, position, &uow.store())?;
 
     // Synthesize the inline-segment view of the target block from format_runs +
     // block_images. This is read-only — we use it to locate the byte offset
@@ -163,7 +163,6 @@ fn execute_insert_image(
     // Update block cached fields: image occupies 1 logical position but adds
     // zero bytes to plain_text.
     let mut updated_block = block.clone();
-    updated_block.text_length += 1;
     updated_block.updated_at = now;
     uow.update_block(&updated_block)?;
 

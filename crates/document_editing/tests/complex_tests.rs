@@ -1227,9 +1227,12 @@ fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
     // --- Compute document end position across all frames ---
     let all_bids = get_all_block_ids(&db)?;
     let mut max_pos = 0i64;
+    let store = db.get_store();
     for bid in &all_bids {
         if let Some(b) = block_controller::get(&db, bid)? {
-            let block_end = b.document_position + b.text_length;
+            let entity: common::entities::Block = b.clone().into();
+            let block_end = b.document_position
+                + common::database::rope_helpers::block_char_length(&entity, store);
             if block_end > max_pos {
                 max_pos = block_end;
             }
@@ -1285,7 +1288,6 @@ fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
     // Remaining block should be empty
     for bid in &remaining_bids {
         let b = block_controller::get(&db, bid)?.expect("Block should exist");
-        assert_eq!(b.text_length, 0, "Remaining block should be empty");
         assert_eq!(block_text_dto(&db, &b), "", "Remaining block should have no text");
     }
 

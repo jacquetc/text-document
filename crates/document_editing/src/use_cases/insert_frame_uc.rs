@@ -2,6 +2,7 @@ use crate::InsertFrameDto;
 use crate::InsertFrameResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::database::rope_helpers::rope_append_empty_block;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
@@ -45,6 +46,7 @@ fn find_frame_at_position(
     frame_ids: &[EntityId],
     position: i64,
 ) -> Result<Option<(Frame, usize)>> {
+    let store = uow.store();
     for frame_id in frame_ids {
         let frame = match uow.get_frame(frame_id)? {
             Some(f) => f,
@@ -60,12 +62,12 @@ fn find_frame_at_position(
 
         if let (Some(first), Some(last)) = (blocks.first(), blocks.last()) {
             let frame_start = first.document_position;
-            let frame_end = last.document_position + last.text_length;
+            let frame_end = last.document_position + block_char_length(&last, &store);
             if position >= frame_start && position <= frame_end {
                 // Find block index closest to position
                 let mut block_idx = 0;
                 for (i, block) in blocks.iter().enumerate() {
-                    if position <= block.document_position + block.text_length {
+                    if position <= block.document_position + block_char_length(&block, &store) {
                         block_idx = i;
                         break;
                     }
@@ -149,7 +151,6 @@ fn execute_insert_frame(
         created_at: now,
         updated_at: now,
         list: None,
-        text_length: 0,
         document_position: dto.position,
         ..Default::default()
     };

@@ -1,7 +1,7 @@
 use crate::SetTextFormatDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::block_content_via_store;
+use common::database::rope_helpers::{block_char_length, block_content_via_store};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -213,9 +213,10 @@ fn execute_set_text_format(
         return Ok(snapshot);
     }
 
+    let store = uow.store();
     for block in &blocks {
         let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
+        let block_end = block_start + block_char_length(block, &store);
 
         if block_end <= range_start || block_start >= range_end {
             continue;
@@ -225,7 +226,7 @@ fn execute_set_text_format(
         let local_char_start =
             std::cmp::max(0, range_start - block_start) as usize;
         let local_char_end =
-            std::cmp::min(block.text_length, range_end - block_start) as usize;
+            std::cmp::min(block_char_length(block, &store), range_end - block_start) as usize;
 
         // Translate char offsets to byte offsets in plain_text. Images contribute
         // 0 bytes to plain_text but 1 to text_length; we adjust by counting

@@ -72,7 +72,6 @@ fn populate_some_state(store: &RopeStore) {
         BLOCK_ID,
         Block {
             id: BLOCK_ID,
-            text_length: 11,
             document_position: 0,
             ..Block::default()
         },

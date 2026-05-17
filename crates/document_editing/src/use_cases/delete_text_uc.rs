@@ -5,7 +5,7 @@ use crate::DeleteTextDto;
 use crate::DeleteTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::block_content_via_store;
+use common::database::rope_helpers::{block_char_length, block_content_via_store};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -93,7 +93,6 @@ fn clear_block(
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
     let mut updated = block.clone();
-    updated.text_length = 0;
     updated.updated_at = now;
     uow.update_block(&updated)?;
     let store = uow.store();
@@ -135,6 +134,8 @@ fn execute_delete(
 
     let start = std::cmp::min(dto.position, dto.anchor);
     let end = std::cmp::max(dto.position, dto.anchor);
+
+    let store = uow.store();
 
     let root = uow
         .get_root(&ROOT_ENTITY_ID)?
@@ -190,7 +191,7 @@ fn execute_delete(
                 b.document_position = running;
                 blocks_to_refresh.push(b.clone());
             }
-            running += b.text_length + 1;
+            running += block_char_length(&b, &store) + 1;
         }
     }
     if !blocks_to_refresh.is_empty() {
@@ -198,7 +199,7 @@ fn execute_delete(
     }
     blocks.sort_by_key(|b| b.document_position);
 
-    let (start_block, start_block_idx, start_offset) = find_block_at_position(&blocks, start)?;
+    let (start_block, start_block_idx, start_offset) = find_block_at_position(&blocks, start, &uow.store())?;
 
     // ── Cell selection safety: detect cross-cell deletion ──────────
     let table_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
@@ -222,7 +223,7 @@ fn execute_delete(
         let mut first_cell: Option<Option<EntityId>> = None;
         let mut cross = false;
         for block in &blocks {
-            if block.document_position + block.text_length < start || block.document_position > end
+            if block.document_position + block_char_length(&block, &store) < start || block.document_position > end
             {
                 continue;
             }
@@ -247,7 +248,7 @@ fn execute_delete(
             std::collections::HashSet::new();
         let mut affected_cell_frames: Vec<EntityId> = Vec::new();
         for block in &blocks {
-            if block.document_position + block.text_length >= start
+            if block.document_position + block_char_length(&block, &store) >= start
                 && block.document_position <= end
                 && let Some(&cf_id) = block_to_cell_frame.get(&block.id)
                 && affected_set.insert(cf_id)
@@ -269,7 +270,7 @@ fn execute_delete(
                 continue;
             }
 
-            let cell_chars: i64 = cell_blocks.iter().map(|b| b.text_length).sum();
+            let cell_chars: i64 = cell_blocks.iter().map(|b| block_char_length(&b, &store)).sum();
             total_chars_removed += cell_chars;
 
             clear_block(uow, &cell_blocks[0], now)?;
@@ -308,7 +309,7 @@ fn execute_delete(
                     let blk_opts = uow.get_block_multi(&blk_ids)?;
                     for b in blk_opts.into_iter().flatten() {
                         table_min_pos = table_min_pos.min(b.document_position);
-                        table_max_pos = table_max_pos.max(b.document_position + b.text_length);
+                        table_max_pos = table_max_pos.max(b.document_position + block_char_length(&b, &store));
                     }
                 }
             }
@@ -367,7 +368,7 @@ fn execute_delete(
 
         for block in &blocks {
             let block_start = block.document_position;
-            let block_end = block_start + block.text_length;
+            let block_end = block_start + block_char_length(&block, &store);
             if block_end < start || block_start >= end {
                 continue;
             }
@@ -384,11 +385,11 @@ fn execute_delete(
         let last_id = last_non_cell.map(|b| b.id);
         let first_is_partial = first_non_cell.is_some_and(|b| start > b.document_position);
         let last_is_partial =
-            last_non_cell.is_some_and(|b| end < b.document_position + b.text_length);
+            last_non_cell.is_some_and(|b| end < b.document_position + block_char_length(&b, &store));
 
         for block in &blocks {
             let block_start = block.document_position;
-            let block_end = block_start + block.text_length;
+            let block_end = block_start + block_char_length(&block, &store);
             if block_end < start || block_start >= end {
                 continue;
             }
@@ -403,12 +404,12 @@ fn execute_delete(
                 let local_char_start =
                     if is_first { (start - block_start) as i64 } else { 0 };
                 let local_char_end =
-                    if is_last { (end - block_start) as i64 } else { block.text_length };
+                    if is_last { (end - block_start) as i64 } else { block_char_length(&block, &store) };
                 let chars_removed_this =
                     delete_char_range_in_block(uow, block, local_char_start, local_char_end)?;
                 total_chars_removed += chars_removed_this;
             } else {
-                total_chars_removed += block.text_length;
+                total_chars_removed += block_char_length(&block, &store);
                 drop_block_runs_and_images(uow, block.id);
                 uow.remove_block(&block.id)?;
                 non_cell_blocks_to_remove.push(block.id);
@@ -574,7 +575,7 @@ fn execute_delete(
     }
     // ── End cell selection safety ──────────────────────────────────
 
-    let (end_block, end_block_idx, end_offset) = find_block_at_position(&blocks, end)?;
+    let (end_block, end_block_idx, end_offset) = find_block_at_position(&blocks, end, &uow.store())?;
     let delete_len = end - start;
 
     if start_block_idx == end_block_idx {
@@ -617,7 +618,6 @@ fn execute_delete(
         );
 
         let mut updated_block = start_block.clone();
-        updated_block.text_length -= delete_len;
         updated_block.updated_at = chrono::Utc::now();
         uow.update_block(&updated_block)?;
 
@@ -677,20 +677,6 @@ fn execute_delete(
         let end_kept = &end_block_text[byte_eo as usize..];
         let merged_plain = format!("{}{}", start_kept, end_kept);
 
-        // Compute char counts for text_length.
-        let start_kept_chars = start_kept.chars().count() as i64;
-        let end_kept_chars = end_kept.chars().count() as i64;
-
-        // Count images surviving in each side.
-        let start_surviving_images: i64 = start_images
-            .iter()
-            .filter(|i| i.byte_offset < byte_so)
-            .count() as i64;
-        let end_surviving_images: i64 = end_images
-            .iter()
-            .filter(|i| i.byte_offset >= byte_eo)
-            .count() as i64;
-
         // Build merged format_runs:
         //   start_runs clipped to [..byte_so), then end_runs from [byte_eo..)
         //   rebased to start at (byte_so - byte_eo) shift.
@@ -747,8 +733,6 @@ fn execute_delete(
 
         // Write merged state to start_block.
         let mut updated_start = start_block.clone();
-        updated_start.text_length =
-            start_kept_chars + end_kept_chars + start_surviving_images + end_surviving_images;
         updated_start.updated_at = now;
         uow.update_block(&updated_start)?;
 
@@ -810,10 +794,14 @@ fn execute_delete(
         updated_frame.updated_at = chrono::Utc::now();
         uow.update_frame(&updated_frame)?;
 
-        let chars_from_start = start_block.text_length - start_offset;
-        let chars_from_middle: i64 = blocks[(start_block_idx + 1)..end_block_idx]
+        // Use the pre-mutation texts captured at line 653 — by now the
+        // rope merge has run and `block_char_length(start_block)` reflects
+        // the post-merge state (start_kept + end_kept), not the original.
+        let start_chars = start_block_text.chars().count() as i64;
+        let chars_from_start = start_chars - start_offset;
+        let chars_from_middle: i64 = middle_block_texts
             .iter()
-            .map(|b| b.text_length)
+            .map(|t| t.chars().count() as i64)
             .sum();
         let chars_from_end = end_offset;
         let chars_removed = chars_from_start + chars_from_middle + chars_from_end;
@@ -896,7 +884,6 @@ fn delete_char_range_in_block(
 
     let positions_removed = removed_text_chars + images_removed;
     let mut updated = block.clone();
-    updated.text_length -= positions_removed;
     updated.updated_at = chrono::Utc::now();
     uow.update_block(&updated)?;
     Ok(positions_removed)

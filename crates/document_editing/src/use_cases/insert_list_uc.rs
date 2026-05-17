@@ -3,6 +3,7 @@ use crate::InsertListDto;
 use crate::InsertListResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -96,7 +97,7 @@ fn execute_insert_list(
     blocks.sort_by_key(|b| b.document_position);
 
     // Find block at position to determine insert index
-    let (_current_block, block_idx, _offset) = find_block_at_position(&blocks, position)?;
+    let (_current_block, block_idx, _offset) = find_block_at_position(&blocks, position, &uow.store())?;
 
     let now = chrono::Utc::now();
 
@@ -113,9 +114,10 @@ fn execute_insert_list(
     let created_list = uow.create_list(&list, doc_id, -1)?;
 
     // Create a new empty block with the list reference
+    let store = uow.store();
     let new_block_position = if !blocks.is_empty() {
         let current = &blocks[block_idx];
-        current.document_position + current.text_length + 1
+        current.document_position + block_char_length(current, &store) + 1
     } else {
         0
     };
@@ -125,7 +127,6 @@ fn execute_insert_list(
         created_at: now,
         updated_at: now,
         list: Some(created_list.id),
-        text_length: 0,
         document_position: new_block_position,
         ..Default::default()
     };

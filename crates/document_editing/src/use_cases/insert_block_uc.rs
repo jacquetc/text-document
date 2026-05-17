@@ -3,7 +3,7 @@ use crate::InsertBlockDto;
 use crate::InsertBlockResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_content_via_store, rope_split_block};
+use common::database::rope_helpers::{block_char_length, block_content_via_store, rope_split_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -90,7 +90,7 @@ fn execute_insert_block(
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
 
-    let (current_block, block_idx, offset) = find_block_at_position(&blocks, position)?;
+    let (current_block, block_idx, offset) = find_block_at_position(&blocks, position, &uow.store())?;
 
     // Split byte offset inside current_block.plain_text accounting for images.
     let store = uow.store();
@@ -115,20 +115,17 @@ fn execute_insert_block(
     let text_after = current_block_text[byte_split as usize..].to_string();
     let text_after_byte_len = text_after.len();
     let text_before_chars = text_before.chars().count() as i64;
-    let text_after_chars = text_after.chars().count() as i64;
 
     // Split format_runs and block_images at the byte boundary.
     let (left_runs, right_runs) = split_runs_at(&current_runs, byte_split);
     let (left_images, right_images) = split_images_at(&current_images, byte_split);
 
     let left_image_count = left_images.len() as i64;
-    let right_image_count = right_images.len() as i64;
 
     let now = chrono::Utc::now();
 
     // Update current block (now the "before" block).
     let mut updated_current = current_block.clone();
-    updated_current.text_length = text_before_chars + left_image_count;
     updated_current.updated_at = now;
     uow.update_block(&updated_current)?;
     debug_assert_well_formed(&left_runs, text_before.len());
@@ -143,14 +140,16 @@ fn execute_insert_block(
         .unwrap()
         .insert(current_block.id, left_images);
 
-    // Create the "after" block.
-    let new_block_position = current_block.document_position + updated_current.text_length + 1;
+    // Create the "after" block. Use `text_before_chars` directly because the
+    // rope split mirror (`rope_split_block` below) hasn't run yet — at this
+    // point in the function `block_char_length(updated_current)` would still
+    // return the unsplit length (chars in both halves).
+    let new_block_position = current_block.document_position + text_before_chars + left_image_count + 1;
     let new_block = Block {
         id: 0,
         created_at: now,
         updated_at: now,
         list: current_block.list,
-        text_length: text_after_chars + right_image_count,
         document_position: new_block_position,
         fmt_alignment: current_block.fmt_alignment.clone(),
         fmt_top_margin: current_block.fmt_top_margin,

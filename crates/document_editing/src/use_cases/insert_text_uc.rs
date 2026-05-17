@@ -3,7 +3,7 @@ use crate::InsertTextDto;
 use crate::InsertTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{
+use common::database::rope_helpers::{block_char_length, 
     block_content_via_store, rope_delete_in_block, rope_insert_in_block,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
@@ -65,7 +65,7 @@ enum InsertTextUndo {
 }
 
 /// Delete a logical character range `[start_offset..end_offset)` inside a
-/// single block. Mutates `block.plain_text`, `block.text_length`,
+/// single block. Mutates `block.plain_text`, `block_char_length(&block, &store)`,
 /// `format_runs[block.id]`, and `block_images[block.id]` consistently.
 /// Returns the count of logical positions removed (text chars + images).
 fn delete_range_in_block(
@@ -122,7 +122,6 @@ fn delete_range_in_block(
     let positions_removed = removed_text_chars + images_removed;
 
     let mut updated_block = block.clone();
-    updated_block.text_length -= positions_removed;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -174,9 +173,9 @@ fn execute_insert_with_selection(
     let position = sel_start;
 
     let (sel_block, sel_block_idx, sel_start_offset) =
-        super::editing_helpers::find_block_at_position(&blocks, sel_start)?;
+        super::editing_helpers::find_block_at_position(&blocks, sel_start, &uow.store())?;
     let (_, sel_end_block_idx, sel_end_offset) =
-        super::editing_helpers::find_block_at_position(&blocks, sel_end)?;
+        super::editing_helpers::find_block_at_position(&blocks, sel_end, &uow.store())?;
 
     if sel_block_idx != sel_end_block_idx {
         return Err(anyhow!(
@@ -210,7 +209,7 @@ fn execute_insert_with_selection(
         .ok_or_else(|| anyhow!("Document not found"))?;
 
     let (block, block_idx, offset) =
-        super::editing_helpers::find_block_at_position(&blocks, position)?;
+        super::editing_helpers::find_block_at_position(&blocks, position, &uow.store())?;
 
     let store = uow.store();
     let images = store
@@ -229,7 +228,6 @@ fn execute_insert_with_selection(
     new_plain.insert_str(byte_offset as usize, &dto.text);
 
     let mut updated_block = block.clone();
-    updated_block.text_length += inserted_char_len;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -317,10 +315,10 @@ fn execute_insert_simple(
 
     let (block, _block_idx, block_pos) =
         find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
-    let offset = (position - block_pos).clamp(0, block.text_length);
+    let store = uow.store();
+    let offset = (position - block_pos).clamp(0, block_char_length(&block, &store));
 
     let original_block = block.clone();
-    let store = uow.store();
     let original_format_runs = store
         .format_runs
         .read()
@@ -346,7 +344,6 @@ fn execute_insert_simple(
     new_plain.insert_str(byte_offset as usize, &dto.text);
 
     let mut updated_block = block.clone();
-    updated_block.text_length += inserted_char_len;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -400,12 +397,13 @@ fn find_block_at_position_sequential(
         return Err(anyhow!("No blocks in document"));
     }
 
+    let store = uow.store();
     let mut running_pos: i64 = 0;
     for (idx, &block_id) in ordered_block_ids.iter().enumerate() {
         let block = uow
             .get_block(&block_id)?
             .ok_or_else(|| anyhow!("Block not found"))?;
-        let block_end = running_pos + block.text_length;
+        let block_end = running_pos + block_char_length(&block, &store);
 
         if position >= running_pos && position <= block_end {
             return Ok((block, idx, running_pos));
@@ -420,7 +418,7 @@ fn find_block_at_position_sequential(
     let mut pos: i64 = 0;
     for &id in &ordered_block_ids[..last_idx] {
         if let Some(b) = uow.get_block(&id)? {
-            pos += b.text_length + 1;
+            pos += block_char_length(&b, &store) + 1;
         }
     }
     Ok((block, last_idx, pos))

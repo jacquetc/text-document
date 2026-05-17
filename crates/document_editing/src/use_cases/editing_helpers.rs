@@ -2,6 +2,8 @@ use anyhow::{Result, anyhow};
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::entities::{Block, Frame};
 use common::format_runs::{InlineContent, InlineSegment};
+use common::database::rope_helpers::block_char_length;
+use common::database::Store;
 use common::types::EntityId;
 
 /// Trait for UoW operations needed to create a cell frame. All
@@ -162,10 +164,14 @@ pub fn is_word_boundary_punct(c: char) -> bool {
 ///
 /// Returns `(block, index_in_list, offset_within_block)`.
 /// If `position` is beyond all blocks, falls back to the end of the last block.
-pub fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block, usize, i64)> {
+pub fn find_block_at_position(
+    blocks: &[Block],
+    position: i64,
+    store: &Store,
+) -> Result<(Block, usize, i64)> {
     for (i, block) in blocks.iter().enumerate() {
         let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
+        let block_end = block_start + block_char_length(block, store);
         // The position is within this block (inclusive of block_end for appending at end)
         if position >= block_start && position <= block_end {
             let offset = position - block_start;
@@ -174,7 +180,7 @@ pub fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block,
     }
     // If position is beyond all blocks, use the last block
     if let Some(block) = blocks.last() {
-        let offset = block.text_length;
+        let offset = block_char_length(block, store);
         return Ok((block.clone(), blocks.len() - 1, offset));
     }
     Err(anyhow!("No blocks found in document"))

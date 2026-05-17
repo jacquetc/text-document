@@ -3,6 +3,7 @@ use crate::BlockInfoDto;
 use crate::GetBlockAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -61,6 +62,8 @@ impl GetBlockAtPositionUseCase {
         // Collect all block IDs in document order by traversing child_order recursively
         let ordered_block_ids = collect_block_ids(&*uow, &frame_id)?;
 
+        let store = uow.store();
+
         // Walk blocks computing positions on the fly.
         // Separator (at block_end) maps to the next block.
         // Empty blocks (text_length == 0) match when position == running_pos.
@@ -69,7 +72,7 @@ impl GetBlockAtPositionUseCase {
             let block = uow
                 .get_block(&block_id)?
                 .ok_or_else(|| anyhow!("Block not found"))?;
-            let block_end = running_pos + block.text_length;
+            let block_end = running_pos + block_char_length(&block, &store);
 
             // Position before this block's start means it was at the separator
             // before this block — separator maps to next block (this one).
@@ -78,18 +81,18 @@ impl GetBlockAtPositionUseCase {
                 return Ok(BlockInfoDto {
                     block_id: block.id as i64,
                     block_start: running_pos,
-                    block_length: block.text_length,
+                    block_length: block_char_length(&block, &store),
                     block_number: block_number as i64,
                 });
             }
 
             // Within block text, or empty block at exactly this position
-            if position < block_end || (block.text_length == 0 && position == running_pos) {
+            if position < block_end || (block_char_length(&block, &store) == 0 && position == running_pos) {
                 uow.end_transaction()?;
                 return Ok(BlockInfoDto {
                     block_id: block.id as i64,
                     block_start: running_pos,
-                    block_length: block.text_length,
+                    block_length: block_char_length(&block, &store),
                     block_number: block_number as i64,
                 });
             }
@@ -106,14 +109,14 @@ impl GetBlockAtPositionUseCase {
             let mut pos: i64 = 0;
             for &id in &ordered_block_ids[..ordered_block_ids.len() - 1] {
                 if let Some(b) = uow.get_block(&id)? {
-                    pos += b.text_length + 1;
+                    pos += block_char_length(&b, &store) + 1;
                 }
             }
             uow.end_transaction()?;
             return Ok(BlockInfoDto {
                 block_id: block.id as i64,
                 block_start: pos,
-                block_length: block.text_length,
+                block_length: block_char_length(&block, &store),
                 block_number: (ordered_block_ids.len() - 1) as i64,
             });
         }

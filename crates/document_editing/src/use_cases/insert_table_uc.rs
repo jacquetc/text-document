@@ -106,7 +106,7 @@ fn execute_insert_table(
             .ok_or_else(|| anyhow!("Document has no frames"))?;
         (*first_frame_id, 0usize, None)
     } else {
-        let (target_block, _, offset) = find_block_at_position(&all_blocks, insert_pos)?;
+        let (target_block, _, offset) = find_block_at_position(&all_blocks, insert_pos, &uow.store())?;
         // Find which frame owns this block
         let mut found_frame_id = frame_ids[0];
         let mut found_block_idx = 0usize;

@@ -38,6 +38,16 @@ pub fn block_content_via_store(block: &Block, store: &Store) -> String {
     rope.byte_slice(bs as usize..content_end as usize).to_string()
 }
 
+/// Logical character count of a block — what the old
+/// `Block.text_length` field used to cache. Computed by counting the
+/// chars in the block's rope content. Image anchors are stored as
+/// `\u{FFFC}` (one char, three bytes) inside the rope content, so the
+/// char count already covers them. Returns 0 for blocks not registered
+/// in the offset index.
+pub fn block_char_length(block: &Block, store: &Store) -> i64 {
+    block_content_via_store(block, store).chars().count() as i64
+}
+
 /// Reset the rope to empty and clear `block_offsets`. Called by
 /// importers when they replace the entire document content.
 pub fn rope_reset(store: &Store) {

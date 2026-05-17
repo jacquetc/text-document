@@ -1,6 +1,7 @@
 use crate::SetBlockFormatDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -86,14 +87,15 @@ fn execute_set_block_format(
 
     // Find blocks that overlap the range
     let mut blocks_to_update: Vec<Block> = Vec::new();
+    let store = uow.store();
     for block in &blocks {
         let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
+        let block_end = block_start + block_char_length(block, &store);
 
         // Block overlaps the range if its text interval [block_start, block_end)
         // intersects [range_start, range_end].  Empty blocks (text_length == 0)
         // are included when their position falls inside the range.
-        let overlaps = if block.text_length > 0 {
+        let overlaps = if block_char_length(block, &store) > 0 {
             block_start <= range_end && block_end > range_start
         } else {
             block_start >= range_start && block_start <= range_end

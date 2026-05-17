@@ -3,6 +3,7 @@ use crate::GetTextAtPositionDto;
 use crate::TextAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::database::rope_helpers::block_content_via_store;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
@@ -78,11 +79,12 @@ impl GetTextAtPositionUseCase {
         // Get all blocks and assign computed positions
         let blocks_opt = uow.get_block_multi(&ordered_block_ids)?;
         let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+        let store = uow.store();
         // Assign on-the-fly positions so they match the true document layout
         let mut running: i64 = 0;
         for block in &mut blocks {
             block.document_position = running;
-            running += block.text_length + 1;
+            running += block_char_length(block, &store) + 1;
         }
 
         // Find the block containing the requested position.
@@ -90,7 +92,7 @@ impl GetTextAtPositionUseCase {
         let first_block_idx = blocks
             .iter()
             .position(|b| {
-                position >= b.document_position && position <= b.document_position + b.text_length
+                position >= b.document_position && position <= b.document_position + block_char_length(&b, &store)
             })
             .ok_or_else(|| anyhow!("Position {} is out of document range", position))?;
 

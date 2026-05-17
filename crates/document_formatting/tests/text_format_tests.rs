@@ -207,7 +207,6 @@ fn test_set_text_format_in_table_cell() -> Result<()> {
         "Cell text",
     );
     let mut update_block: UpdateBlockDto = cell_block.into();
-    update_block.text_length = 9;
     block_controller::update(&db, &hub, &mut urm, None, &update_block)?;
 
     document_formatting_controller::set_text_format(

@@ -527,11 +527,14 @@ impl TextDocument {
         // Walk blocks computing positions on the fly
         let pos = position as i64;
         let mut running_pos: i64 = 0;
+        let store = inner.ctx.db_context.get_store();
         for &block_id in &ordered_block_ids {
             let block_dto = block_commands::get_block(&inner.ctx, &block_id)
                 .ok()
                 .flatten()?;
-            let block_end = running_pos + block_dto.text_length;
+            let entity: common::entities::Block = block_dto.clone().into();
+            let block_end = running_pos
+                + common::database::rope_helpers::block_char_length(&entity, store);
             if pos >= running_pos && pos <= block_end {
                 return crate::text_block::build_block_snapshot_with_position(
                     &inner,
@@ -625,11 +628,15 @@ impl TextDocument {
         let range_start = position;
         let range_end = position + length;
 
+        let store = inner.ctx.db_context.get_store();
         sorted
             .iter()
             .filter(|b| {
                 let block_start = b.document_position.max(0) as usize;
-                let block_end = block_start + b.text_length.max(0) as usize;
+                let entity: common::entities::Block = (*b).clone().into();
+                let block_end = block_start
+                    + common::database::rope_helpers::block_char_length(&entity, store).max(0)
+                        as usize;
                 // Overlap check: block intersects [range_start, range_end)
                 if length == 0 {
                     // Point query: block contains the position
@@ -1029,10 +1036,12 @@ fn capture_block_state(inner: &TextDocumentInner) -> Vec<UndoBlockState> {
             let format = BlockFormat::from(&b);
             let entity: common::entities::Block = b.clone().into();
             let plain_text = common::database::rope_helpers::block_content_via_store(&entity, store);
+            let text_length =
+                common::database::rope_helpers::block_char_length(&entity, store);
             UndoBlockState {
                 id: b.id,
                 position: b.document_position,
-                text_length: b.text_length,
+                text_length,
                 plain_text,
                 format,
             }

@@ -458,10 +458,15 @@ fn test_format_blocks_across_multiple_frames() -> Result<()> {
 
     let mut min_pos = i64::MAX;
     let mut max_end = 0;
+    let store = db.get_store();
     for bid in &all_block_ids {
         let b = block_controller::get(&db, bid)?.unwrap();
         min_pos = min_pos.min(b.document_position);
-        max_end = max_end.max(b.document_position + b.text_length);
+        let entity: common::entities::Block = b.clone().into();
+        max_end = max_end.max(
+            b.document_position
+                + common::database::rope_helpers::block_char_length(&entity, store),
+        );
     }
 
     document_formatting_controller::set_block_format(

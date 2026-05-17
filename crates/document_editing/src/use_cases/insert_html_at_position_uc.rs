@@ -3,7 +3,7 @@ use crate::InsertHtmlAtPositionDto;
 use crate::InsertHtmlAtPositionResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{
+use common::database::rope_helpers::{block_char_length, 
     block_content_via_store, rope_insert_block_at, rope_insert_in_block,
     rope_replace_block_content,
 };
@@ -122,7 +122,7 @@ fn execute_content_insert(
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    let (current_block, block_idx, offset) = find_block_at_position(&blocks, position)?;
+    let (current_block, block_idx, offset) = find_block_at_position(&blocks, position, &uow.store())?;
 
     let store = uow.store();
     let (current_runs, current_images) = {
@@ -144,6 +144,13 @@ fn execute_content_insert(
     };
 
     let current_block_text = block_content_via_store(&current_block, &store);
+    // Capture the pre-mutation char length so that downstream position
+    // math (head_delta, running_position, original_next_pos) doesn't
+    // re-read it from a rope that has since been overwritten by the
+    // head update — `original_current_char_length` would
+    // return the post-mutation length, not the original.
+    let original_current_char_length =
+        current_block_text.chars().count() as i64 + current_images.len() as i64;
     let byte_offset = logical_offset_to_byte(&current_block_text, &current_images, offset);
     let now = chrono::Utc::now();
 
@@ -185,7 +192,6 @@ fn execute_content_insert(
         shift_images_for_insert(&mut images, byte_offset, inserted_bytes);
 
         let mut updated_block = current_block.clone();
-        updated_block.text_length += inserted_len;
         updated_block.updated_at = now;
         uow.update_block(&updated_block)?;
         write_block_state(uow, current_block.id, runs, images);
@@ -280,7 +286,6 @@ fn execute_content_insert(
                 list_grouper.reset();
                 None
             };
-            updated_current.text_length = first_len;
             updated_current.list = head_list_id;
             updated_current.fmt_heading_level = first_parsed.heading_level;
             updated_current.fmt_line_height = first_parsed.line_height;
@@ -307,13 +312,11 @@ fn execute_content_insert(
                 });
             }
             coalesce_in_place(&mut runs);
-            updated_current.text_length =
-                text_before_chars + first_len + left_image_count;
+            let _ = text_before_chars + first_len + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
             (hp, runs, left_images.clone())
         } else {
-            updated_current.text_length = text_before_chars + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
             (text_before.clone(), left_runs.clone(), left_images.clone())
@@ -338,7 +341,7 @@ fn execute_content_insert(
             s + head_plain.len() as u32
         });
 
-        let head_delta = updated_current.text_length - current_block.text_length;
+        let head_delta = block_char_length(&updated_current, &store) - original_current_char_length;
         let mut new_block_ids: Vec<EntityId> = Vec::new();
         let mut total_new_chars: i64 = if merge_first || overwrite_head {
             head_delta
@@ -346,7 +349,7 @@ fn execute_content_insert(
             0
         };
         let mut running_position =
-            current_block.document_position + updated_current.text_length + 1;
+            current_block.document_position + block_char_length(&updated_current, &store) + 1;
 
         let middle_start = if merge_first || overwrite_head { 1 } else { 0 };
         let middle_end = if merge_last {
@@ -392,7 +395,6 @@ fn execute_content_insert(
                 created_at: now,
                 updated_at: now,
                 list: list_id,
-                text_length: block_text_len,
                 document_position: running_position,
                 fmt_alignment: None,
                 fmt_top_margin: None,
@@ -474,13 +476,11 @@ fn execute_content_insert(
 
         let mut tail_doc_pos: i64 = 0;
         if !skip_tail {
-            let tail_text_length = tail_chars + right_image_count;
             let tail_block = Block {
                 id: 0,
                 created_at: now,
                 updated_at: now,
                 list: if overwrite_head { None } else { current_block.list },
-                text_length: tail_text_length,
                 document_position: running_position,
                 fmt_alignment: if overwrite_head {
                     None
@@ -575,7 +575,7 @@ fn execute_content_insert(
             }
 
             new_block_ids.push(created_tail.id);
-            running_position += created_tail.text_length + 1;
+            running_position += block_char_length(&created_tail, &store) + 1;
         }
 
         let mut updated_frame = frame.clone();
@@ -594,7 +594,7 @@ fn execute_content_insert(
         let standalone_count = (middle_end - middle_start) as i64;
         let blocks_added = standalone_count + if skip_tail { 0 } else { 1 };
         let original_next_pos =
-            current_block.document_position + current_block.text_length + 1;
+            current_block.document_position + original_current_char_length + 1;
         let pos_shift = running_position - original_next_pos;
 
         let mut blocks_to_update: Vec<Block> = Vec::new();
@@ -649,7 +649,6 @@ fn execute_content_insert(
             };
 
             let mut updated_current = current_block.clone();
-            updated_current.text_length = block_text_len;
             updated_current.list = list_id;
             updated_current.fmt_heading_level = parsed.heading_level;
             updated_current.fmt_line_height = parsed.line_height;
@@ -683,17 +682,15 @@ fn execute_content_insert(
             });
 
             let mut running_position =
-                current_block.document_position + updated_current.text_length + 1;
+                current_block.document_position + block_char_length(&updated_current, &store) + 1;
 
             let mut new_block_ids: Vec<EntityId> = Vec::new();
             if !skip_tail {
-                let tail_text_length = text_after_chars + right_image_count;
                 let tail_block = Block {
                     id: 0,
                     created_at: now,
                     updated_at: now,
                     list: None,
-                    text_length: tail_text_length,
                     document_position: running_position,
                     fmt_alignment: None,
                     fmt_top_margin: None,
@@ -726,7 +723,7 @@ fn execute_content_insert(
                 }
 
                 new_block_ids.push(created_tail.id);
-                running_position += created_tail.text_length + 1;
+                running_position += block_char_length(&created_tail, &store) + 1;
             }
 
             if !new_block_ids.is_empty() {
@@ -745,9 +742,9 @@ fn execute_content_insert(
             }
 
             let blocks_added: i64 = if skip_tail { 0 } else { 1 };
-            let head_delta = updated_current.text_length - current_block.text_length;
+            let head_delta = block_char_length(&updated_current, &store) - original_current_char_length;
             let original_next_pos =
-                current_block.document_position + current_block.text_length + 1;
+                current_block.document_position + original_current_char_length + 1;
             let pos_shift = running_position - original_next_pos;
 
             let mut blocks_to_update: Vec<Block> = Vec::new();
@@ -768,14 +765,13 @@ fn execute_content_insert(
             uow.update_document(&updated_doc)?;
 
             Ok((
-                current_block.document_position + updated_current.text_length,
+                current_block.document_position + block_char_length(&updated_current, &store),
                 blocks_added,
                 snapshot,
             ))
         } else {
             // Normal path: text_before is not empty.
             let mut updated_current = current_block.clone();
-            updated_current.text_length = text_before_chars + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
             write_block_state(
@@ -803,7 +799,7 @@ fn execute_content_insert(
             });
 
             let mut running_position =
-                current_block.document_position + updated_current.text_length + 1;
+                current_block.document_position + block_char_length(&updated_current, &store) + 1;
 
             let list_id = if let Some(ref list_style) = parsed.list_style {
                 let list = List {
@@ -826,7 +822,6 @@ fn execute_content_insert(
                 created_at: now,
                 updated_at: now,
                 list: list_id,
-                text_length: block_text_len,
                 document_position: running_position,
                 fmt_alignment: None,
                 fmt_top_margin: None,
@@ -858,13 +853,11 @@ fn execute_content_insert(
 
             running_position += block_text_len + 1;
 
-            let tail_text_length = text_after_chars + right_image_count;
             let tail_block = Block {
                 id: 0,
                 created_at: now,
                 updated_at: now,
                 list: current_block.list,
-                text_length: tail_text_length,
                 document_position: running_position,
                 fmt_alignment: current_block.fmt_alignment.clone(),
                 fmt_top_margin: current_block.fmt_top_margin,
@@ -912,8 +905,8 @@ fn execute_content_insert(
 
             let blocks_added: i64 = 2;
             let original_next_pos =
-                current_block.document_position + current_block.text_length + 1;
-            let new_next_pos = running_position + created_tail.text_length + 1;
+                current_block.document_position + original_current_char_length + 1;
+            let new_next_pos = running_position + block_char_length(&created_tail, &store) + 1;
             let pos_shift = new_next_pos - original_next_pos;
 
             let mut blocks_to_update: Vec<Block> = Vec::new();

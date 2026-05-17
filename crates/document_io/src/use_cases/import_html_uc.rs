@@ -3,6 +3,7 @@ use crate::ImportHtmlDto;
 use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::database::rope_helpers::{
     rope_append_block, rope_append_table_anchor, rope_insert_block_boundary, rope_reset,
 };
@@ -195,7 +196,6 @@ impl LongOperation for ImportHtmlUseCase {
 
                     let current_frame_id = frame_stack.last().unwrap().frame_id;
                     let block = Block {
-                        text_length: line_len,
                         document_position,
                         fmt_heading_level: parsed_block.heading_level,
                         fmt_line_height: parsed_block.line_height,
@@ -311,10 +311,8 @@ impl LongOperation for ImportHtmlUseCase {
 
                             let (plain_text, format_runs) =
                                 format_runs_from_spans(&cell.spans, false);
-                            let text_length = plain_text.chars().count() as i64;
 
                             let block = Block {
-                                text_length,
                                 document_position,
                                 ..Block::default()
                             };
@@ -351,6 +349,7 @@ impl LongOperation for ImportHtmlUseCase {
                             };
                             uow.create_table_cell(&table_cell, created_table.id, -1)?;
 
+                            let text_length = plain_text.chars().count() as i64;
                             total_chars += text_length;
                             total_block_count += 1;
                             cell_count += 1;

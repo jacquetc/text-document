@@ -48,20 +48,28 @@ impl TextBlock {
     /// Character count. O(1).
     pub fn length(&self) -> usize {
         let inner = self.doc.lock();
+        let store = inner.ctx.db_context.get_store();
         block_commands::get_block(&inner.ctx, &(self.block_id as u64))
             .ok()
             .flatten()
-            .map(|b| to_usize(b.text_length))
+            .map(|b| {
+                let entity: common::entities::Block = b.into();
+                to_usize(common::database::rope_helpers::block_char_length(&entity, store))
+            })
             .unwrap_or(0)
     }
 
     /// `length() == 0`. O(1).
     pub fn is_empty(&self) -> bool {
         let inner = self.doc.lock();
+        let store = inner.ctx.db_context.get_store();
         block_commands::get_block(&inner.ctx, &(self.block_id as u64))
             .ok()
             .flatten()
-            .map(|b| b.text_length == 0)
+            .map(|b| {
+                let entity: common::entities::Block = b.into();
+                common::database::rope_helpers::block_char_length(&entity, store) == 0
+            })
             .unwrap_or(true)
     }
 
@@ -829,7 +837,10 @@ pub(crate) fn build_block_snapshot_with_position(
     Some(BlockSnapshot {
         block_id: block_id as usize,
         position,
-        length: to_usize(block_dto.text_length),
+        length: to_usize(common::database::rope_helpers::block_char_length(
+            &entity,
+            inner.ctx.db_context.get_store(),
+        )),
         text,
         fragments,
         block_format,

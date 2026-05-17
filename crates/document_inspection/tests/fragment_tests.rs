@@ -215,7 +215,12 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
     let block_ids = get_block_ids(&db_context)?;
     let last_block = block_controller::get(&db_context, block_ids.last().unwrap())?
         .expect("last block should exist");
-    let insert_pos = last_block.document_position + last_block.text_length;
+    let last_entity: common::entities::Block = last_block.clone().into();
+    let insert_pos = last_block.document_position
+        + common::database::rope_helpers::block_char_length(
+            &last_entity,
+            db_context.get_store(),
+        );
 
     document_editing_controller::insert_fragment(
         &db_context,
@@ -324,12 +329,17 @@ fn test_extract_insert_with_list() -> Result<()> {
     // Find blocks with lists
     let block_ids = get_block_ids(&db_context)?;
     let mut list_block_positions: Vec<(i64, i64)> = Vec::new();
+    let store = db_context.get_store();
     for block_id in &block_ids {
         let block = block_controller::get(&db_context, block_id)?;
         if let Some(block) = block
             && block.list.is_some()
         {
-            list_block_positions.push((block.document_position, block.text_length));
+            let entity: common::entities::Block = block.clone().into();
+            list_block_positions.push((
+                block.document_position,
+                common::database::rope_helpers::block_char_length(&entity, store),
+            ));
         }
     }
     // "- item1\n- item2" produces exactly 2 list blocks
@@ -365,7 +375,12 @@ fn test_extract_insert_with_list() -> Result<()> {
     let all_block_ids = get_block_ids(&db_context)?;
     let last_block =
         block_controller::get(&db_context, all_block_ids.last().unwrap())?.expect("last block");
-    let insert_pos = last_block.document_position + last_block.text_length;
+    let last_entity: common::entities::Block = last_block.clone().into();
+    let insert_pos = last_block.document_position
+        + common::database::rope_helpers::block_char_length(
+            &last_entity,
+            db_context.get_store(),
+        );
 
     document_editing_controller::insert_fragment(
         &db_context,
