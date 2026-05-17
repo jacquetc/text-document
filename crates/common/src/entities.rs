@@ -111,7 +111,6 @@ pub struct Block {
     pub list: Option<EntityId>,
     pub text_length: i64,
     pub document_position: i64,
-    pub plain_text: String,
     pub fmt_alignment: Option<Alignment>,
     pub fmt_top_margin: Option<i64>,
     pub fmt_bottom_margin: Option<i64>,

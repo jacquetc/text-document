@@ -127,7 +127,6 @@ fn execute_insert_list(
         list: Some(created_list.id),
         text_length: 0,
         document_position: new_block_position,
-        plain_text: String::new(),
         ..Default::default()
     };
 

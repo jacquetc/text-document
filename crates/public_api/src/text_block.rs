@@ -34,10 +34,14 @@ impl TextBlock {
     /// Block's plain text. O(1).
     pub fn text(&self) -> String {
         let inner = self.doc.lock();
+        let store = inner.ctx.db_context.get_store();
         block_commands::get_block(&inner.ctx, &(self.block_id as u64))
             .ok()
             .flatten()
-            .map(|b| b.plain_text)
+            .map(|b| {
+                let entity: common::entities::Block = b.into();
+                common::database::rope_helpers::block_content_via_store(&entity, store)
+            })
             .unwrap_or_default()
     }
 
@@ -431,7 +435,12 @@ fn build_raw_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<Fragment
         None => return Vec::new(),
     };
 
-    let plain: &str = &block_dto.plain_text;
+    let entity: common::entities::Block = block_dto.clone().into();
+    let plain_owned = common::database::rope_helpers::block_content_via_store(
+        &entity,
+        inner.ctx.db_context.get_store(),
+    );
+    let plain: &str = &plain_owned;
 
     let (runs, images) = {
         let store = inner.ctx.db_context.get_store();
@@ -812,11 +821,16 @@ pub(crate) fn build_block_snapshot_with_position(
 
     let position = computed_position.unwrap_or_else(|| to_usize(block_dto.document_position));
 
+    let entity: common::entities::Block = block_dto.clone().into();
+    let text = common::database::rope_helpers::block_content_via_store(
+        &entity,
+        inner.ctx.db_context.get_store(),
+    );
     Some(BlockSnapshot {
         block_id: block_id as usize,
         position,
         length: to_usize(block_dto.text_length),
-        text: block_dto.plain_text,
+        text,
         fragments,
         block_format,
         list_info,

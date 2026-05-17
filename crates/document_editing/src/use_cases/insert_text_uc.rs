@@ -123,7 +123,6 @@ fn delete_range_in_block(
 
     let mut updated_block = block.clone();
     updated_block.text_length -= positions_removed;
-    updated_block.plain_text = new_plain;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -231,7 +230,6 @@ fn execute_insert_with_selection(
 
     let mut updated_block = block.clone();
     updated_block.text_length += inserted_char_len;
-    updated_block.plain_text = new_plain.clone();
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -349,7 +347,6 @@ fn execute_insert_simple(
 
     let mut updated_block = block.clone();
     updated_block.text_length += inserted_char_len;
-    updated_block.plain_text = new_plain.clone();
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -605,6 +602,20 @@ impl UndoRedoCommand for InsertTextUseCase {
             self.last_result = Some(other_result.clone());
         }
         self.last_merge_time = other_cmd.last_merge_time;
+
+        // Extend the combined insertion length so a single undo reverts
+        // all merged keystrokes (not just the first one). The merge
+        // criteria in can_merge() guarantee both inserts are contiguous
+        // and in the same block, so widening the existing
+        // (inserted_byte_offset, inserted_byte_len) span by the other's
+        // length captures the combined effect.
+        if let (
+            Some(InsertTextUndo::Simple(self_undo)),
+            Some(InsertTextUndo::Simple(other_undo)),
+        ) = (&mut self.undo_data, &other_cmd.undo_data)
+        {
+            self_undo.inserted_byte_len += other_undo.inserted_byte_len;
+        }
 
         true
     }

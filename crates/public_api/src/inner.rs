@@ -355,6 +355,15 @@ impl TextDocumentInner {
             -1,
         )?;
 
+        // Register the initial empty block in `block_offsets` so
+        // subsequent rope mirrors (insert_text, insert_fragment, etc.)
+        // can resolve its byte position. The generic create_block CRUD
+        // path doesn't touch the rope.
+        common::database::rope_helpers::rope_append_empty_block(
+            ctx.db_context.get_store(),
+            block.id,
+        );
+
         // Fix child_order on the main frame — the generic create_block path
         // adds the block to the blocks junction table but does not update
         // child_order. We must set it so that flow() works correctly.

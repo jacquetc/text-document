@@ -195,7 +195,6 @@ impl LongOperation for ImportHtmlUseCase {
 
                     let current_frame_id = frame_stack.last().unwrap().frame_id;
                     let block = Block {
-                        plain_text: plain_text.clone(),
                         text_length: line_len,
                         document_position,
                         fmt_heading_level: parsed_block.heading_level,
@@ -315,7 +314,6 @@ impl LongOperation for ImportHtmlUseCase {
                             let text_length = plain_text.chars().count() as i64;
 
                             let block = Block {
-                                plain_text: plain_text.clone(),
                                 text_length,
                                 document_position,
                                 ..Block::default()

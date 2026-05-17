@@ -12,7 +12,7 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, List, Root};
 use common::format_runs::{
-    FormatRun, coalesce_in_place, debug_assert_well_formed, logical_offset_to_byte,
+    FormatRun, coalesce_in_place, logical_offset_to_byte,
     shift_images_for_insert, shift_runs_for_insert, splice_range, split_images_at, split_runs_at,
 };
 
@@ -55,11 +55,9 @@ pub trait InsertHtmlAtPositionUnitOfWorkTrait: CommandUnitOfWork {}
 fn write_block_state(
     uow: &mut Box<dyn InsertHtmlAtPositionUnitOfWorkTrait>,
     block_id: EntityId,
-    plain_text: &str,
     runs: Vec<FormatRun>,
     images: Vec<common::format_runs::ImageAnchor>,
 ) {
-    debug_assert_well_formed(&runs, plain_text.len());
     let store = uow.store();
     {
         let mut runs_map = store.format_runs.write().unwrap();
@@ -187,11 +185,10 @@ fn execute_content_insert(
         shift_images_for_insert(&mut images, byte_offset, inserted_bytes);
 
         let mut updated_block = current_block.clone();
-        updated_block.plain_text = new_plain.clone();
         updated_block.text_length += inserted_len;
         updated_block.updated_at = now;
         uow.update_block(&updated_block)?;
-        write_block_state(uow, current_block.id, &new_plain, runs, images);
+        write_block_state(uow, current_block.id, runs, images);
 
         // Mirror the inline insert into the global rope.
         rope_insert_in_block(&store, current_block.id, byte_offset, &inserted_plain);
@@ -283,7 +280,6 @@ fn execute_content_insert(
                 list_grouper.reset();
                 None
             };
-            updated_current.plain_text = first_plain.clone();
             updated_current.text_length = first_len;
             updated_current.list = head_list_id;
             updated_current.fmt_heading_level = first_parsed.heading_level;
@@ -311,20 +307,18 @@ fn execute_content_insert(
                 });
             }
             coalesce_in_place(&mut runs);
-            updated_current.plain_text = hp.clone();
             updated_current.text_length =
                 text_before_chars + first_len + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
             (hp, runs, left_images.clone())
         } else {
-            updated_current.plain_text = text_before.clone();
             updated_current.text_length = text_before_chars + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
             (text_before.clone(), left_runs.clone(), left_images.clone())
         };
-        write_block_state(uow, current_block.id, &head_plain, head_runs, head_images);
+        write_block_state(uow, current_block.id, head_runs, head_images);
 
         // Mirror the head's new content into the rope. Compute the
         // post-head byte position so subsequent block inserts can be
@@ -400,7 +394,6 @@ fn execute_content_insert(
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
-                plain_text: block_plain.clone(),
                 fmt_alignment: None,
                 fmt_top_margin: None,
                 fmt_bottom_margin: None,
@@ -421,7 +414,7 @@ fn execute_content_insert(
 
             let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
             let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
-            write_block_state(uow, created_block.id, &block_plain, block_runs, Vec::new());
+            write_block_state(uow, created_block.id, block_runs, Vec::new());
 
             // Mirror the new middle block into the rope at the
             // running byte cursor (prepends a `\n` boundary). Skipped
@@ -489,7 +482,6 @@ fn execute_content_insert(
                 list: if overwrite_head { None } else { current_block.list },
                 text_length: tail_text_length,
                 document_position: running_position,
-                plain_text: tail_plain.clone(),
                 fmt_alignment: if overwrite_head {
                     None
                 } else {
@@ -575,7 +567,7 @@ fn execute_content_insert(
             tail_doc_pos = running_position;
             let tail_insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
             let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
-            write_block_state(uow, created_tail.id, &tail_plain, tail_runs, tail_images);
+            write_block_state(uow, created_tail.id, tail_runs, tail_images);
 
             // Mirror the tail block into the rope.
             if let Some(next_rope_byte) = next_rope_byte_opt {
@@ -657,7 +649,6 @@ fn execute_content_insert(
             };
 
             let mut updated_current = current_block.clone();
-            updated_current.plain_text = block_plain.clone();
             updated_current.text_length = block_text_len;
             updated_current.list = list_id;
             updated_current.fmt_heading_level = parsed.heading_level;
@@ -670,22 +661,26 @@ fn execute_content_insert(
             write_block_state(
                 uow,
                 current_block.id,
-                &block_plain,
                 block_runs,
                 Vec::new(),
             );
 
             // Mirror the head's new content into the rope (skipped
             // when the head wasn't in the rope, e.g. unseeded tests).
-            let next_rope_byte_opt = store
+            // The lookup runs in its own scope so the
+            // `block_offsets.read()` guard drops BEFORE
+            // `rope_replace_block_content` acquires its write
+            // guard — otherwise the same-thread upgrade deadlocks.
+            let head_rope_start = store
                 .block_offsets
                 .read()
                 .unwrap()
                 .range_of_block(current_block.id)
-                .map(|(s, _)| {
-                    rope_replace_block_content(&store, current_block.id, &block_plain);
-                    s + block_plain.len() as u32
-                });
+                .map(|(s, _)| s);
+            let next_rope_byte_opt = head_rope_start.map(|s| {
+                rope_replace_block_content(&store, current_block.id, &block_plain);
+                s + block_plain.len() as u32
+            });
 
             let mut running_position =
                 current_block.document_position + updated_current.text_length + 1;
@@ -700,7 +695,6 @@ fn execute_content_insert(
                     list: None,
                     text_length: tail_text_length,
                     document_position: running_position,
-                    plain_text: text_after.clone(),
                     fmt_alignment: None,
                     fmt_top_margin: None,
                     fmt_bottom_margin: None,
@@ -723,7 +717,6 @@ fn execute_content_insert(
                 write_block_state(
                     uow,
                     created_tail.id,
-                    &text_after,
                     right_runs.clone(),
                     right_images.clone(),
                 );
@@ -782,29 +775,32 @@ fn execute_content_insert(
         } else {
             // Normal path: text_before is not empty.
             let mut updated_current = current_block.clone();
-            updated_current.plain_text = text_before.clone();
             updated_current.text_length = text_before_chars + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
             write_block_state(
                 uow,
                 current_block.id,
-                &text_before,
                 left_runs.clone(),
                 left_images.clone(),
             );
 
             // Mirror the head's new content into the rope (skipped
             // when the head wasn't in the rope, e.g. unseeded tests).
-            let mut next_rope_byte_opt = store
+            // Lookup is in its own scope to drop the
+            // `block_offsets.read()` guard before
+            // `rope_replace_block_content` takes the write guard —
+            // otherwise the same-thread upgrade deadlocks.
+            let head_rope_start = store
                 .block_offsets
                 .read()
                 .unwrap()
                 .range_of_block(current_block.id)
-                .map(|(s, _)| {
-                    rope_replace_block_content(&store, current_block.id, &text_before);
-                    s + text_before.len() as u32
-                });
+                .map(|(s, _)| s);
+            let mut next_rope_byte_opt = head_rope_start.map(|s| {
+                rope_replace_block_content(&store, current_block.id, &text_before);
+                s + text_before.len() as u32
+            });
 
             let mut running_position =
                 current_block.document_position + updated_current.text_length + 1;
@@ -832,7 +828,6 @@ fn execute_content_insert(
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
-                plain_text: block_plain.clone(),
                 fmt_alignment: None,
                 fmt_top_margin: None,
                 fmt_bottom_margin: None,
@@ -852,7 +847,7 @@ fn execute_content_insert(
             };
 
             let created_block = uow.create_block(&new_block, frame_id, (block_idx + 1) as i32)?;
-            write_block_state(uow, created_block.id, &block_plain, block_runs, Vec::new());
+            write_block_state(uow, created_block.id, block_runs, Vec::new());
 
             // Mirror the inserted block into the rope (skipped when
             // the head wasn't in the rope).
@@ -871,7 +866,6 @@ fn execute_content_insert(
                 list: current_block.list,
                 text_length: tail_text_length,
                 document_position: running_position,
-                plain_text: text_after.clone(),
                 fmt_alignment: current_block.fmt_alignment.clone(),
                 fmt_top_margin: current_block.fmt_top_margin,
                 fmt_bottom_margin: current_block.fmt_bottom_margin,
@@ -894,7 +888,6 @@ fn execute_content_insert(
             write_block_state(
                 uow,
                 created_tail.id,
-                &text_after,
                 right_runs.clone(),
                 right_images.clone(),
             );

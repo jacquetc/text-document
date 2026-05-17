@@ -1841,16 +1841,18 @@ impl TextCursor {
             .ok_or_else(|| anyhow::anyhow!("block not found at position"))?;
 
         // Convert document-wide char position to a byte offset within
-        // the block's plain_text.
+        // the block's content (read from the rope).
         let local_char = pos.saturating_sub(block_dto.document_position as usize);
-        let plain: &str = &block_dto.plain_text;
+        let store = inner.ctx.db_context.get_store();
+        let entity: common::entities::Block = block_dto.clone().into();
+        let plain_owned =
+            common::database::rope_helpers::block_content_via_store(&entity, store);
+        let plain: &str = &plain_owned;
         let byte_offset: u32 = plain
             .char_indices()
             .nth(local_char)
             .map(|(b, _)| b as u32)
             .unwrap_or(plain.len() as u32);
-
-        let store = inner.ctx.db_context.get_store();
 
         // If there's an image anchor at this exact byte position, use
         // its format.

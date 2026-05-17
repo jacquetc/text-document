@@ -12,39 +12,30 @@ use crate::database::block_offset_index::OffsetMarker;
 use crate::entities::Block;
 use crate::types::EntityId;
 
-/// Read a block's plain-text content. Prefers bytes from the global
-/// rope via `block_offsets` (stripping the trailing `\n` boundary that
-/// `range_of` includes for non-last entries). Falls back to
-/// `block.plain_text` when the rope range is missing OR when its
-/// content disagrees with `block.plain_text` (which happens for use
-/// cases that mutate plain_text without mirroring to the rope — e.g.
-/// `insert_html_at_position_uc`).
-///
-/// After step 7c (when `Block.plain_text` is removed) the fallback
-/// goes away and this becomes a pure rope read.
+/// Read a block's content from the global rope via `block_offsets`,
+/// stripping the trailing `\n` boundary that `range_of` includes for
+/// non-last entries. Returns an empty string if the block isn't
+/// registered in the offset index (e.g. a freshly-created block that
+/// hasn't been spliced into the rope yet — `setup_with_text` test
+/// docs use this path).
 pub fn block_content_via_store(block: &Block, store: &Store) -> String {
     let offsets = store.block_offsets.read().unwrap();
-    if let Some((bs, be)) = offsets.range_of_block(block.id) {
-        let rope = store.rope.read().unwrap();
-        let slice = rope.byte_slice(bs as usize..be as usize).to_string();
-        // Strip the trailing inter-block `\n` if present. The last
-        // block in the rope has no trailing `\n`, so this is a no-op
-        // for it.
-        let rope_text = slice
-            .strip_suffix('\n')
-            .map(|s| s.to_string())
-            .unwrap_or(slice);
-        // Divergence guard: content-equality (not just length) — a
-        // same-length replacement under an unmirrored use case would
-        // otherwise return stale rope bytes silently. After step 7c
-        // this branch goes away — plain_text won't exist.
-        if rope_text != block.plain_text {
-            return block.plain_text.clone();
-        }
-        return rope_text;
-    }
-    // Fallback to plain_text (e.g. unmirrored cell blocks).
-    block.plain_text.clone()
+    let marker = OffsetMarker::Block(block.id);
+    let Some(idx) = offsets.entries.iter().position(|(m, _)| *m == marker) else {
+        return String::new();
+    };
+    let bs = offsets.entries[idx].1;
+    let (be, has_successor) = match offsets.entries.get(idx + 1) {
+        Some((_, next_bs)) => (*next_bs, true),
+        None => (offsets.total_bytes(), false),
+    };
+    // Drop the trailing inter-block boundary `\n` ONLY when this block
+    // has a successor entry — that one byte is the boundary `\n` between
+    // this block and the next. The last entry has no trailing boundary;
+    // any final `\n` is real content.
+    let content_end = if has_successor && be > bs { be - 1 } else { be };
+    let rope = store.rope.read().unwrap();
+    rope.byte_slice(bs as usize..content_end as usize).to_string()
 }
 
 /// Reset the rope to empty and clear `block_offsets`. Called by
@@ -592,11 +583,17 @@ pub fn rope_remove_block(store: &Store, block_id: EntityId) {
         rope.remove(char_start..char_end);
     }
     store.block_offsets.write().unwrap().entries.remove(idx);
+    // Shift entries STRICTLY PAST the removed range. Using `remove_end` as
+    // the threshold (rather than `remove_start`) keeps an empty predecessor
+    // whose byte_start equals `remove_start` (the leading boundary `\n` we
+    // just deleted) in place — its content position is unchanged, only its
+    // trailing boundary is gone. `total_bytes` decreases by `deleted_bytes`
+    // regardless of threshold.
     store
         .block_offsets
         .write()
         .unwrap()
-        .shift_after(remove_start, -(deleted_bytes as i32));
+        .shift_after(remove_end, -(deleted_bytes as i32));
 }
 
 /// Replace the entire content of a registered block in the rope with

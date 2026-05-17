@@ -6,3 +6,6 @@
 # everyone who runs the test benefits from these saved cases.
 cc 9847718d0b639e805d1422b82d3ea5cc0a27183fe1657e6fd58aa0a603f323b6 # shrinks to text = "\n", ops = [End]
 cc 0d3e5c77a5c4643aa959cf7a5a3e102ba8c1b2913e44efdf80dd6dc06627cf8d # shrinks to text = "\n", pos = 1
+cc 74ab29667468bc59f20f931900babbfc78c10e4af0fcbb0a08a532f1468a054e # shrinks to text = "\n"
+cc e3f87592ef2a83148562e7d71a7cb970010433649186620162e4f7b812c66450 # shrinks to text = "\n"
+cc 7ab42eb873bb7204bcbddcddc62ef070877579306fdd8edd8b7837f38804a554 # shrinks to base = "\n", insert = "0", pos_frac = 0.0

@@ -1022,14 +1022,20 @@ struct UndoBlockState {
 fn capture_block_state(inner: &TextDocumentInner) -> Vec<UndoBlockState> {
     let all_blocks =
         frontend::commands::block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+    let store = inner.ctx.db_context.get_store();
     let mut states: Vec<UndoBlockState> = all_blocks
         .into_iter()
-        .map(|b| UndoBlockState {
-            id: b.id,
-            position: b.document_position,
-            text_length: b.text_length,
-            plain_text: b.plain_text.clone(),
-            format: BlockFormat::from(&b),
+        .map(|b| {
+            let format = BlockFormat::from(&b);
+            let entity: common::entities::Block = b.clone().into();
+            let plain_text = common::database::rope_helpers::block_content_via_store(&entity, store);
+            UndoBlockState {
+                id: b.id,
+                position: b.document_position,
+                text_length: b.text_length,
+                plain_text,
+                format,
+            }
         })
         .collect();
     states.sort_by_key(|s| s.position);

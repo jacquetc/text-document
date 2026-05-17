@@ -444,7 +444,15 @@ pub(crate) fn merge_highlight_spans(
 fn ordered_block_ids(inner: &TextDocumentInner) -> Vec<(u64, String)> {
     let mut blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
     blocks.sort_by_key(|b| b.document_position);
-    blocks.into_iter().map(|b| (b.id, b.plain_text)).collect()
+    let store = inner.ctx.db_context.get_store();
+    blocks
+        .into_iter()
+        .map(|b| {
+            let entity: common::entities::Block = b.clone().into();
+            let text = common::database::rope_helpers::block_content_via_store(&entity, store);
+            (b.id, text)
+        })
+        .collect()
 }
 
 impl TextDocumentInner {

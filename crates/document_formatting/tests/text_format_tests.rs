@@ -198,8 +198,15 @@ fn test_set_text_format_in_table_cell() -> Result<()> {
     let cell_block = block_controller::get(&db, &cell_block_ids[0])?.unwrap();
     let cell_block_pos = cell_block.document_position;
 
+    // Write the cell content into the rope directly (the cell is
+    // already registered in block_offsets by `insert_table_uc`),
+    // then update the block's `text_length` cache.
+    common::database::rope_helpers::rope_replace_block_content(
+        db.get_store(),
+        cell_block.id,
+        "Cell text",
+    );
     let mut update_block: UpdateBlockDto = cell_block.into();
-    update_block.plain_text = "Cell text".into();
     update_block.text_length = 9;
     block_controller::update(&db, &hub, &mut urm, None, &update_block)?;
 

@@ -151,7 +151,6 @@ fn execute_insert_frame(
         list: None,
         text_length: 0,
         document_position: dto.position,
-        plain_text: String::new(),
         ..Default::default()
     };
 

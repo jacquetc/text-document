@@ -74,7 +74,6 @@ impl ImportPlainTextUseCase {
             let line_chars = line.chars().count() as i64;
 
             let block = Block {
-                plain_text: line.to_string(),
                 text_length: line_chars,
                 document_position,
                 ..Block::default()

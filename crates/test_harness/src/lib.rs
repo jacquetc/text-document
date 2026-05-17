@@ -28,7 +28,7 @@ pub use common::format_runs::InlineSegment;
 pub use common::direct_access::table::table_repository::TableRelationshipField;
 pub use common::direct_access::table_cell::table_cell_repository::TableCellRelationshipField;
 pub use direct_access::block::block_controller;
-pub use direct_access::block::dtos::{BlockRelationshipDto, CreateBlockDto, UpdateBlockDto};
+pub use direct_access::block::dtos::{BlockDto, BlockRelationshipDto, CreateBlockDto, UpdateBlockDto};
 pub use direct_access::document::document_controller;
 pub use direct_access::document::dtos::CreateDocumentDto;
 pub use direct_access::frame::dtos::CreateFrameDto;
@@ -94,6 +94,11 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
         frame_controller::remove(&db_context, &event_hub, &mut undo_redo_manager, None, fid)?;
     }
 
+    // Frame removal cascades entities but does not clean up the rope-side
+    // offset index. Reset the rope so the new block we're about to create
+    // starts from a clean slate (no stale Block(b0) entry from initialize()).
+    common::database::rope_helpers::rope_reset(db_context.get_store());
+
     // Create a fresh frame
     let frame = frame_controller::create(
         &db_context,
@@ -116,7 +121,6 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
         let line_len = line.chars().count() as i64;
 
         let block_dto = CreateBlockDto {
-            plain_text: line.to_string(),
             text_length: line_len,
             document_position,
             ..Default::default()
@@ -131,6 +135,20 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
             frame.id,
             i as i32,
         )?;
+
+        // Seed the rope with the line's content so block_content_via_store
+        // returns the right value. Mirrors what document_io::import_plain_text
+        // does at the use-case layer.
+        if i > 0 {
+            common::database::rope_helpers::rope_insert_block_boundary(
+                db_context.get_store(),
+            );
+        }
+        common::database::rope_helpers::rope_append_block(
+            db_context.get_store(),
+            block.id,
+            line,
+        );
 
         child_order.push(block.id as i64);
 
@@ -172,40 +190,13 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
     Ok((db_context, event_hub, undo_redo_manager))
 }
 
-/// Like `setup_with_text`, but also seeds the global rope so tests
-/// can observe rope state directly. Appends each block's text into
-/// the rope and registers an entry in the offset index, mirroring
-/// what `document_io::import_plain_text` would do.
-///
-/// Returns `(DbContext, Arc<EventHub>, UndoRedoManager)`.
+/// Alias for [`setup_with_text`] — after step 7c-4 the rope is the
+/// sole content source, so `setup_with_text` always seeds it. Kept
+/// for source-compatibility with existing tests.
 pub fn setup_with_imported_text(
     text: &str,
 ) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
-    use common::database::rope_helpers::{
-        rope_append_block, rope_insert_block_boundary, rope_reset,
-    };
-
-    let (db_context, event_hub, undo_redo_manager) = setup_with_text(text)?;
-
-    // Replay block content into the rope. Reset first to handle the
-    // setup-created blank-block case cleanly.
-    rope_reset(db_context.get_store());
-
-    let block_ids = get_block_ids(&db_context)?;
-    let mut blocks: Vec<_> = block_ids
-        .iter()
-        .filter_map(|id| block_controller::get(&db_context, id).ok().flatten())
-        .collect();
-    blocks.sort_by_key(|b| b.document_position);
-
-    for (i, block) in blocks.iter().enumerate() {
-        if i > 0 {
-            rope_insert_block_boundary(db_context.get_store());
-        }
-        rope_append_block(db_context.get_store(), block.id, &block.plain_text);
-    }
-
-    Ok((db_context, event_hub, undo_redo_manager))
+    setup_with_text(text)
 }
 
 /// Export the current document as plain text by reading blocks and
@@ -219,12 +210,15 @@ pub fn export_text(db_context: &DbContext, _event_hub: &Arc<EventHub>) -> Result
         }
     }
     blocks.sort_by_key(|b| b.document_position);
-    let text = blocks
+    let store = db_context.get_store();
+    let parts: Vec<String> = blocks
         .iter()
-        .map(|b| b.plain_text.as_str())
-        .collect::<Vec<&str>>()
-        .join("\n");
-    Ok(text)
+        .map(|b| {
+            let entity: common::entities::Block = b.clone().into();
+            common::database::rope_helpers::block_content_via_store(&entity, store)
+        })
+        .collect();
+    Ok(parts.join("\n"))
 }
 
 /// Get the first frame's block IDs.
@@ -317,12 +311,15 @@ pub fn synth_block_elements(
     db_context: &DbContext,
     block_id: EntityId,
 ) -> Result<Vec<InlineSegment>> {
-    let block = block_controller::get(db_context, &block_id)?
+    let block_dto = block_controller::get(db_context, &block_id)?
         .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+    let block: common::entities::Block = block_dto.into();
+    let plain_text =
+        common::database::rope_helpers::block_content_via_store(&block, db_context.get_store());
     Ok(inline_segments_for_block(
         db_context.get_store(),
         block_id,
-        &block.plain_text,
+        &plain_text,
     ))
 }
 
@@ -337,6 +334,13 @@ pub fn synth_first_block_elements(
 /// Image anchors stored on a block (post-Phase-1 source of truth for images).
 pub fn get_block_image_anchors(db_context: &DbContext, block_id: EntityId) -> Vec<ImageAnchor> {
     get_block_images(db_context.get_store(), block_id)
+}
+
+/// Read a block's content from the rope via a `BlockDto`. Post-7c-4
+/// equivalent of the old `block_dto.plain_text` field access.
+pub fn block_text_dto(db_context: &DbContext, dto: &BlockDto) -> String {
+    let entity: common::entities::Block = dto.clone().into();
+    common::database::rope_helpers::block_content_via_store(&entity, db_context.get_store())
 }
 
 /// Get the first frame ID for the document.
@@ -506,6 +510,19 @@ pub fn insert_table(
         }
     }
 
+    // Mirror cell-block creation into the global rope so subsequent
+    // `rope_replace_block_content` / `block_content_via_store` calls
+    // see them. The harness skips the anchor-frame/sentinel layout from
+    // `insert_table_uc`; cells are simply appended as empty blocks at
+    // the rope tail, which is enough for tests that only care about
+    // per-cell content addressability.
+    for &bid in &cell_blocks {
+        common::database::rope_helpers::rope_append_empty_block(
+            db_context.get_store(),
+            bid,
+        );
+    }
+
     // Assign document_positions to cell blocks
     for (current_pos, &bid) in (position..).zip(cell_blocks.iter()) {
         let mut b = block_controller::get(db_context, &bid)?
@@ -651,8 +668,11 @@ pub fn insert_image(
         .get(&target_block.id)
         .cloned()
         .unwrap_or_default();
+    let target_entity: common::entities::Block = target_block.clone().into();
+    let target_text =
+        common::database::rope_helpers::block_content_via_store(&target_entity, store);
     let byte_offset =
-        logical_offset_to_byte(&target_block.plain_text, &images_at_block, offset);
+        logical_offset_to_byte(&target_text, &images_at_block, offset);
 
     // Insert into block_images, keeping sort order by byte_offset (new
     // image goes AFTER any anchors at the same byte position to match

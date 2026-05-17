@@ -16,7 +16,7 @@ use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, List, Root, Table, TableCell};
 use common::format_runs::{
-    FormatRun, ImageAnchor, InlineSegment, coalesce_in_place, debug_assert_well_formed,
+    FormatRun, ImageAnchor, InlineSegment, coalesce_in_place,
     logical_offset_to_byte, split_images_at, split_runs_at, character_format_from_segment,
 };
 
@@ -137,11 +137,9 @@ fn frag_block_state(fb: &FragmentBlock) -> (Vec<FormatRun>, Vec<ImageAnchor>) {
 fn write_block_state(
     uow: &mut Box<dyn InsertFragmentUnitOfWorkTrait>,
     block_id: EntityId,
-    plain_text: &str,
     runs: Vec<FormatRun>,
     images: Vec<ImageAnchor>,
 ) {
-    debug_assert_well_formed(&runs, plain_text.len());
     let store = uow.store();
     {
         let mut runs_map = store.format_runs.write().unwrap();
@@ -344,12 +342,11 @@ fn try_replace_table_cells(
             if let Some(first_frag_blk) = frag_cell.blocks.first() {
                 let (runs, images) = frag_block_state(first_frag_blk);
                 let mut updated = first_blk.clone();
-                updated.plain_text = first_frag_blk.plain_text.clone();
                 updated.text_length =
                     first_frag_blk.plain_text.chars().count() as i64 + images.len() as i64;
                 updated.updated_at = now;
                 uow.update_block(&updated)?;
-                write_block_state(uow, first_blk.id, &first_frag_blk.plain_text, runs, images);
+                write_block_state(uow, first_blk.id, runs, images);
 
                 for extra_frag in &frag_cell.blocks[1..] {
                     let (xruns, ximages) = frag_block_state(extra_frag);
@@ -361,19 +358,17 @@ fn try_replace_table_cells(
                         text_length: extra_frag.plain_text.chars().count() as i64
                             + ximages.len() as i64,
                         document_position: 0,
-                        plain_text: extra_frag.plain_text.clone(),
                         ..Default::default()
                     };
                     let created = uow.create_block(&extra_block, cf_id, -1)?;
-                    write_block_state(uow, created.id, &extra_frag.plain_text, xruns, ximages);
+                    write_block_state(uow, created.id, xruns, ximages);
                 }
             } else {
                 let mut updated = first_blk.clone();
-                updated.plain_text = String::new();
                 updated.text_length = 0;
                 updated.updated_at = now;
                 uow.update_block(&updated)?;
-                write_block_state(uow, first_blk.id, "", Vec::new(), Vec::new());
+                write_block_state(uow, first_blk.id, Vec::new(), Vec::new());
             }
         }
     }
@@ -463,8 +458,16 @@ fn insert_table_fragment(
         let (anchor_target, anchor_after) = if let Some(first) = blocks.first() {
             // Find the block currently at `insert_pos` (or fall back to
             // the first block) and decide before/after based on offset.
+            //
+            // `offset > 0` is the right test (rather than `offset >=
+            // text_length`): for an empty block at the cursor we want
+            // `after=false` so the anchor takes the empty block's
+            // position and the (shifted) block lands after it. Without
+            // this, `rope_insert_table_anchor` with `after=true` on a
+            // last-and-empty target produces an unsorted block_offsets
+            // vec, breaking range lookups.
             match find_block_at_position(&blocks, insert_pos) {
-                Ok((tb, _, offset)) => (tb.id, offset >= tb.text_length),
+                Ok((tb, _, offset)) => (tb.id, offset > 0),
                 Err(_) => (first.id, false),
             }
         } else {
@@ -506,12 +509,11 @@ fn insert_table_fragment(
                 let first_len = first_chars + images.len() as i64;
 
                 let mut updated_block = created_block.clone();
-                updated_block.plain_text = first_frag.plain_text.clone();
                 updated_block.text_length = first_len;
                 updated_block.document_position = current_pos;
                 updated_block.updated_at = now;
                 cell_blocks_to_update.push(updated_block);
-                write_block_state(uow, created_block.id, &first_frag.plain_text, runs, images);
+                write_block_state(uow, created_block.id, runs, images);
                 this_cell_blocks.push((created_block.id, first_frag.plain_text.clone()));
 
                 current_pos += first_len + 1;
@@ -529,11 +531,10 @@ fn insert_table_fragment(
                         list: None,
                         text_length: extra_len,
                         document_position: current_pos,
-                        plain_text: extra_frag.plain_text.clone(),
                         ..Default::default()
                     };
                     let created_extra = uow.create_block(&extra_block, cell_frame_id, -1)?;
-                    write_block_state(uow, created_extra.id, &extra_frag.plain_text, xruns, ximages);
+                    write_block_state(uow, created_extra.id, xruns, ximages);
                     this_cell_blocks.push((created_extra.id, extra_frag.plain_text.clone()));
                     current_pos += extra_len + 1;
                     total_blocks_added += 1;
@@ -924,7 +925,6 @@ fn insert_mixed_fragment(
         } else {
             None
         };
-        updated_current.plain_text = head_plain.clone();
         updated_current.text_length = head_plain.chars().count() as i64 + head_images.len() as i64;
         updated_current.list = head_list_id;
         updated_current.fmt_alignment = fb.alignment.clone();
@@ -946,7 +946,6 @@ fn insert_mixed_fragment(
         updated_current.updated_at = now;
         uow.update_block_with_relationships(&updated_current)?;
     } else {
-        updated_current.plain_text = head_plain.clone();
         updated_current.text_length = if merge_first {
             text_before_chars + first_chars + left_image_count
         } else {
@@ -955,7 +954,7 @@ fn insert_mixed_fragment(
         updated_current.updated_at = now;
         uow.update_block(&updated_current)?;
     }
-    write_block_state(uow, current_block.id, &head_plain, head_runs, head_images);
+    write_block_state(uow, current_block.id, head_runs, head_images);
 
     // ── Rope mirror: head ──
     // Push the new head content into the rope so subsequent block /
@@ -1051,7 +1050,6 @@ fn insert_mixed_fragment(
                     list: list_id,
                     text_length: block_text_len,
                     document_position: running_position,
-                    plain_text: frag_block.plain_text.clone(),
                     fmt_alignment: frag_block.alignment.clone(),
                     fmt_top_margin: frag_block.top_margin,
                     fmt_bottom_margin: frag_block.bottom_margin,
@@ -1071,7 +1069,7 @@ fn insert_mixed_fragment(
                 };
 
                 let created_block = uow.create_block(&new_block, frame_id, -1)?;
-                write_block_state(uow, created_block.id, &frag_block.plain_text, runs, images);
+                write_block_state(uow, created_block.id, runs, images);
 
                 // ── Rope mirror: middle block ──
                 if let Some(next_rope_byte) = next_rope_byte_opt.as_mut() {
@@ -1132,12 +1130,11 @@ fn insert_mixed_fragment(
                         let cb_len = cb_chars + images.len() as i64;
 
                         let mut updated_block = created_block.clone();
-                        updated_block.plain_text = first_cb.plain_text.clone();
                         updated_block.text_length = cb_len;
                         updated_block.document_position = running_position;
                         updated_block.updated_at = now;
                         cell_blocks_to_update.push(updated_block);
-                        write_block_state(uow, created_block.id, &first_cb.plain_text, runs, images);
+                        write_block_state(uow, created_block.id, runs, images);
                         this_cell_blocks.push((created_block.id, first_cb.plain_text.clone()));
 
                         running_position += cb_len + 1;
@@ -1155,7 +1152,6 @@ fn insert_mixed_fragment(
                                 list: None,
                                 text_length: extra_len,
                                 document_position: running_position,
-                                plain_text: extra_frag.plain_text.clone(),
                                 ..Default::default()
                             };
                             let created_extra =
@@ -1163,7 +1159,6 @@ fn insert_mixed_fragment(
                             write_block_state(
                                 uow,
                                 created_extra.id,
-                                &extra_frag.plain_text,
                                 xruns,
                                 ximages,
                             );
@@ -1227,6 +1222,27 @@ fn insert_mixed_fragment(
                 let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
                 new_child_order_entries.push(-(created_anchor.id as i64));
 
+                // Splice the anchor into the parent frame's child_order
+                // NOW (rather than after the items loop) so the per-cell
+                // `top_level_frame_end_byte` walks include the
+                // TableAnchor's bytes — otherwise it returns the byte
+                // position BEFORE the sentinel and cells end up spliced
+                // in front of the anchor, corrupting their content
+                // ranges. The post-loop update below is then idempotent
+                // for entries we already added here.
+                {
+                    let parent = uow
+                        .get_frame(&frame_id)?
+                        .ok_or_else(|| anyhow!("Parent frame not found"))?;
+                    let neg_anchor = -(created_anchor.id as i64);
+                    if !parent.child_order.contains(&neg_anchor) {
+                        let mut updated_parent = parent;
+                        updated_parent.child_order.push(neg_anchor);
+                        updated_parent.updated_at = now;
+                        uow.update_frame(&updated_parent)?;
+                    }
+                }
+
                 // ── Rope mirror: table anchor + cells ──
                 // Insert anchor sentinel relative to `last_block_id`
                 // (after=true except when the head block is still
@@ -1242,10 +1258,6 @@ fn insert_mixed_fragment(
                         last_block_id,
                         after,
                     );
-                    // The anchor + boundary added 4 bytes after `last_block_id`.
-                    if let Some(next_rope_byte) = next_rope_byte_opt.as_mut() {
-                        *next_rope_byte += 4;
-                    }
                     for cell_blocks in &this_table_cell_blocks {
                         let mut iter = cell_blocks.iter();
                         if let Some((first_id, first_text)) = iter.next() {
@@ -1276,6 +1288,15 @@ fn insert_mixed_fragment(
                                 prev_byte_len = extra_text.len() as u32;
                             }
                         }
+                    }
+                    // The anchor + cells together extend to
+                    // `top_level_frame_end_byte` of the parent frame.
+                    // Cursor advances past them so the next block
+                    // (or tail) lands AFTER all table-related bytes.
+                    if let Some(next_rope_byte) = next_rope_byte_opt.as_mut() {
+                        *next_rope_byte = common::database::rope_helpers::top_level_frame_end_byte(
+                            &store, frame_id,
+                        );
                     }
                 }
             }
@@ -1310,7 +1331,6 @@ fn insert_mixed_fragment(
             list: if overwrite_head { None } else { current_block.list },
             text_length: tail_text_length,
             document_position: running_position,
-            plain_text: tail_plain.clone(),
             fmt_alignment: if overwrite_head {
                 None
             } else {
@@ -1395,7 +1415,7 @@ fn insert_mixed_fragment(
 
         let created_tail = uow.create_block(&tail_block, frame_id, -1)?;
         tail_text_len = created_tail.text_length;
-        write_block_state(uow, created_tail.id, &tail_plain, tail_runs, tail_images);
+        write_block_state(uow, created_tail.id, tail_runs, tail_images);
 
         // ── Rope mirror: tail block ──
         if let Some(next_rope_byte) = next_rope_byte_opt {
@@ -1555,27 +1575,28 @@ fn execute_insert_fragment(
         .get_frame(&frame_id)?
         .ok_or_else(|| anyhow!("Frame not found"))?;
 
-    let (current_runs, current_images) = {
-        let store = uow.store();
-        (
-            store
-                .format_runs
-                .read()
-                .unwrap()
-                .get(&current_block.id)
-                .cloned()
-                .unwrap_or_default(),
-            store
-                .block_images
-                .read()
-                .unwrap()
-                .get(&current_block.id)
-                .cloned()
-                .unwrap_or_default(),
-        )
-    };
+    let store = uow.store();
+    let (current_runs, current_images) = (
+        store
+            .format_runs
+            .read()
+            .unwrap()
+            .get(&current_block.id)
+            .cloned()
+            .unwrap_or_default(),
+        store
+            .block_images
+            .read()
+            .unwrap()
+            .get(&current_block.id)
+            .cloned()
+            .unwrap_or_default(),
+    );
 
-    let byte_offset = logical_offset_to_byte(&current_block.plain_text, &current_images, offset);
+    let current_block_text =
+        common::database::rope_helpers::block_content_via_store(&current_block, &store);
+    let byte_offset =
+        logical_offset_to_byte(&current_block_text, &current_images, offset);
     let now = chrono::Utc::now();
 
     // ── Inline merge: single block with no block-level formatting ──
@@ -1600,10 +1621,10 @@ fn execute_insert_fragment(
 
         // Build new plain_text.
         let mut new_plain =
-            String::with_capacity(current_block.plain_text.len() + inserted_plain.len());
-        new_plain.push_str(&current_block.plain_text[..byte_offset as usize]);
+            String::with_capacity(current_block_text.len() + inserted_plain.len());
+        new_plain.push_str(&current_block_text[..byte_offset as usize]);
         new_plain.push_str(inserted_plain);
-        new_plain.push_str(&current_block.plain_text[byte_offset as usize..]);
+        new_plain.push_str(&current_block_text[byte_offset as usize..]);
 
         // Splice format_runs over the inserted byte range. Surrounding format
         // is preserved outside the inserted region.
@@ -1635,11 +1656,10 @@ fn execute_insert_fragment(
         images.sort_by_key(|a| a.byte_offset);
 
         let mut updated_block = current_block.clone();
-        updated_block.plain_text = new_plain.clone();
         updated_block.text_length += inserted_len;
         updated_block.updated_at = now;
         uow.update_block(&updated_block)?;
-        write_block_state(uow, current_block.id, &new_plain, runs, images);
+        write_block_state(uow, current_block.id, runs, images);
 
         // Mirror the inline-merge splice into the rope. No-op under default.
         rope_insert_in_block(&uow.store(), current_block.id, byte_offset, inserted_plain);
@@ -1670,8 +1690,8 @@ fn execute_insert_fragment(
     }
 
     // ── Block-splitting path ──
-    let text_before = current_block.plain_text[..byte_offset as usize].to_string();
-    let text_after = current_block.plain_text[byte_offset as usize..].to_string();
+    let text_before = current_block_text[..byte_offset as usize].to_string();
+    let text_after = current_block_text[byte_offset as usize..].to_string();
     let text_before_chars = text_before.chars().count() as i64;
     let text_after_chars = text_after.chars().count() as i64;
 
@@ -1735,7 +1755,6 @@ fn execute_insert_fragment(
                 list_grouper.reset();
                 None
             };
-            updated_current.plain_text = head_plain.clone();
             updated_current.text_length = first_chars + head_images.len() as i64;
             updated_current.list = head_list_id;
             updated_current.fmt_alignment = first_frag.alignment.clone();
@@ -1757,18 +1776,16 @@ fn execute_insert_fragment(
             updated_current.updated_at = now;
             uow.update_block_with_relationships(&updated_current)?;
         } else if merge_first {
-            updated_current.plain_text = head_plain.clone();
             updated_current.text_length =
                 text_before_chars + first_chars + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
         } else {
-            updated_current.plain_text = head_plain.clone();
             updated_current.text_length = text_before_chars + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
         }
-        write_block_state(uow, current_block.id, &head_plain, head_runs, head_images);
+        write_block_state(uow, current_block.id, head_runs, head_images);
 
         let mut new_block_ids: Vec<EntityId> = Vec::new();
         // Track (created_block_id, plain_text) for the rope mirror.
@@ -1821,7 +1838,6 @@ fn execute_insert_fragment(
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
-                plain_text: frag_block.plain_text.clone(),
                 fmt_alignment: frag_block.alignment.clone(),
                 fmt_top_margin: frag_block.top_margin,
                 fmt_bottom_margin: frag_block.bottom_margin,
@@ -1842,7 +1858,7 @@ fn execute_insert_fragment(
 
             let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
             let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
-            write_block_state(uow, created_block.id, &frag_block.plain_text, runs, images);
+            write_block_state(uow, created_block.id, runs, images);
 
             middle_block_payload.push((created_block.id, frag_block.plain_text.clone()));
             new_block_ids.push(created_block.id);
@@ -1877,7 +1893,6 @@ fn execute_insert_fragment(
                 list: if overwrite_head { None } else { current_block.list },
                 text_length: tail_text_length,
                 document_position: running_position,
-                plain_text: tail_plain.clone(),
                 fmt_alignment: if overwrite_head {
                     None
                 } else {
@@ -1964,7 +1979,7 @@ fn execute_insert_fragment(
             let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
             tail_text_len = created_tail.text_length;
             created_tail_id = Some(created_tail.id);
-            write_block_state(uow, created_tail.id, &tail_plain, tail_runs, tail_images);
+            write_block_state(uow, created_tail.id, tail_runs, tail_images);
         }
 
         let mut updated_frame = frame.clone();
@@ -2102,7 +2117,6 @@ fn execute_insert_fragment(
                 None
             };
             let mut updated_current = current_block.clone();
-            updated_current.plain_text = frag_block.plain_text.clone();
             updated_current.text_length = block_text_len;
             updated_current.list = list_id;
             updated_current.fmt_alignment = frag_block.alignment.clone();
@@ -2126,7 +2140,6 @@ fn execute_insert_fragment(
             write_block_state(
                 uow,
                 current_block.id,
-                &frag_block.plain_text,
                 block_runs,
                 block_images,
             );
@@ -2147,7 +2160,6 @@ fn execute_insert_fragment(
                     list: None,
                     text_length: tail_text_length,
                     document_position: running_position,
-                    plain_text: text_after.clone(),
                     fmt_alignment: None,
                     fmt_top_margin: None,
                     fmt_bottom_margin: None,
@@ -2174,7 +2186,6 @@ fn execute_insert_fragment(
                 write_block_state(
                     uow,
                     created_tail.id,
-                    &text_after,
                     right_runs.clone(),
                     right_images.clone(),
                 );
@@ -2256,14 +2267,12 @@ fn execute_insert_fragment(
         } else {
             // Normal path: text_before is not empty, keep the head block.
             let mut updated_current = current_block.clone();
-            updated_current.plain_text = text_before.clone();
             updated_current.text_length = text_before_chars + left_image_count;
             updated_current.updated_at = now;
             uow.update_block(&updated_current)?;
             write_block_state(
                 uow,
                 current_block.id,
-                &text_before,
                 left_runs.clone(),
                 left_images.clone(),
             );
@@ -2286,7 +2295,6 @@ fn execute_insert_fragment(
                 list: list_id,
                 text_length: block_text_len,
                 document_position: running_position,
-                plain_text: frag_block.plain_text.clone(),
                 fmt_alignment: frag_block.alignment.clone(),
                 fmt_top_margin: frag_block.top_margin,
                 fmt_bottom_margin: frag_block.bottom_margin,
@@ -2309,7 +2317,6 @@ fn execute_insert_fragment(
             write_block_state(
                 uow,
                 created_block.id,
-                &frag_block.plain_text,
                 block_runs,
                 block_images,
             );
@@ -2324,7 +2331,6 @@ fn execute_insert_fragment(
                 list: current_block.list,
                 text_length: tail_text_length,
                 document_position: running_position,
-                plain_text: text_after.clone(),
                 fmt_alignment: current_block.fmt_alignment.clone(),
                 fmt_top_margin: current_block.fmt_top_margin,
                 fmt_bottom_margin: current_block.fmt_bottom_margin,
@@ -2347,7 +2353,6 @@ fn execute_insert_fragment(
             write_block_state(
                 uow,
                 created_tail.id,
-                &text_after,
                 right_runs.clone(),
                 right_images.clone(),
             );

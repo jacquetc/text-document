@@ -8,3 +8,5 @@ cc 9168f5aa1fe39d24d2f5068f266a683a0e30741d1ed804076db275b6e943dee3 # shrinks to
 cc 15355c78cac2bf135c017d14d913f3c06e97793f8371fdfc1d52a050292e23ff # shrinks to seed = "A aaAAaAa", insert = "a", p_frac = 0.3805816568576817, q_frac = 0.37132571001952197
 cc 154358202e21f272a4264484fb1b94abac05d1644b11b4297cc06c36c7ce700b # shrinks to text = "0\u{301}aaAa🏻0 a🏻Aaa\u{301}Aa A", pos_frac = 0.32342818977504795
 cc 0fce22a99049d22e07863abcc0633e4dae31ebf5ae94f9d0dfefae1e6f398dd8 # shrinks to seed = "", requested = 1
+cc 5d88d74cf8337900b04680966f89c8126e61ca8496e57b081d1a5d6fa06ba388 # shrinks to text = "\n", pos_frac = 0.0
+cc fc5ea305ff2734f194bd4a00d5e7efbc1a8f9657d971a2e9aaa776eb55940091 # shrinks to text = "\n"

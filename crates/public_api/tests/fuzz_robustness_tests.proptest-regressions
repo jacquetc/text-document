@@ -9,3 +9,5 @@ cc f8dc321800d2c7ed90107db351f8d163fb561876b40eb164f2188bb5e0e9b4fe # shrinks to
 cc 116b4b2806140b20347152a3abde2f5baf28a9bd7518e6ec2e43e130d88c4575 # shrinks to seed = "é/é🌍!mk\"c/7\t&.?'.\t?éE<\n\tv>\na\n]2]98Od🌍à!]àH0=yW/]'<&F( ]v]T\téà?2"
 cc 41b09c2b595bf0be11c1d5ebe6f1696c8cc2a73ddc967a046f2117591fdc021b # shrinks to seed = "Y)"
 cc c0c3aa774756c7cc37ae89bea3584260fe3f17d10ee69ad3c704afa7db12e5d4 # shrinks to seed = "", ops = [InsertBlock, DeletePrev, Undo, InsertText("a "), InsertBlock, Undo, InsertBlock]
+cc 726a13e6138459f64a78e0cb9e1310f1471810b84a4df2c9b41e53b967c6d572 # shrinks to seed = "", ops = [InsertText(""), InsertText(" "), Undo]
+cc 053fa73a2c7230e00cb6316c52df5b7b0a62134cfe2ed9582a5822836cbe1558 # shrinks to seed = "\n\n"

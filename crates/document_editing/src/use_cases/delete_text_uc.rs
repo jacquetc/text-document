@@ -93,11 +93,11 @@ fn clear_block(
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
     let mut updated = block.clone();
-    updated.plain_text = String::new();
     updated.text_length = 0;
     updated.updated_at = now;
     uow.update_block(&updated)?;
     let store = uow.store();
+    common::database::rope_helpers::rope_replace_block_content(&store, block.id, "");
     store.format_runs.write().unwrap().insert(block.id, Vec::new());
     store.block_images.write().unwrap().insert(block.id, Vec::new());
     Ok(())
@@ -530,6 +530,19 @@ fn execute_delete(
             uf.child_order.push(created.id as i64);
             uf.updated_at = now;
             uow.update_frame(&uf)?;
+
+            // Cross-block delete can leave stale rope-offset entries (e.g.
+            // table-cell blocks that were cascade-removed via frame
+            // deletion never went through `rope_remove_block`, and the
+            // table-anchor sentinel can survive too). Now that every
+            // entity-store block is gone, drop everything in the rope and
+            // re-register a single empty block matching the entity we just
+            // created. No-op under default backend.
+            common::database::rope_helpers::rope_reset(&uow.store());
+            common::database::rope_helpers::rope_append_empty_block(
+                &uow.store(),
+                created.id,
+            );
         }
 
         let actual_block_count = {
@@ -604,7 +617,6 @@ fn execute_delete(
         );
 
         let mut updated_block = start_block.clone();
-        updated_block.plain_text = new_plain.clone();
         updated_block.text_length -= delete_len;
         updated_block.updated_at = chrono::Utc::now();
         uow.update_block(&updated_block)?;
@@ -735,7 +747,6 @@ fn execute_delete(
 
         // Write merged state to start_block.
         let mut updated_start = start_block.clone();
-        updated_start.plain_text = merged_plain.clone();
         updated_start.text_length =
             start_kept_chars + end_kept_chars + start_surviving_images + end_surviving_images;
         updated_start.updated_at = now;
@@ -773,6 +784,15 @@ fn execute_delete(
 
         for block_id in &blocks_to_remove {
             drop_block_runs_and_images(uow, *block_id);
+            // `rope_merge_block_range` only drains entries in the
+            // rope-adjacent slice [start_idx+1..=end_idx]. Blocks
+            // whose rope position is outside that slice (notably
+            // table cells, which live at top_level_frame_end_byte
+            // for their parent frame, far from the main-flow
+            // selection) stay in `block_offsets` with stale entries.
+            // Drop them here so the rope index doesn't carry
+            // dangling block ids past delete_text.
+            common::database::rope_helpers::rope_remove_block(&uow.store(), *block_id);
             uow.remove_block(block_id)?;
         }
 
@@ -871,9 +891,11 @@ fn delete_char_range_in_block(
         shift_images_for_delete(images, byte_start, byte_end) as i64
     };
 
+    // Mirror the delete into the global rope.
+    common::database::rope_helpers::rope_delete_in_block(&store, block.id, byte_start, byte_end);
+
     let positions_removed = removed_text_chars + images_removed;
     let mut updated = block.clone();
-    updated.plain_text = new_plain.clone();
     updated.text_length -= positions_removed;
     updated.updated_at = chrono::Utc::now();
     uow.update_block(&updated)?;

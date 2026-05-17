@@ -155,29 +155,6 @@ impl FragmentBlock {
             && self.code_language.is_none()
     }
 
-    pub fn from_segments(block: &Block, segments: &[InlineSegment], list: Option<&List>) -> Self {
-        FragmentBlock {
-            plain_text: block.plain_text.clone(),
-            elements: segments.iter().map(FragmentElement::from_segment).collect(),
-            heading_level: block.fmt_heading_level,
-            list: list.map(FragmentList::from_entity),
-            alignment: block.fmt_alignment.clone(),
-            indent: block.fmt_indent,
-            text_indent: block.fmt_text_indent,
-            marker: block.fmt_marker.clone(),
-            top_margin: block.fmt_top_margin,
-            bottom_margin: block.fmt_bottom_margin,
-            left_margin: block.fmt_left_margin,
-            right_margin: block.fmt_right_margin,
-            tab_positions: block.fmt_tab_positions.clone(),
-            line_height: block.fmt_line_height,
-            non_breakable_lines: block.fmt_non_breakable_lines,
-            direction: block.fmt_direction.clone(),
-            background_color: block.fmt_background_color.clone(),
-            is_code_block: block.fmt_is_code_block,
-            code_language: block.fmt_code_language.clone(),
-        }
-    }
 }
 
 impl FragmentList {

@@ -128,7 +128,6 @@ fn execute_insert_block(
 
     // Update current block (now the "before" block).
     let mut updated_current = current_block.clone();
-    updated_current.plain_text = text_before.clone();
     updated_current.text_length = text_before_chars + left_image_count;
     updated_current.updated_at = now;
     uow.update_block(&updated_current)?;
@@ -153,7 +152,6 @@ fn execute_insert_block(
         list: current_block.list,
         text_length: text_after_chars + right_image_count,
         document_position: new_block_position,
-        plain_text: text_after,
         fmt_alignment: current_block.fmt_alignment.clone(),
         fmt_top_margin: current_block.fmt_top_margin,
         fmt_bottom_margin: current_block.fmt_bottom_margin,

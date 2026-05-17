@@ -14,10 +14,10 @@ use document_editing::{
 };
 
 use test_harness::{
-    DocumentRelationshipField, RootRelationshipField, block_controller, document_controller,
-    export_text, frame_controller, get_all_block_ids, get_block_ids, get_document_stats,
-    get_element_ids, get_sorted_cells, get_table_ids, inline_element_controller, root_controller,
-    setup_with_text, table_controller,
+    DocumentRelationshipField, RootRelationshipField, block_controller, block_text_dto,
+    document_controller, export_text, frame_controller, get_all_block_ids, get_block_ids,
+    get_document_stats, get_element_ids, get_sorted_cells, get_table_ids,
+    inline_element_controller, root_controller, setup_with_text, table_controller,
 };
 
 use test_harness::list_controller;
@@ -67,7 +67,7 @@ fn test_table_and_list_in_same_document() -> Result<()> {
         .iter()
         .find_map(|id| {
             let b = block_controller::get(&db, id).ok()??;
-            if b.plain_text == "Content" {
+            if block_text_dto(&db, &b) == "Content" {
                 Some(b)
             } else {
                 None
@@ -275,7 +275,7 @@ fn test_table_then_list_operations() -> Result<()> {
         .iter()
         .find_map(|id| {
             let b = block_controller::get(&db, id).ok()??;
-            if b.plain_text == "Hello" {
+            if block_text_dto(&db, &b) == "Hello" {
                 Some(b)
             } else {
                 None
@@ -447,7 +447,10 @@ fn test_table_merge_split_row_column_sequence() -> Result<()> {
     let text_blocks: Vec<_> = get_all_block_ids(&db)?
         .iter()
         .filter_map(|id| block_controller::get(&db, id).ok()?)
-        .filter(|b| b.plain_text == "Before" || b.plain_text == "After")
+        .filter(|b| {
+            let t = block_text_dto(&db, b);
+            t == "Before" || t == "After"
+        })
         .collect();
     assert_eq!(text_blocks.len(), 2);
 
@@ -719,11 +722,12 @@ fn test_remove_table_preserves_lists() -> Result<()> {
     let block_ids = get_block_ids(&db)?;
     for bid in &block_ids {
         let b = block_controller::get(&db, bid)?.unwrap();
+        let t = block_text_dto(&db, &b);
         assert_eq!(
             b.list,
             Some(list_result.list_id as u64),
             "Block '{}' should still be in the list",
-            b.plain_text
+            t
         );
     }
 
@@ -1051,9 +1055,13 @@ fn test_complex_table_operation_sequence_positions() -> Result<()> {
     let text_blocks: Vec<_> = all_ids
         .iter()
         .filter_map(|id| block_controller::get(&db, id).ok()?)
-        .filter(|b| !b.plain_text.is_empty())
+        .map(|b| {
+            let t = block_text_dto(&db, &b);
+            (b, t)
+        })
+        .filter(|(_b, t)| !t.is_empty())
         .collect();
-    let texts: Vec<&str> = text_blocks.iter().map(|b| b.plain_text.as_str()).collect();
+    let texts: Vec<&str> = text_blocks.iter().map(|(_b, t)| t.as_str()).collect();
     assert!(
         texts.contains(&"Alpha"),
         "Alpha should still exist, got: {:?}",
@@ -1278,7 +1286,7 @@ fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
     for bid in &remaining_bids {
         let b = block_controller::get(&db, bid)?.expect("Block should exist");
         assert_eq!(b.text_length, 0, "Remaining block should be empty");
-        assert_eq!(b.plain_text, "", "Remaining block should have no text");
+        assert_eq!(block_text_dto(&db, &b), "", "Remaining block should have no text");
     }
 
     Ok(())

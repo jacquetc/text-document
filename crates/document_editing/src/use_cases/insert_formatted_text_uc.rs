@@ -51,6 +51,10 @@ struct SimpleUndoData {
     original_block_images: Vec<ImageAnchor>,
     doc_id: EntityId,
     original_character_count: i64,
+    /// Byte offset inside the block where the new text was inserted.
+    inserted_byte_offset: u32,
+    /// Number of bytes inserted into the rope by this command.
+    inserted_byte_len: u32,
 }
 
 enum InsertFormattedTextUndo {
@@ -137,7 +141,6 @@ fn delete_range_in_block(
 
     let positions_removed = removed_text_chars + images_removed;
     let mut updated_block = block.clone();
-    updated_block.plain_text = new_plain.clone();
     updated_block.text_length -= positions_removed;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
@@ -152,7 +155,7 @@ fn insert_formatted_at(
     block: &Block,
     char_offset: i64,
     dto: &InsertFormattedTextDto,
-) -> Result<()> {
+) -> Result<(u32, u32)> {
     let store = uow.store();
     let images_before = store
         .block_images
@@ -172,7 +175,6 @@ fn insert_formatted_at(
 
     let mut updated_block = block.clone();
     updated_block.text_length += inserted_char_len;
-    updated_block.plain_text = new_plain.clone();
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
 
@@ -206,7 +208,7 @@ fn insert_formatted_at(
     // Mirror to rope (no-op under default).
     rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
-    Ok(())
+    Ok((byte_offset, inserted_byte_len))
 }
 
 fn execute_with_selection(
@@ -279,7 +281,7 @@ fn execute_with_selection(
         .get_block(&sel_block.id)?
         .ok_or_else(|| anyhow!("Block not found after deletion"))?;
 
-    insert_formatted_at(uow, &block, start_offset, dto)?;
+    let _ = insert_formatted_at(uow, &block, start_offset, dto)?;
 
     let text_len = dto.text.chars().count() as i64;
     let mut updated_doc = uow
@@ -359,7 +361,8 @@ fn execute_insert_simple(
         .cloned()
         .unwrap_or_default();
 
-    insert_formatted_at(uow, &block, offset, dto)?;
+    let (inserted_byte_offset, inserted_byte_len) =
+        insert_formatted_at(uow, &block, offset, dto)?;
 
     let text_len = dto.text.chars().count() as i64;
     let mut updated_doc = document.clone();
@@ -374,6 +377,8 @@ fn execute_insert_simple(
         original_block_images,
         doc_id,
         original_character_count: document.character_count,
+        inserted_byte_offset,
+        inserted_byte_len,
     };
 
     Ok((
@@ -463,6 +468,20 @@ impl UndoRedoCommand for InsertFormattedTextUseCase {
             InsertFormattedTextUndo::Simple(data) => {
                 uow.update_block(&data.original_block)?;
                 let store = uow.store();
+
+                // Revert the rope mutation done by the forward path. Must
+                // happen BEFORE format_runs/block_images restore so any
+                // debug_assert_well_formed inside the rope helper sees a
+                // consistent runs-vs-rope state.
+                if data.inserted_byte_len > 0 {
+                    rope_delete_in_block(
+                        &store,
+                        data.block_id,
+                        data.inserted_byte_offset,
+                        data.inserted_byte_offset + data.inserted_byte_len,
+                    );
+                }
+
                 store
                     .format_runs
                     .write()

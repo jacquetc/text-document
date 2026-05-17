@@ -183,7 +183,6 @@ fn import_parsed_elements(
                 // Create Block in the current (possibly blockquote) frame
                 let current_frame_id = frame_stack.last().unwrap().frame_id;
                 let block = Block {
-                    plain_text: plain_text.clone(),
                     text_length: line_len,
                     document_position,
                     fmt_heading_level: parsed_block.heading_level,
@@ -300,7 +299,6 @@ fn import_parsed_elements(
 
                         // Create block in cell frame
                         let block = Block {
-                            plain_text: plain_text.clone(),
                             text_length,
                             document_position,
                             ..Block::default()

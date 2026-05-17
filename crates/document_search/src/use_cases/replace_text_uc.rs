@@ -158,7 +158,6 @@ fn replace_in_block(
 
     let net_chars_delta = replacement_char_len - removed_text_chars - images_removed;
     let mut updated_block = block.clone();
-    updated_block.plain_text = new_plain.clone();
     updated_block.text_length += net_chars_delta;
     updated_block.updated_at = chrono::Utc::now();
     uow.update_block(&updated_block)?;
