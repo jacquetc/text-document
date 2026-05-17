@@ -57,6 +57,46 @@ pub fn block_char_length(block: &Block, store: &Store) -> i64 {
     (char_end - char_start) as i64
 }
 
+/// Convert an in-block char offset to an in-block byte offset using the
+/// rope's index. Both inputs and outputs are relative to the start of
+/// the block's content (NOT absolute rope positions). The char offset
+/// is clamped to the block's logical length so callers don't need to
+/// pre-validate.
+///
+/// O(log n) via `ropey::Rope::char_to_byte` — replaces the O(L)
+/// "materialize block text + walk char_indices" pattern that
+/// `set_text_format_uc` / `merge_text_format_uc` used. Returns
+/// `(byte_offset_in_block, content_byte_len)` so callers can also
+/// pass the content length to `debug_assert_well_formed` without
+/// materializing the text.
+///
+/// Returns `(0, 0)` for blocks not registered in the offset index.
+pub fn block_char_to_byte_in_block(
+    store: &Store,
+    block_id: EntityId,
+    char_offset: usize,
+) -> (u32, usize) {
+    let offsets = store.block_offsets.read().unwrap();
+    let marker = OffsetMarker::Block(block_id);
+    let Some((bs, be, has_successor)) = offsets.range_with_successor(marker) else {
+        return (0, 0);
+    };
+    let content_end_bytes = if has_successor && be > bs { be - 1 } else { be };
+    let content_byte_len = (content_end_bytes - bs) as usize;
+    drop(offsets);
+
+    let rope = store.rope.read().unwrap();
+    let block_char_start = rope.byte_to_char(bs as usize);
+    let block_char_end = rope.byte_to_char(content_end_bytes as usize);
+    let block_char_len = block_char_end - block_char_start;
+
+    // Clamp char_offset to block's char length.
+    let clamped = std::cmp::min(char_offset, block_char_len);
+    let abs_byte = rope.char_to_byte(block_char_start + clamped);
+    let byte_in_block = (abs_byte - bs as usize) as u32;
+    (byte_in_block, content_byte_len)
+}
+
 /// Fast-path full-document plain text: returns `Some(rope.to_string())`
 /// iff the document is in the canonical flat layout — no table anchors
 /// in the offset index, single top-level frame. In that case the

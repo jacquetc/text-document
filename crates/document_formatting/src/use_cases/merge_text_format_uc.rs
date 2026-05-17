@@ -1,7 +1,7 @@
 use crate::MergeTextFormatDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_char_length, block_content_via_store};
+use common::database::rope_helpers::{block_char_length, block_char_to_byte_in_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -62,14 +62,6 @@ fn merge_dto(base: &CharacterFormat, dto: &MergeTextFormatDto) -> CharacterForma
         out.font_strikeout = Some(v);
     }
     out
-}
-
-fn char_to_byte(plain_text: &str, char_offset: usize) -> u32 {
-    plain_text
-        .char_indices()
-        .nth(char_offset)
-        .map(|(b, _)| b as u32)
-        .unwrap_or(plain_text.len() as u32)
 }
 
 fn build_replacement_runs(
@@ -161,12 +153,11 @@ fn execute_merge_text_format(
         let local_char_end =
             std::cmp::min(block_char_length(block, &store), range_end - block_start) as usize;
 
-        let block_text = block_content_via_store(block, &store);
-        let plain_text_len = block_text.chars().count();
-        let text_char_start = std::cmp::min(local_char_start, plain_text_len);
-        let text_char_end = std::cmp::min(local_char_end, plain_text_len);
-        let byte_start = char_to_byte(&block_text, text_char_start);
-        let byte_end = char_to_byte(&block_text, text_char_end);
+        // Rope-native char->byte translation (clamps internally).
+        let (byte_start, content_byte_len) =
+            block_char_to_byte_in_block(&store, block.id, local_char_start);
+        let (byte_end, _) =
+            block_char_to_byte_in_block(&store, block.id, local_char_end);
 
         if byte_start >= byte_end {
             continue;
@@ -193,7 +184,7 @@ fn execute_merge_text_format(
             let runs = runs_map.entry(block.id).or_default();
             let replacement = build_replacement_runs(runs, byte_start, byte_end, dto);
             splice_range(runs, byte_start..byte_end, replacement);
-            debug_assert_well_formed(runs, block_text.len());
+            debug_assert_well_formed(runs, content_byte_len);
         }
 
         // Update image anchor formats inside the selected byte range.
