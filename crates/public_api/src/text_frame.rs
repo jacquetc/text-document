@@ -235,7 +235,8 @@ pub(crate) fn build_flow_snapshot(
     };
 
     if !frame_dto.child_order.is_empty() {
-        let (elements, _) = snapshot_from_child_order(inner, &frame_dto.child_order, 0);
+        let (elements, _) =
+            snapshot_from_child_order(inner, &frame_dto.child_order, 0, frame_id);
         elements
     } else {
         snapshot_fallback(inner, &frame_dto)
@@ -243,11 +244,15 @@ pub(crate) fn build_flow_snapshot(
 }
 
 /// Walk child_order, building snapshots with on-the-fly position computation.
+/// `parent_frame_id` is passed down so per-block snapshots skip the
+/// expensive `find_parent_frame` walk over every frame in the store —
+/// a major contributor to per-keystroke editor lag.
 /// Returns (elements, running_position_after_last_block).
 fn snapshot_from_child_order(
     inner: &TextDocumentInner,
     child_order: &[i64],
     start_pos: usize,
+    parent_frame_id: EntityId,
 ) -> (Vec<FlowElementSnapshot>, usize) {
     let mut elements = Vec::with_capacity(child_order.len());
     let mut running_pos = start_pos;
@@ -255,11 +260,14 @@ fn snapshot_from_child_order(
     for &entry in child_order {
         if entry > 0 {
             let block_id = entry as u64;
-            if let Some(snap) = crate::text_block::build_block_snapshot_with_position(
-                inner,
-                block_id,
-                Some(running_pos),
-            ) {
+            if let Some(snap) =
+                crate::text_block::build_block_snapshot_with_position_and_parent(
+                    inner,
+                    block_id,
+                    Some(running_pos),
+                    Some(parent_frame_id),
+                )
+            {
                 running_pos += snap.length + 1; // +1 for block separator
                 elements.push(FlowElementSnapshot::Block(snap));
             }
@@ -277,8 +285,12 @@ fn snapshot_from_child_order(
                         elements.push(FlowElementSnapshot::Table(snap));
                     }
                 } else {
-                    let (nested, new_pos) =
-                        snapshot_from_child_order(inner, &sub_frame.child_order, running_pos);
+                    let (nested, new_pos) = snapshot_from_child_order(
+                        inner,
+                        &sub_frame.child_order,
+                        running_pos,
+                        sub_frame_id,
+                    );
                     running_pos = new_pos;
                     elements.push(FlowElementSnapshot::Frame(FrameSnapshot {
                         frame_id: sub_frame_id as usize,

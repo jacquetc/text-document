@@ -343,9 +343,23 @@ fn find_parent_frame(inner: &TextDocumentInner, block_id: u64) -> Option<EntityI
     None
 }
 
+/// O(1) fast check used by the snapshot hot path: returns true iff the
+/// store has zero table entities. Used to skip the expensive
+/// `find_table_cell_context` walks for documents that have no tables
+/// (e.g. typical markdown documents in an editor).
+fn document_has_no_tables(inner: &TextDocumentInner) -> bool {
+    inner.ctx.db_context.get_store().tables.read().unwrap().is_empty()
+}
+
 /// Find table cell context for a block (snapshot-friendly, no live handles).
 /// Returns `None` if the block is not inside a table cell.
 fn find_table_cell_context(inner: &TextDocumentInner, block_id: u64) -> Option<TableCellContext> {
+    // Fast exit: a doc with no tables can't have any cell-bound blocks.
+    // Avoids per-block `get_all_frame` + `get_all_table` walks during
+    // snapshot_flow, which is called per editor pane on every keystroke.
+    if document_has_no_tables(inner) {
+        return None;
+    }
     let frame_id = find_parent_frame(inner, block_id)?;
 
     let frame_dto = frame_commands::get_frame(&inner.ctx, &frame_id)
@@ -408,7 +422,20 @@ fn compute_block_number(inner: &TextDocumentInner, block_id: u64) -> usize {
 /// Build fragments for a block from its format runs and image anchors,
 /// with highlight spans merged in when a syntax highlighter is attached.
 pub(crate) fn build_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<FragmentContent> {
-    let fragments = build_raw_fragments(inner, block_id);
+    build_fragments_with_text(inner, block_id, None)
+}
+
+/// Like `build_fragments` but accepts a pre-materialized block text to
+/// avoid the double `block_content_via_store` allocation when the
+/// caller (e.g. `build_block_snapshot_with_position_and_parent`)
+/// already has the text. Per-block snapshot cost halves for typing in
+/// a multi-block document.
+pub(crate) fn build_fragments_with_text(
+    inner: &TextDocumentInner,
+    block_id: u64,
+    prefetched_text: Option<&str>,
+) -> Vec<FragmentContent> {
+    let fragments = build_raw_fragments(inner, block_id, prefetched_text);
 
     if let Some(ref hl) = inner.highlight
         && let Some(block_hl) = hl.blocks.get(&(block_id as usize))
@@ -434,8 +461,12 @@ pub(crate) fn build_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<F
 /// Uncovered byte ranges between runs (or before the first run / after
 /// the last) emit Text fragments with `TextFormat::default()` — the
 /// "no character formatting" case.
-fn build_raw_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<FragmentContent> {
-    let block_dto = match block_commands::get_block(&inner.ctx, &block_id)
+fn build_raw_fragments(
+    inner: &TextDocumentInner,
+    block_id: u64,
+    prefetched_text: Option<&str>,
+) -> Vec<FragmentContent> {
+    let _block_dto = match block_commands::get_block(&inner.ctx, &block_id)
         .ok()
         .flatten()
     {
@@ -443,12 +474,18 @@ fn build_raw_fragments(inner: &TextDocumentInner, block_id: u64) -> Vec<Fragment
         None => return Vec::new(),
     };
 
-    let entity: common::entities::Block = block_dto.clone().into();
-    let plain_owned = common::database::rope_helpers::block_content_via_store(
-        &entity,
-        inner.ctx.db_context.get_store(),
-    );
-    let plain: &str = &plain_owned;
+    let plain_owned;
+    let plain: &str = match prefetched_text {
+        Some(t) => t,
+        None => {
+            let entity: common::entities::Block = _block_dto.clone().into();
+            plain_owned = common::database::rope_helpers::block_content_via_store(
+                &entity,
+                inner.ctx.db_context.get_store(),
+            );
+            &plain_owned
+        }
+    };
 
     let (runs, images) = {
         let store = inner.ctx.db_context.get_store();
@@ -805,7 +842,7 @@ pub(crate) fn build_block_snapshot(
     inner: &TextDocumentInner,
     block_id: u64,
 ) -> Option<BlockSnapshot> {
-    build_block_snapshot_with_position(inner, block_id, None)
+    build_block_snapshot_with_position_and_parent(inner, block_id, None, None)
 }
 
 /// Build a BlockSnapshot, optionally overriding the position with a computed value.
@@ -816,31 +853,48 @@ pub(crate) fn build_block_snapshot_with_position(
     block_id: u64,
     computed_position: Option<usize>,
 ) -> Option<BlockSnapshot> {
+    build_block_snapshot_with_position_and_parent(inner, block_id, computed_position, None)
+}
+
+/// Build a BlockSnapshot with an optional `parent_frame_hint`. When the
+/// caller already knows which frame owns the block (e.g. snapshot_flow's
+/// per-frame walk), passing it here skips the per-block `find_parent_frame`
+/// call — which would otherwise fetch every Frame in the store on every
+/// invocation. That walk was a major contributor to per-keystroke
+/// editor lag.
+pub(crate) fn build_block_snapshot_with_position_and_parent(
+    inner: &TextDocumentInner,
+    block_id: u64,
+    computed_position: Option<usize>,
+    parent_frame_hint: Option<EntityId>,
+) -> Option<BlockSnapshot> {
     let block_dto = block_commands::get_block(&inner.ctx, &block_id)
         .ok()
         .flatten()?;
 
-    let fragments = build_fragments(inner, block_id);
     let block_format = BlockFormat::from(&block_dto);
     let list_info = build_list_info(inner, &block_dto);
 
-    let parent_frame_id = find_parent_frame(inner, block_id).map(|id| id as usize);
+    let parent_frame_id = parent_frame_hint
+        .or_else(|| find_parent_frame(inner, block_id))
+        .map(|id| id as usize);
     let table_cell = find_table_cell_context(inner, block_id);
 
     let position = computed_position.unwrap_or_else(|| to_usize(block_dto.document_position));
 
+    // Materialize the block text once and pass it to build_fragments
+    // and into the snapshot's `text` field — saves one redundant rope
+    // slice + String allocation per block per snapshot_flow call.
     let entity: common::entities::Block = block_dto.clone().into();
-    let text = common::database::rope_helpers::block_content_via_store(
-        &entity,
-        inner.ctx.db_context.get_store(),
-    );
+    let store = inner.ctx.db_context.get_store();
+    let text = common::database::rope_helpers::block_content_via_store(&entity, store);
+    let length = to_usize(common::database::rope_helpers::block_char_length(&entity, store));
+    let fragments = build_fragments_with_text(inner, block_id, Some(&text));
+
     Some(BlockSnapshot {
         block_id: block_id as usize,
         position,
-        length: to_usize(common::database::rope_helpers::block_char_length(
-            &entity,
-            inner.ctx.db_context.get_store(),
-        )),
+        length,
         text,
         fragments,
         block_format,
