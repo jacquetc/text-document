@@ -599,6 +599,70 @@ pub fn rope_remove_block(store: &Store, block_id: EntityId) {
         .shift_after(remove_start, -(deleted_bytes as i32));
 }
 
+/// Replace the entire content of a registered block in the rope with
+/// `new_text`. Preserves the block's `byte_start` and its trailing
+/// boundary `\n` (if any); subsequent entries shift by the net
+/// length delta.
+///
+/// Used by use cases that compute a block's final content as a string
+/// and want to push that content to the rope in one shot — e.g. the
+/// block-splitting branches of `insert_html_at_position_uc` and
+/// `insert_markdown_at_position_uc`, where each affected block
+/// (head, tail, mid-replacement) gets a single new value.
+///
+/// No-op if `block_id` is not in the index.
+pub fn rope_replace_block_content(store: &Store, block_id: EntityId, new_text: &str) {
+    let (block_byte_start, content_bytes) = {
+        let offsets = store.block_offsets.read().unwrap();
+        let Some((start, end)) = offsets.range_of_block(block_id) else {
+            return;
+        };
+        let total = offsets.total_bytes();
+        // `range_of` extends to the next entry's `byte_start` (or to
+        // `total_bytes`). If there's a following entry, the byte at
+        // `end - 1` is the inter-block boundary `\n` that belongs to
+        // the boundary between this block and the next, not to this
+        // block's content.
+        let has_trailing_boundary = end < total;
+        let content_bytes = if has_trailing_boundary {
+            end - start - 1
+        } else {
+            end - start
+        };
+        (start, content_bytes)
+    };
+
+    let new_bytes = new_text.len() as u32;
+    if content_bytes == 0 && new_bytes == 0 {
+        return;
+    }
+    let delta = new_bytes as i32 - content_bytes as i32;
+
+    // Splice [block_byte_start..block_byte_start + content_bytes)
+    // with `new_text`.
+    {
+        let mut rope = store.rope.write().unwrap();
+        let char_start = rope.byte_to_char(block_byte_start as usize);
+        if content_bytes > 0 {
+            let char_end = rope.byte_to_char((block_byte_start + content_bytes) as usize);
+            rope.remove(char_start..char_end);
+        }
+        if new_bytes > 0 {
+            rope.insert(char_start, new_text);
+        }
+    }
+
+    if delta != 0 {
+        // Shift entries that sit strictly past this block's start
+        // (i.e. the trailing boundary and everything after).
+        store
+            .block_offsets
+            .write()
+            .unwrap()
+            .shift_after(block_byte_start + 1, delta);
+    }
+}
+
 /// Delete bytes `[byte_start_in_block..byte_end_in_block)` from inside
 /// the block identified by `block_id`. Shifts subsequent block offsets
 /// by the deleted byte length. No-op for blocks not in the index.

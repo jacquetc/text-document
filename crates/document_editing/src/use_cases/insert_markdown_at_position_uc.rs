@@ -3,7 +3,10 @@ use crate::InsertMarkdownAtPositionDto;
 use crate::InsertMarkdownAtPositionResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_content_via_store, rope_insert_in_block};
+use common::database::rope_helpers::{
+    block_content_via_store, rope_insert_block_at, rope_insert_in_block,
+    rope_replace_block_content,
+};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -274,6 +277,18 @@ fn execute_content_insert(
         uow.update_block(&updated_current)?;
         write_block_state(uow, current_block.id, &head_plain, head_runs, left_images);
 
+        // Mirror the head's new content into the rope (skipped when
+        // the head wasn't in the rope, e.g. unseeded tests).
+        let mut next_rope_byte_opt = store
+            .block_offsets
+            .read()
+            .unwrap()
+            .range_of_block(current_block.id)
+            .map(|(s, _)| {
+                rope_replace_block_content(&store, current_block.id, &head_plain);
+                s + head_plain.len() as u32
+            });
+
         let mut new_block_ids: Vec<EntityId> = Vec::new();
         let mut total_new_chars: i64 = if merge_first { first_len } else { 0 };
         let mut running_position =
@@ -348,6 +363,13 @@ fn execute_content_insert(
             let insert_index = (block_idx + 1 + new_block_ids.len()) as i32;
             let created_block = uow.create_block(&new_block, frame_id, insert_index)?;
             write_block_state(uow, created_block.id, &block_plain, block_runs, Vec::new());
+
+            // Mirror the new middle block into the rope (skipped when
+            // the head wasn't in the rope).
+            if let Some(next_rope_byte) = next_rope_byte_opt.as_mut() {
+                rope_insert_block_at(&store, *next_rope_byte, created_block.id, &block_plain);
+                *next_rope_byte += 1 + block_plain.len() as u32;
+            }
 
             new_block_ids.push(created_block.id);
             total_new_chars += block_text_len;
@@ -424,6 +446,11 @@ fn execute_content_insert(
         let created_tail = uow.create_block(&tail_block, frame_id, tail_insert_index)?;
         write_block_state(uow, created_tail.id, &tail_plain, tail_runs, tail_images);
 
+        // Mirror the tail block into the rope.
+        if let Some(next_rope_byte) = next_rope_byte_opt {
+            rope_insert_block_at(&store, next_rope_byte, created_tail.id, &tail_plain);
+        }
+
         let mut updated_frame = frame.clone();
         let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
         let mut new_child_ids: Vec<i64> = new_block_ids.iter().map(|id| *id as i64).collect();
@@ -482,6 +509,18 @@ fn execute_content_insert(
         uow.update_block(&updated_current)?;
         write_block_state(uow, current_block.id, &text_before, left_runs, left_images);
 
+        // Mirror the head's new content into the rope (skipped when
+        // the head wasn't in the rope).
+        let mut next_rope_byte_opt = store
+            .block_offsets
+            .read()
+            .unwrap()
+            .range_of_block(current_block.id)
+            .map(|(s, _)| {
+                rope_replace_block_content(&store, current_block.id, &text_before);
+                s + text_before.len() as u32
+            });
+
         let mut running_position =
             current_block.document_position + updated_current.text_length + 1;
 
@@ -530,6 +569,12 @@ fn execute_content_insert(
         let created_block = uow.create_block(&new_block, frame_id, (block_idx + 1) as i32)?;
         write_block_state(uow, created_block.id, &block_plain, block_runs, Vec::new());
 
+        // Mirror the inserted block into the rope.
+        if let Some(next_rope_byte) = next_rope_byte_opt.as_mut() {
+            rope_insert_block_at(&store, *next_rope_byte, created_block.id, &block_plain);
+            *next_rope_byte += 1 + block_plain.len() as u32;
+        }
+
         running_position += block_text_len + 1;
 
         let tail_text_length = text_after_chars + right_image_count;
@@ -561,6 +606,11 @@ fn execute_content_insert(
 
         let created_tail = uow.create_block(&tail_block, frame_id, (block_idx + 2) as i32)?;
         write_block_state(uow, created_tail.id, &text_after, right_runs, right_images);
+
+        // Mirror the tail block into the rope.
+        if let Some(next_rope_byte) = next_rope_byte_opt {
+            rope_insert_block_at(&store, next_rope_byte, created_tail.id, &text_after);
+        }
 
         let mut updated_frame = frame.clone();
         let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
