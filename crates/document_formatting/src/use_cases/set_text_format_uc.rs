@@ -7,9 +7,9 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, Root};
 use common::format_runs::{
-    CharacterFormat, FormatRun, debug_assert_well_formed, splice_range,
+    CharacterFormat, FormatRun, capture_image_formats_in_range, capture_runs_in_range,
+    debug_assert_well_formed, splice_range,
 };
-use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
@@ -22,14 +22,23 @@ pub trait SetTextFormatUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Root", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Get")]
 #[macros::uow_action(entity = "Document", action = "GetRelationship")]
-#[macros::uow_action(entity = "Document", action = "Snapshot")]
-#[macros::uow_action(entity = "Document", action = "Restore")]
 #[macros::uow_action(entity = "Frame", action = "Get")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "Get")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
 pub trait SetTextFormatUnitOfWorkTrait: CommandUnitOfWork {}
+
+/// Per-block captured state for hand-rolled undo. Built during the
+/// mutation pass; consumed by `undo()` to restore the prior state
+/// without paying the cost of a full RopeStoreSnapshot.
+#[derive(Clone, Debug)]
+struct BlockFormatInverse {
+    block_id: EntityId,
+    byte_range: (u32, u32),
+    prior_runs: Vec<FormatRun>,
+    prior_image_formats: Vec<(u32, CharacterFormat)>,
+}
 
 fn underline_style_to_entity(s: &crate::dtos::UnderlineStyle) -> common::entities::UnderlineStyle {
     match s {
@@ -177,7 +186,7 @@ fn build_replacement_runs(
 fn execute_set_text_format(
     uow: &mut Box<dyn SetTextFormatUnitOfWorkTrait>,
     dto: &SetTextFormatDto,
-) -> Result<EntityTreeSnapshot> {
+) -> Result<Vec<BlockFormatInverse>> {
     // Get Root -> Document
     let root = uow
         .get_root(&ROOT_ENTITY_ID)?
@@ -190,9 +199,6 @@ fn execute_set_text_format(
     let _document = uow
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
-
-    // Snapshot for undo before mutation (covers format_runs and block_images).
-    let snapshot = uow.snapshot_document(&[doc_id])?;
 
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
@@ -209,8 +215,10 @@ fn execute_set_text_format(
     let range_start = std::cmp::min(dto.position, dto.anchor);
     let range_end = std::cmp::max(dto.position, dto.anchor);
 
+    let mut inverse: Vec<BlockFormatInverse> = Vec::new();
+
     if range_start == range_end {
-        return Ok(snapshot);
+        return Ok(inverse);
     }
 
     let store = uow.store();
@@ -228,13 +236,6 @@ fn execute_set_text_format(
         let local_char_end =
             std::cmp::min(block_char_length(block, &store), range_end - block_start) as usize;
 
-        // Translate char offsets to byte offsets in plain_text. Images contribute
-        // 0 bytes to plain_text but 1 to text_length; we adjust by counting
-        // image anchors with byte_offset < local_char_end - existing_text_bytes.
-        // Simpler: clamp the byte range to the plain_text length and update
-        // image anchor formats whose byte_offset falls inside the char range
-        // (treating each image as a single logical character).
-        let store = uow.store();
         let block_text = block_content_via_store(block, &store);
         let plain_text_len = block_text.chars().count();
         let text_char_start = std::cmp::min(local_char_start, plain_text_len);
@@ -242,8 +243,28 @@ fn execute_set_text_format(
         let byte_start = char_to_byte(&block_text, text_char_start);
         let byte_end = char_to_byte(&block_text, text_char_end);
 
+        if byte_start >= byte_end {
+            continue;
+        }
+
+        // Capture prior state before mutation.
+        let prior_runs = {
+            let runs_map = store.format_runs.read().unwrap();
+            runs_map
+                .get(&block.id)
+                .map(|runs| capture_runs_in_range(runs, byte_start, byte_end))
+                .unwrap_or_default()
+        };
+        let prior_image_formats = {
+            let images_map = store.block_images.read().unwrap();
+            images_map
+                .get(&block.id)
+                .map(|images| capture_image_formats_in_range(images, byte_start, byte_end))
+                .unwrap_or_default()
+        };
+
         // Update format runs over the byte range.
-        if byte_start < byte_end {
+        {
             let mut runs_map = store.format_runs.write().unwrap();
             let runs = runs_map.entry(block.id).or_default();
             let replacement = build_replacement_runs(runs, byte_start, byte_end, dto);
@@ -253,7 +274,6 @@ fn execute_set_text_format(
 
         // Update image anchor formats. An image at `byte_offset` is in the
         // selection if its byte_offset is inside [byte_start..byte_end].
-        // Images use the same merge_dto semantics as text runs.
         {
             let mut images_map = store.block_images.write().unwrap();
             if let Some(images) = images_map.get_mut(&block.id) {
@@ -264,14 +284,53 @@ fn execute_set_text_format(
                 }
             }
         }
+
+        inverse.push(BlockFormatInverse {
+            block_id: block.id,
+            byte_range: (byte_start, byte_end),
+            prior_runs,
+            prior_image_formats,
+        });
     }
 
-    Ok(snapshot)
+    Ok(inverse)
+}
+
+/// Restore the prior format-run and image-format state captured during
+/// the forward mutation. Splices the captured runs back into each
+/// affected block's byte range and restores per-image formats.
+fn apply_inverse(
+    uow: &mut Box<dyn SetTextFormatUnitOfWorkTrait>,
+    inverse: &[BlockFormatInverse],
+) -> Result<()> {
+    let store = uow.store();
+    for entry in inverse {
+        {
+            let mut runs_map = store.format_runs.write().unwrap();
+            let runs = runs_map.entry(entry.block_id).or_default();
+            splice_range(
+                runs,
+                entry.byte_range.0..entry.byte_range.1,
+                entry.prior_runs.clone(),
+            );
+        }
+        {
+            let mut images_map = store.block_images.write().unwrap();
+            if let Some(images) = images_map.get_mut(&entry.block_id) {
+                for (byte_offset, format) in &entry.prior_image_formats {
+                    if let Some(img) = images.iter_mut().find(|i| i.byte_offset == *byte_offset) {
+                        img.format = format.clone();
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub struct SetTextFormatUseCase {
     uow_factory: Box<dyn SetTextFormatUnitOfWorkFactoryTrait>,
-    undo_snapshot: Option<EntityTreeSnapshot>,
+    inverse: Option<Vec<BlockFormatInverse>>,
     last_dto: Option<SetTextFormatDto>,
 }
 
@@ -279,7 +338,7 @@ impl SetTextFormatUseCase {
     pub fn new(uow_factory: Box<dyn SetTextFormatUnitOfWorkFactoryTrait>) -> Self {
         SetTextFormatUseCase {
             uow_factory,
-            undo_snapshot: None,
+            inverse: None,
             last_dto: None,
         }
     }
@@ -288,8 +347,8 @@ impl SetTextFormatUseCase {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        let snapshot = execute_set_text_format(&mut uow, dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let inverse = execute_set_text_format(&mut uow, dto)?;
+        self.inverse = Some(inverse);
         self.last_dto = Some(dto.clone());
 
         uow.commit()?;
@@ -299,15 +358,15 @@ impl SetTextFormatUseCase {
 
 impl UndoRedoCommand for SetTextFormatUseCase {
     fn undo(&mut self) -> Result<()> {
-        let snapshot = self
-            .undo_snapshot
+        let inverse = self
+            .inverse
             .as_ref()
-            .ok_or_else(|| anyhow!("No snapshot available for undo"))?
+            .ok_or_else(|| anyhow!("No inverse data available for undo"))?
             .clone();
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        uow.restore_document(&snapshot)?;
+        apply_inverse(&mut uow, &inverse)?;
         uow.commit()?;
         Ok(())
     }
@@ -321,8 +380,8 @@ impl UndoRedoCommand for SetTextFormatUseCase {
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        let snapshot = execute_set_text_format(&mut uow, &dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let inverse = execute_set_text_format(&mut uow, &dto)?;
+        self.inverse = Some(inverse);
         uow.commit()?;
         Ok(())
     }

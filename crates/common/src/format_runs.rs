@@ -230,6 +230,52 @@ pub fn splice_range(
     *runs = result;
 }
 
+/// Capture the slice of `runs` that intersects `[start..end)`, clipped
+/// to those bounds. Used by hand-rolled-inverse undo for format-only
+/// edits: callers capture this BEFORE calling [`splice_range`], and
+/// on undo splice the captured runs back into the same byte range to
+/// restore the prior state without paying the cost of a full
+/// `RopeStoreSnapshot`.
+///
+/// Gaps in the original runs (positions inside `[start..end)` with no
+/// formatting) become gaps in the captured output too — the undo
+/// splice preserves them faithfully.
+pub fn capture_runs_in_range(runs: &[FormatRun], start: u32, end: u32) -> Vec<FormatRun> {
+    let mut out = Vec::new();
+    for run in runs {
+        if run.byte_end <= start || run.byte_start >= end {
+            continue;
+        }
+        let clipped_start = std::cmp::max(run.byte_start, start);
+        let clipped_end = std::cmp::min(run.byte_end, end);
+        if clipped_start < clipped_end {
+            out.push(FormatRun {
+                byte_start: clipped_start,
+                byte_end: clipped_end,
+                format: run.format.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// Capture the `(byte_offset, format)` pairs for every image anchor
+/// inside `[start..end)`. Used together with [`capture_runs_in_range`]
+/// by hand-rolled-inverse undo for format-only edits.
+pub fn capture_image_formats_in_range(
+    images: &[ImageAnchor],
+    start: u32,
+    end: u32,
+) -> Vec<(u32, CharacterFormat)> {
+    let mut out = Vec::new();
+    for img in images {
+        if img.byte_offset >= start && img.byte_offset < end {
+            out.push((img.byte_offset, img.format.clone()));
+        }
+    }
+    out
+}
+
 /// Shift the byte offsets of every run whose `byte_start >= threshold`
 /// by `delta`. Used after a text insert/delete to keep downstream runs
 /// in sync with the new block text. Runs strictly before the threshold
