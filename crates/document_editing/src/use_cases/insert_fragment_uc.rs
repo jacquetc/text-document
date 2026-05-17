@@ -957,6 +957,29 @@ fn insert_mixed_fragment(
     }
     write_block_state(uow, current_block.id, &head_plain, head_runs, head_images);
 
+    // ── Rope mirror: head ──
+    // Push the new head content into the rope so subsequent block /
+    // table inserts can be placed at a known cursor byte. `last_block_id`
+    // tracks the most recent block to use as a target for table-anchor
+    // insertion (`after = true`).
+    let store = uow.store();
+    let head_rope_start = store
+        .block_offsets
+        .read()
+        .unwrap()
+        .range_of_block(current_block.id)
+        .map(|(s, _)| s);
+    let mut next_rope_byte_opt = head_rope_start.map(|s| {
+        common::database::rope_helpers::rope_replace_block_content(
+            &store,
+            current_block.id,
+            &head_plain,
+        );
+        s + head_plain.len() as u32
+    });
+    let mut last_block_id: EntityId = current_block.id;
+    let mut last_block_has_content = !head_plain.is_empty();
+
     let mut running_position = current_block.document_position + updated_current.text_length + 1;
     let mut new_child_order_entries: Vec<i64> = Vec::new();
     let head_delta = updated_current.text_length - current_block.text_length;
@@ -1050,6 +1073,19 @@ fn insert_mixed_fragment(
                 let created_block = uow.create_block(&new_block, frame_id, -1)?;
                 write_block_state(uow, created_block.id, &frag_block.plain_text, runs, images);
 
+                // ── Rope mirror: middle block ──
+                if let Some(next_rope_byte) = next_rope_byte_opt.as_mut() {
+                    common::database::rope_helpers::rope_insert_block_at(
+                        &store,
+                        *next_rope_byte,
+                        created_block.id,
+                        &frag_block.plain_text,
+                    );
+                    *next_rope_byte += 1 + frag_block.plain_text.len() as u32;
+                    last_block_id = created_block.id;
+                    last_block_has_content = !frag_block.plain_text.is_empty();
+                }
+
                 new_child_order_entries.push(created_block.id as i64);
                 total_new_chars += block_text_len;
                 total_blocks_added += 1;
@@ -1081,9 +1117,13 @@ fn insert_mixed_fragment(
                 let created_table = uow.create_table(&table, doc_id, -1)?;
 
                 let mut cell_blocks_to_update: Vec<Block> = Vec::new();
+                // (block_id, content) tuples in cell order, for the
+                // rope mirror below.
+                let mut this_table_cell_blocks: Vec<Vec<(EntityId, String)>> = Vec::new();
 
                 for frag_cell in &frag_table.cells {
                     let (cell_frame_id, created_block) = create_cell_frame(uow, doc_id, now)?;
+                    let mut this_cell_blocks: Vec<(EntityId, String)> = Vec::new();
 
                     if !frag_cell.blocks.is_empty() {
                         let first_cb = &frag_cell.blocks[0];
@@ -1098,6 +1138,7 @@ fn insert_mixed_fragment(
                         updated_block.updated_at = now;
                         cell_blocks_to_update.push(updated_block);
                         write_block_state(uow, created_block.id, &first_cb.plain_text, runs, images);
+                        this_cell_blocks.push((created_block.id, first_cb.plain_text.clone()));
 
                         running_position += cb_len + 1;
                         total_blocks_added += 1;
@@ -1126,6 +1167,7 @@ fn insert_mixed_fragment(
                                 xruns,
                                 ximages,
                             );
+                            this_cell_blocks.push((created_extra.id, extra_frag.plain_text.clone()));
                             running_position += extra_len + 1;
                             total_blocks_added += 1;
                             total_new_chars += extra_len;
@@ -1135,6 +1177,7 @@ fn insert_mixed_fragment(
                         updated_block.document_position = running_position;
                         updated_block.updated_at = now;
                         cell_blocks_to_update.push(updated_block);
+                        this_cell_blocks.push((created_block.id, String::new()));
                         running_position += 1;
                         total_blocks_added += 1;
                     }
@@ -1154,6 +1197,7 @@ fn insert_mixed_fragment(
                         fmt_background_color: frag_cell.fmt_background_color.clone(),
                     };
                     uow.create_table_cell(&cell, created_table.id, -1)?;
+                    this_table_cell_blocks.push(this_cell_blocks);
                 }
 
                 if !cell_blocks_to_update.is_empty() {
@@ -1182,6 +1226,58 @@ fn insert_mixed_fragment(
                 };
                 let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
                 new_child_order_entries.push(-(created_anchor.id as i64));
+
+                // ── Rope mirror: table anchor + cells ──
+                // Insert anchor sentinel relative to `last_block_id`
+                // (after=true except when the head block is still
+                // empty — same fix as the empty-target case in
+                // `insert_table_fragment`). Cells go at
+                // `top_level_frame_end_byte` for the parent frame, in
+                // the same per-cell shape as `insert_table_fragment`.
+                if next_rope_byte_opt.is_some() {
+                    let after = last_block_id != current_block.id || last_block_has_content;
+                    common::database::rope_helpers::rope_insert_table_anchor(
+                        &store,
+                        created_table.id,
+                        last_block_id,
+                        after,
+                    );
+                    // The anchor + boundary added 4 bytes after `last_block_id`.
+                    if let Some(next_rope_byte) = next_rope_byte_opt.as_mut() {
+                        *next_rope_byte += 4;
+                    }
+                    for cell_blocks in &this_table_cell_blocks {
+                        let mut iter = cell_blocks.iter();
+                        if let Some((first_id, first_text)) = iter.next() {
+                            let pos = common::database::rope_helpers::top_level_frame_end_byte(
+                                &store, frame_id,
+                            );
+                            common::database::rope_helpers::rope_insert_block_at(
+                                &store, pos, *first_id, first_text,
+                            );
+                            let mut prev_id = *first_id;
+                            let mut prev_byte_len = first_text.len() as u32;
+                            for (extra_id, extra_text) in iter {
+                                common::database::rope_helpers::rope_split_block(
+                                    &store,
+                                    prev_id,
+                                    prev_byte_len,
+                                    *extra_id,
+                                );
+                                if !extra_text.is_empty() {
+                                    common::database::rope_helpers::rope_insert_in_block(
+                                        &store,
+                                        *extra_id,
+                                        0,
+                                        extra_text,
+                                    );
+                                }
+                                prev_id = *extra_id;
+                                prev_byte_len = extra_text.len() as u32;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1300,6 +1396,16 @@ fn insert_mixed_fragment(
         let created_tail = uow.create_block(&tail_block, frame_id, -1)?;
         tail_text_len = created_tail.text_length;
         write_block_state(uow, created_tail.id, &tail_plain, tail_runs, tail_images);
+
+        // ── Rope mirror: tail block ──
+        if let Some(next_rope_byte) = next_rope_byte_opt {
+            common::database::rope_helpers::rope_insert_block_at(
+                &store,
+                next_rope_byte,
+                created_tail.id,
+                &tail_plain,
+            );
+        }
 
         new_child_order_entries.push(created_tail.id as i64);
         total_blocks_added += 1;
