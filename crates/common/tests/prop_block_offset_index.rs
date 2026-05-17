@@ -5,9 +5,31 @@
 //! - `shift_after` preserves invariants
 //! - The index round-trips through clone (used by snapshots)
 
-use common::database::block_offset_index::BlockOffsetIndex;
+use common::database::block_offset_index::{BlockOffsetIndex, OffsetMarker};
 use common::types::EntityId;
 use proptest::prelude::*;
+
+/// Verify the internal `marker_index` cache is consistent with
+/// `entries`: every entry's marker maps to its exact position, and
+/// `range_of` returns the same answer it would via linear scan.
+fn assert_marker_index_consistent(idx: &BlockOffsetIndex) {
+    for (i, (marker, _)) in idx.entries.iter().enumerate() {
+        let expected = Some((
+            idx.entries[i].1,
+            idx.entries
+                .get(i + 1)
+                .map(|(_, bs)| *bs)
+                .unwrap_or(idx.total_bytes()),
+        ));
+        assert_eq!(
+            idx.range_of(*marker),
+            expected,
+            "range_of({:?}) inconsistent with entries[{}]",
+            marker,
+            i
+        );
+    }
+}
 
 // ── Unit tests ──────────────────────────────────────────────────────
 
@@ -118,6 +140,67 @@ fn clone_roundtrips() {
     assert_eq!(idx, cloned);
 }
 
+#[test]
+fn insert_at_middle_keeps_marker_index_consistent() {
+    let mut idx = BlockOffsetIndex::new();
+    idx.set_total_bytes(30);
+    idx.push_block(1, 0);
+    idx.push_block(3, 20);
+    assert_marker_index_consistent(&idx);
+
+    // Insert block 2 between block 1 and block 3.
+    idx.insert_at(1, OffsetMarker::Block(2), 10);
+    assert_eq!(idx.range_of_block(1), Some((0, 10)));
+    assert_eq!(idx.range_of_block(2), Some((10, 20)));
+    assert_eq!(idx.range_of_block(3), Some((20, 30)));
+    assert_marker_index_consistent(&idx);
+}
+
+#[test]
+fn remove_at_keeps_marker_index_consistent() {
+    let mut idx = BlockOffsetIndex::new();
+    idx.set_total_bytes(40);
+    idx.push_block(1, 0);
+    idx.push_block(2, 10);
+    idx.push_block(3, 20);
+    idx.push_block(4, 30);
+
+    idx.remove_at(1);
+    assert_eq!(idx.range_of_block(1), Some((0, 20)));
+    assert_eq!(idx.range_of_block(2), None);
+    assert_eq!(idx.range_of_block(3), Some((20, 30)));
+    assert_eq!(idx.range_of_block(4), Some((30, 40)));
+    assert_marker_index_consistent(&idx);
+}
+
+#[test]
+fn clear_resets_state() {
+    let mut idx = BlockOffsetIndex::new();
+    idx.set_total_bytes(30);
+    idx.push_block(1, 0);
+    idx.push_block(2, 15);
+
+    idx.clear();
+    assert!(idx.is_empty());
+    assert_eq!(idx.total_bytes(), 0);
+    assert_eq!(idx.range_of_block(1), None);
+    assert_marker_index_consistent(&idx);
+}
+
+#[test]
+fn shift_after_does_not_touch_marker_index() {
+    let mut idx = BlockOffsetIndex::new();
+    idx.set_total_bytes(30);
+    idx.push_block(1, 0);
+    idx.push_block(2, 10);
+    idx.push_block(3, 20);
+
+    idx.shift_after(12, 5);
+    // Positions in `entries` unchanged — only byte_starts moved.
+    // marker_index points to entries[0], [1], [2] for blocks 1, 2, 3.
+    assert_marker_index_consistent(&idx);
+}
+
 // ── Property tests ──────────────────────────────────────────────────
 
 /// Generate a non-empty, sorted, gap-free sequence of `(id, byte_start)`
@@ -226,6 +309,53 @@ proptest! {
                 window[0] <= window[1],
                 "entries must stay sorted by byte_start"
             );
+        }
+    }
+
+    /// After any sequence of `insert_at` / `remove_at` operations the
+    /// `marker_index` cache must agree with a linear scan of `entries`.
+    #[test]
+    fn prop_marker_index_consistent_after_random_ops(
+        ops in proptest::collection::vec(
+            (0u32..30u32, 0u32..50u32, prop::bool::ANY),
+            0..20,
+        ),
+    ) {
+        let mut idx = BlockOffsetIndex::new();
+        idx.set_total_bytes(1000);
+        let mut next_id: EntityId = 1;
+        for (position_seed, byte_start, is_remove) in ops {
+            let len = idx.len();
+            if is_remove && len > 0 {
+                let p = (position_seed as usize) % len;
+                idx.remove_at(p);
+            } else {
+                let p = if len == 0 { 0 } else { (position_seed as usize) % (len + 1) };
+                idx.insert_at(p, OffsetMarker::Block(next_id), byte_start);
+                next_id += 1;
+            }
+            assert_marker_index_consistent(&idx);
+        }
+    }
+
+    /// `range_of` agrees with the linear-scan version for every
+    /// indexed marker.
+    #[test]
+    fn prop_range_of_matches_linear_scan(idx in arb_index()) {
+        for (marker, _) in idx.entries.iter() {
+            let cached = idx.range_of(*marker);
+            // Linear-scan equivalent.
+            let scan_idx = idx.entries.iter().position(|(m, _)| *m == *marker);
+            let scan_range = scan_idx.map(|i| {
+                let start = idx.entries[i].1;
+                let end = idx
+                    .entries
+                    .get(i + 1)
+                    .map(|(_, bs)| *bs)
+                    .unwrap_or(idx.total_bytes());
+                (start, end)
+            });
+            prop_assert_eq!(cached, scan_range);
         }
     }
 }

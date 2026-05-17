@@ -140,7 +140,7 @@ fn snapshot_restore_round_trip_populated_store() {
     store.rope.write().unwrap().insert(0, "PREFIX");
     store.blocks.write().unwrap().clear();
     store.format_runs.write().unwrap().clear();
-    store.block_offsets.write().unwrap().entries.clear();
+    store.block_offsets.write().unwrap().clear();
 
     // Restore.
     let expected = RopeStore::new();

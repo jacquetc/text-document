@@ -340,10 +340,9 @@ pub fn rope_merge_block_range(
     }
 
     // 2. Remove block_offsets entries for [start_idx+1 ..= end_idx].
-    //    Vec::drain handles this in one go.
     {
         let mut offsets = store.block_offsets.write().unwrap();
-        offsets.entries.drain((start_idx + 1)..=end_idx);
+        offsets.drain_inclusive(start_idx + 1, end_idx);
     }
 
     // 3. Shift any remaining entries past the deletion by -deleted_bytes.
@@ -481,7 +480,7 @@ pub fn rope_append_table_anchor(store: &Store, table_id: EntityId) {
     };
 
     let mut offsets = store.block_offsets.write().unwrap();
-    offsets.entries.push((OffsetMarker::TableAnchor(table_id), anchor_byte_start));
+    offsets.push(OffsetMarker::TableAnchor(table_id), anchor_byte_start);
     offsets.set_total_bytes(new_total);
 }
 
@@ -529,7 +528,7 @@ pub fn rope_remove_table_anchor(store: &Store, table_id: EntityId) {
     }
     {
         let mut offsets = store.block_offsets.write().unwrap();
-        offsets.entries.remove(anchor_idx);
+        offsets.remove_at(anchor_idx);
     }
     store
         .block_offsets
@@ -581,7 +580,7 @@ pub fn rope_remove_block(store: &Store, block_id: EntityId) {
     };
     if remove_end <= remove_start {
         // Drop the entry only; nothing to remove from the rope.
-        store.block_offsets.write().unwrap().entries.remove(idx);
+        store.block_offsets.write().unwrap().remove_at(idx);
         return;
     }
     let deleted_bytes = remove_end - remove_start;
@@ -592,7 +591,7 @@ pub fn rope_remove_block(store: &Store, block_id: EntityId) {
         let char_end = rope.byte_to_char(remove_end as usize);
         rope.remove(char_start..char_end);
     }
-    store.block_offsets.write().unwrap().entries.remove(idx);
+    store.block_offsets.write().unwrap().remove_at(idx);
     // Shift entries STRICTLY PAST the removed range. Using `remove_end` as
     // the threshold (rather than `remove_start`) keeps an empty predecessor
     // whose byte_start equals `remove_start` (the leading boundary `\n` we

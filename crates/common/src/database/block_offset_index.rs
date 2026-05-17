@@ -15,6 +15,7 @@
 //! - Empty `entries` ⟺ no markers in the document.
 
 use crate::types::EntityId;
+use im::HashMap as ImHashMap;
 
 /// Discriminates real blocks from table-anchor sentinels in the
 /// offset index. The wrapped `EntityId` is the corresponding entity's
@@ -53,6 +54,18 @@ pub struct BlockOffsetIndex {
     /// Total byte length of the rope this index describes. The last
     /// entry extends from its `byte_start` to this value.
     pub total_bytes: u32,
+
+    /// O(1)-average lookup from marker to its position in `entries`.
+    /// Maintained eagerly by the `push` / `push_block` / `insert_at` /
+    /// `remove_at` / `clear` methods on this type — direct mutation of
+    /// `entries` from outside leaves this cache stale, so callers must
+    /// go through those methods (or call `rebuild_marker_index` after
+    /// mutating in bulk).
+    ///
+    /// Stored as `im::HashMap` so the snapshot-clone path stays O(1).
+    /// `shift_after` does not move positions, only byte_starts — so
+    /// this map is unaffected by shifts.
+    marker_index: ImHashMap<OffsetMarker, usize>,
 }
 
 impl BlockOffsetIndex {
@@ -81,6 +94,13 @@ impl BlockOffsetIndex {
     /// neighbours — this method does NOT re-sort.
     pub fn insert_at(&mut self, position: usize, marker: OffsetMarker, byte_start: u32) {
         self.entries.insert(position, (marker, byte_start));
+        // All markers at positions ≥ `position` shifted up by 1.
+        for (m, p) in self.marker_index.iter_mut() {
+            if *p >= position && *m != marker {
+                *p += 1;
+            }
+        }
+        self.marker_index.insert(marker, position);
     }
 
     /// Append a marker at the end (its `byte_start` must be ≥ the last
@@ -93,7 +113,9 @@ impl BlockOffsetIndex {
                 .unwrap_or(true),
             "push must preserve ordering"
         );
+        let position = self.entries.len();
         self.entries.push((marker, byte_start));
+        self.marker_index.insert(marker, position);
     }
 
     /// Convenience: register a block by id. Equivalent to
@@ -104,14 +126,62 @@ impl BlockOffsetIndex {
 
     /// Remove the entry at the given position. Panics if out of bounds.
     pub fn remove_at(&mut self, position: usize) -> (OffsetMarker, u32) {
-        self.entries.remove(position)
+        let removed = self.entries.remove(position);
+        self.marker_index.remove(&removed.0);
+        // All markers at positions > `position` shifted down by 1.
+        for (_, p) in self.marker_index.iter_mut() {
+            if *p > position {
+                *p -= 1;
+            }
+        }
+        removed
+    }
+
+    /// Remove a contiguous range of entries, equivalent to
+    /// `entries.drain(start..=end_inclusive)` plus the matching
+    /// marker_index maintenance. Returns the removed entries.
+    pub fn drain_inclusive(&mut self, start: usize, end_inclusive: usize) -> Vec<(OffsetMarker, u32)> {
+        let removed: Vec<_> = self.entries.drain(start..=end_inclusive).collect();
+        for (m, _) in &removed {
+            self.marker_index.remove(m);
+        }
+        let shift = removed.len();
+        // All markers at positions > end_inclusive shift down by `shift`.
+        for (_, p) in self.marker_index.iter_mut() {
+            if *p > end_inclusive {
+                *p -= shift;
+            }
+        }
+        removed
+    }
+
+    /// Drop every entry and reset `total_bytes` to zero. Equivalent to
+    /// `*self = Self::default()` but expressed as a method so callers
+    /// don't need to depend on `Default`.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.marker_index = ImHashMap::new();
+        self.total_bytes = 0;
+    }
+
+    /// Rebuild `marker_index` from `entries`. Use after bulk mutations
+    /// that bypassed the maintenance methods (e.g. raw `entries.push`
+    /// in test setup).
+    pub fn rebuild_marker_index(&mut self) {
+        let mut idx = ImHashMap::new();
+        for (i, (m, _)) in self.entries.iter().enumerate() {
+            idx.insert(*m, i);
+        }
+        self.marker_index = idx;
     }
 
     /// Byte range `(start, end)` of a marker. `end` is the next
     /// marker's `byte_start` (or `total_bytes` for the last entry).
     /// Returns `None` if the marker is not indexed.
+    ///
+    /// O(1) average via the `marker_index` map.
     pub fn range_of(&self, marker: OffsetMarker) -> Option<(u32, u32)> {
-        let idx = self.entries.iter().position(|(m, _)| *m == marker)?;
+        let idx = *self.marker_index.get(&marker)?;
         let start = self.entries[idx].1;
         let end = self
             .entries
