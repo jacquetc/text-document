@@ -57,6 +57,39 @@ pub fn block_char_length(block: &Block, store: &Store) -> i64 {
     (char_end - char_start) as i64
 }
 
+/// Fast-path full-document plain text: returns `Some(rope.to_string())`
+/// iff the document is in the canonical flat layout — no table anchors
+/// in the offset index, single top-level frame. In that case the
+/// rope's byte order is the same as the document-flow order, so one
+/// `to_string()` allocation replaces the O(N) per-block walk +
+/// per-block `Cow<str>` materialization that `build_full_text` /
+/// `export_plain_text` would otherwise do.
+///
+/// Returns `None` for documents containing tables or nested frames —
+/// those require the per-frame, per-block traversal because table
+/// cell content lives in separate byte ranges later in the rope
+/// (plan §1.6), not interleaved with the parent frame's bytes.
+///
+/// `top_frame_count` is the caller-known number of top-level frames
+/// (typically obtained from `Document.frames.len()`). Callers
+/// already have this value and pass it in to avoid a redundant uow
+/// query.
+pub fn rope_flat_text_if_simple(store: &Store, top_frame_count: usize) -> Option<String> {
+    if top_frame_count != 1 {
+        return None;
+    }
+    let offsets = store.block_offsets.read().unwrap();
+    let has_table = offsets
+        .entries
+        .iter()
+        .any(|(m, _)| matches!(m, OffsetMarker::TableAnchor(_)));
+    if has_table {
+        return None;
+    }
+    drop(offsets);
+    Some(store.rope.read().unwrap().to_string())
+}
+
 /// Reset the rope to empty and clear `block_offsets`. Called by
 /// importers when they replace the entire document content.
 pub fn rope_reset(store: &Store) {

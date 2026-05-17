@@ -4,6 +4,7 @@ use crate::ReplaceTextDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::database::rope_helpers::block_char_length;
+use common::database::rope_helpers::rope_flat_text_if_simple;
 use common::database::rope_helpers::{
     block_content_via_store, rope_delete_in_block, rope_insert_in_block,
 };
@@ -65,7 +66,9 @@ fn fetch_blocks_and_build_text(
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    let full_text = build_full_text_via_store(&blocks, &uow.store());
+    // Fast path: flat single-frame doc — rope contents == full plain text.
+    let full_text = rope_flat_text_if_simple(&uow.store(), frame_ids.len())
+        .unwrap_or_else(|| build_full_text_via_store(&blocks, &uow.store()));
 
     Ok((full_text, blocks))
 }

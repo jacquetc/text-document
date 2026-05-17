@@ -4,6 +4,7 @@ use crate::FindResultDto;
 use crate::FindTextDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::rope_flat_text_if_simple;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -34,6 +35,12 @@ fn build_full_text(uow: &dyn FindTextUnitOfWorkTrait) -> Result<String> {
         .ok_or_else(|| anyhow!("Root has no document"))?;
 
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+
+    // Fast path: flat single-frame document — entire searchable text
+    // is already laid out contiguously in the rope.
+    if let Some(text) = rope_flat_text_if_simple(&uow.store(), frame_ids.len()) {
+        return Ok(text);
+    }
 
     let mut all_block_ids: Vec<EntityId> = Vec::new();
     for frame_id in &frame_ids {
