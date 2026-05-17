@@ -10,3 +10,4 @@ cc 154358202e21f272a4264484fb1b94abac05d1644b11b4297cc06c36c7ce700b # shrinks to
 cc 0fce22a99049d22e07863abcc0633e4dae31ebf5ae94f9d0dfefae1e6f398dd8 # shrinks to seed = "", requested = 1
 cc 5d88d74cf8337900b04680966f89c8126e61ca8496e57b081d1a5d6fa06ba388 # shrinks to text = "\n", pos_frac = 0.0
 cc fc5ea305ff2734f194bd4a00d5e7efbc1a8f9657d971a2e9aaa776eb55940091 # shrinks to text = "\n"
+cc a003a6f119ae45d09ca93f7e421a21a73602e6da5163450bb76a9d400cf06511 # shrinks to text = "\nAa 0\naa0aaaa  0A 000 aaaaa", pos_frac = 0.15358104069908138

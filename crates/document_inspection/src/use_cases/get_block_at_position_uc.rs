@@ -3,7 +3,8 @@ use crate::BlockInfoDto;
 use crate::GetBlockAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::database::rope_helpers::block_char_length;
+use common::database::block_offset_index::OffsetMarker;
+use common::database::rope_helpers::{block_char_length, find_block_at_char_position};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -42,8 +43,61 @@ impl GetBlockAtPositionUseCase {
         uow.begin_transaction()?;
 
         let position = dto.position;
+        let store = uow.store();
 
-        // Get Root(1) -> Document -> root frame
+        // Fast path: O(log n) via the rope index. Only valid for flat
+        // (no-table) documents — table cell content lives at separate
+        // rope byte ranges (plan §1.6). Falls back to the slow walk
+        // below for tabled docs.
+        if let Some((init_block_id, init_char_in_block, init_block_char_start)) =
+            find_block_at_char_position(&store, position)
+        {
+            let mut block_id = init_block_id;
+            let mut block_char_start = init_block_char_start;
+            let mut block = uow
+                .get_block(&block_id)?
+                .ok_or_else(|| anyhow!("Block not found"))?;
+            let mut block_length = block_char_length(&block, &store);
+
+            // Separator semantic: at the inter-block `\n` (char_in_block
+            // == block_char_len of a non-empty block with a successor),
+            // belong to the NEXT block. Empty blocks stay put.
+            if block_length > 0 && init_char_in_block == block_length {
+                let next_block_info: Option<(EntityId, u32)> = {
+                    let offsets = store.block_offsets.read().unwrap();
+                    offsets
+                        .position_of(OffsetMarker::Block(block_id))
+                        .and_then(|cur_idx| offsets.entries.get(cur_idx + 1).copied())
+                        .and_then(|(m, bs)| m.as_block().map(|id| (id, bs)))
+                };
+                if let Some((next_block_id, next_bs)) = next_block_info {
+                    let next_char_start =
+                        store.rope.read().unwrap().byte_to_char(next_bs as usize) as i64;
+                    block_id = next_block_id;
+                    block_char_start = next_char_start;
+                    block = uow
+                        .get_block(&block_id)?
+                        .ok_or_else(|| anyhow!("Block not found"))?;
+                    block_length = block_char_length(&block, &store);
+                }
+            }
+
+            let block_number = store
+                .block_offsets
+                .read()
+                .unwrap()
+                .position_of(OffsetMarker::Block(block_id))
+                .unwrap_or(0) as i64;
+            uow.end_transaction()?;
+            return Ok(BlockInfoDto {
+                block_id: block_id as i64,
+                block_start: block_char_start,
+                block_length,
+                block_number,
+            });
+        }
+
+        // Slow path: tabled document — walk the block tree.
         let root = uow
             .get_root(&ROOT_ENTITY_ID)?
             .ok_or_else(|| anyhow!("Root entity not found"))?;
@@ -61,8 +115,6 @@ impl GetBlockAtPositionUseCase {
 
         // Collect all block IDs in document order by traversing child_order recursively
         let ordered_block_ids = collect_block_ids(&*uow, &frame_id)?;
-
-        let store = uow.store();
 
         // Walk blocks computing positions on the fly.
         // Separator (at block_end) maps to the next block.

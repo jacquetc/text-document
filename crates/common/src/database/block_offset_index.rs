@@ -217,6 +217,13 @@ impl BlockOffsetIndex {
         Some((start, end, has_successor))
     }
 
+    /// Position of `marker` in `entries`. O(1) average via the
+    /// `marker_index` cache. Returns `None` if the marker is not
+    /// indexed.
+    pub fn position_of(&self, marker: OffsetMarker) -> Option<usize> {
+        self.marker_index.get(&marker).copied()
+    }
+
     /// Marker whose byte range covers `byte`. Returns `None` if the
     /// index is empty or `byte` falls past `total_bytes`.
     ///

@@ -79,16 +79,34 @@ pub fn find_block_at_char_position(
     store: &Store,
     position: i64,
 ) -> Option<(EntityId, i64, i64)> {
-    // Fast path is only valid for flat, table-free documents. With
-    // tables, cell content sits at separate rope byte ranges (plan
-    // §1.6), so byte→block lookup finds the wrong block for cursor
-    // positions inside cells.
+    // Fast path is only valid when EVERY block in the document is
+    // mirrored to the rope. Disqualifying cases:
+    //
+    // 1. Documents containing tables — cell content sits at separate
+    //    rope byte ranges (plan §1.6) so byte→block lookup finds the
+    //    wrong block for cursor positions inside cells.
+    //
+    // 2. Documents containing sub-frames inserted with a parent —
+    //    `insert_frame_uc` currently only mirrors top-level frames to
+    //    the rope (parent=None case), leaving sub-frame blocks
+    //    unregistered in the offset index. Detect by comparing block
+    //    counts: if the rope index has fewer Block markers than the
+    //    store has Block entities, some are unmirrored.
     let offsets = store.block_offsets.read().unwrap();
     if offsets
         .entries
         .iter()
         .any(|(m, _)| matches!(m, OffsetMarker::TableAnchor(_)))
     {
+        return None;
+    }
+    let indexed_block_count = offsets
+        .entries
+        .iter()
+        .filter(|(m, _)| matches!(m, OffsetMarker::Block(_)))
+        .count();
+    let total_block_count = store.blocks.read().unwrap().len();
+    if indexed_block_count != total_block_count {
         return None;
     }
     drop(offsets);
@@ -104,6 +122,7 @@ pub fn find_block_at_char_position(
     let (bs, be, has_successor) =
         offsets.range_with_successor(OffsetMarker::Block(block_id))?;
     let content_end = if has_successor && be > bs { be - 1 } else { be };
+
     drop(offsets);
 
     let rope = store.rope.read().unwrap();
@@ -113,6 +132,15 @@ pub fn find_block_at_char_position(
     let byte_for_char = std::cmp::min(abs_byte, content_end as usize);
     let abs_char = rope.byte_to_char(byte_for_char) as i64;
     let char_in_block = abs_char - block_char_start;
+
+    // NOTE: separator semantics differ across use cases. Callers like
+    // `get_block_at_position_uc` interpret "position at the end of a
+    // non-empty block with a successor" as "belongs to the next
+    // block"; callers like `insert_text_uc` want the previous block
+    // with offset == block_char_len. This helper returns the
+    // previous-block answer (the simpler semantic); use-case-specific
+    // advance logic lives at the call site.
+    let _ = has_successor;
 
     Some((block_id, char_in_block, block_char_start))
 }
