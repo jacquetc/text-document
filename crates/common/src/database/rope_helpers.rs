@@ -57,6 +57,66 @@ pub fn block_char_length(block: &Block, store: &Store) -> i64 {
     (char_end - char_start) as i64
 }
 
+/// Locate which block contains a given absolute char position in the
+/// document, returning `(block_id, char_offset_in_block, block_char_start)`
+/// in O(log n) using the rope + `BlockOffsetIndex` instead of an O(N)
+/// linear walk of all blocks.
+///
+/// Replaces the per-keystroke hot path in editing use cases
+/// (`find_block_at_position_sequential`) which fetched every block
+/// + called `block_char_length` per block. For an N-block document
+/// each editor keystroke now costs O(log n) lookups instead of O(N).
+///
+/// Returns `None` for documents containing tables — table cell content
+/// lives in separate byte ranges later in the rope (plan §1.6), so the
+/// rope's char-position space diverges from the user-visible flow
+/// order. Callers must fall back to the slow per-block walk in that
+/// case.
+///
+/// `position` past the document end clamps to the last block's
+/// end-of-content.
+pub fn find_block_at_char_position(
+    store: &Store,
+    position: i64,
+) -> Option<(EntityId, i64, i64)> {
+    // Fast path is only valid for flat, table-free documents. With
+    // tables, cell content sits at separate rope byte ranges (plan
+    // §1.6), so byte→block lookup finds the wrong block for cursor
+    // positions inside cells.
+    let offsets = store.block_offsets.read().unwrap();
+    if offsets
+        .entries
+        .iter()
+        .any(|(m, _)| matches!(m, OffsetMarker::TableAnchor(_)))
+    {
+        return None;
+    }
+    drop(offsets);
+
+    let rope = store.rope.read().unwrap();
+    let total_chars = rope.len_chars() as i64;
+    let pos_clamped = position.clamp(0, total_chars);
+    let abs_byte = rope.char_to_byte(pos_clamped as usize);
+    drop(rope);
+
+    let offsets = store.block_offsets.read().unwrap();
+    let block_id = offsets.marker_at_byte(abs_byte as u32)?.as_block()?;
+    let (bs, be, has_successor) =
+        offsets.range_with_successor(OffsetMarker::Block(block_id))?;
+    let content_end = if has_successor && be > bs { be - 1 } else { be };
+    drop(offsets);
+
+    let rope = store.rope.read().unwrap();
+    let block_char_start = rope.byte_to_char(bs as usize) as i64;
+    // Clamp the cursor's byte to the block's content area (not into the
+    // trailing `\n` boundary if any).
+    let byte_for_char = std::cmp::min(abs_byte, content_end as usize);
+    let abs_char = rope.byte_to_char(byte_for_char) as i64;
+    let char_in_block = abs_char - block_char_start;
+
+    Some((block_id, char_in_block, block_char_start))
+}
+
 /// Convert an in-block char offset to an in-block byte offset using the
 /// rope's index. Both inputs and outputs are relative to the start of
 /// the block's content (NOT absolute rope positions). The char offset

@@ -3,8 +3,9 @@ use crate::InsertTextDto;
 use crate::InsertTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_char_length, 
-    block_content_via_store, rope_delete_in_block, rope_insert_in_block,
+use common::database::rope_helpers::{block_char_length,
+    block_content_via_store, find_block_at_char_position, rope_delete_in_block,
+    rope_insert_in_block,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -290,33 +291,52 @@ fn execute_insert_simple(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
-    let frame_id = *frame_ids
-        .first()
-        .ok_or_else(|| anyhow!("Document has no frames"))?;
-
-    let get_table_cell_frames = |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
-        let cell_ids = uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
-        let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
-        let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
-        cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
-        Ok(cells.into_iter().filter_map(|c| c.cell_frame).collect())
-    };
-    let ordered_block_ids = collect_block_ids_recursive(
-        &|id| uow.get_frame(id),
-        &|id, field| uow.get_frame_relationship(id, field),
-        &get_table_cell_frames,
-        &frame_id,
-    )?;
-
-    if ordered_block_ids.is_empty() {
-        return Err(anyhow!("No blocks in document"));
-    }
-
-    let (block, _block_idx, block_pos) =
-        find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
     let store = uow.store();
-    let offset = (position - block_pos).clamp(0, block_char_length(&block, &store));
+    // Fast path: O(log n) block lookup via the rope index. Returns
+    // None for tabled documents — they need the per-block walk below
+    // because table cell content lives at separate rope byte ranges
+    // (plan §1.6) so byte→block lookup would find the wrong block.
+    let (block, block_pos, offset) = match find_block_at_char_position(&store, position) {
+        Some((block_id, char_in_block, block_char_start)) => {
+            let block = uow
+                .get_block(&block_id)?
+                .ok_or_else(|| anyhow!("Block not found"))?;
+            let offset = char_in_block.clamp(0, block_char_length(&block, &store));
+            (block, block_char_start, offset)
+        }
+        None => {
+            // Slow path: tabled document. Walk blocks to find the cursor's
+            // position in user-visible flow order.
+            let frame_ids =
+                uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+            let frame_id = *frame_ids
+                .first()
+                .ok_or_else(|| anyhow!("Document has no frames"))?;
+            let get_table_cell_frames =
+                |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
+                    let cell_ids =
+                        uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+                    let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+                    let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
+                    cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+                    Ok(cells.into_iter().filter_map(|c| c.cell_frame).collect())
+                };
+            let ordered_block_ids = collect_block_ids_recursive(
+                &|id| uow.get_frame(id),
+                &|id, field| uow.get_frame_relationship(id, field),
+                &get_table_cell_frames,
+                &frame_id,
+            )?;
+            if ordered_block_ids.is_empty() {
+                return Err(anyhow!("No blocks in document"));
+            }
+            let (block, _block_idx, block_pos) =
+                find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
+            let offset =
+                (position - block_pos).clamp(0, block_char_length(&block, &store));
+            (block, block_pos, offset)
+        }
+    };
 
     let original_block = block.clone();
     let original_format_runs = store
@@ -388,6 +408,11 @@ fn execute_insert_simple(
     ))
 }
 
+/// Slow-path block lookup for tabled documents. Walks the ordered
+/// block list, computing positions sequentially. Only used when the
+/// O(log n) fast path `find_block_at_char_position` returns `None`
+/// (i.e. when the document contains tables — cell content lives at
+/// separate rope ranges so byte→block lookup can't be used directly).
 fn find_block_at_position_sequential(
     uow: &dyn InsertTextUnitOfWorkTrait,
     ordered_block_ids: &[EntityId],
