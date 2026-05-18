@@ -446,6 +446,156 @@ fn inserted_3x3_typing_in_each_cell_lands_in_that_cell() {
     );
 }
 
+/// Find the snapshot position of a named block.
+fn block_position_by_text(doc: &TextDocument, text: &str) -> Option<usize> {
+    all_block_positions(doc)
+        .into_iter()
+        .find(|(_, _, t)| t == text)
+        .map(|(p, _, _)| p)
+}
+
+/// Snapshot the text inside cell (r, c).
+fn cell_text(doc: &TextDocument, row: usize, col: usize) -> Option<String> {
+    let snap = doc.snapshot_flow();
+    snap.elements.iter().find_map(|el| {
+        if let FlowElementSnapshot::Table(ts) = el {
+            ts.cells
+                .iter()
+                .find(|cc| cc.row == row && cc.column == col)
+                .and_then(|cc| cc.blocks.first())
+                .map(|b| b.text.clone())
+        } else {
+            None
+        }
+    })
+}
+
+#[test]
+fn inserted_2x2_at_start_of_block_lands_before_it() {
+    // Cursor at the START of an existing block (offset 0) places
+    // the table *before* that block in the flow. The cells should
+    // span a contiguous run of positions starting at the cursor's
+    // position; the displaced block should sit past the table.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello").unwrap();
+    let cursor = doc.cursor_at(0);
+    cursor.insert_table(2, 2).unwrap();
+
+    let positions = all_block_positions(&doc);
+    let hello_pos = block_position_by_text(&doc, "Hello")
+        .expect("'Hello' block should survive insertion");
+    let cell_positions: Vec<usize> = positions
+        .iter()
+        .filter_map(|(p, _, t)| if t.is_empty() { Some(*p) } else { None })
+        .collect();
+    assert_eq!(
+        cell_positions.len(),
+        4,
+        "2x2 table should yield 4 empty cell blocks; got {cell_positions:?}"
+    );
+    // Cells should occupy a contiguous run starting at 0 (the
+    // cursor's position), each one boundary past the previous.
+    assert_eq!(
+        cell_positions[0], 0,
+        "first cell of insert_table at offset 0 should sit at the cursor's position (0)"
+    );
+    for w in cell_positions.windows(2) {
+        assert_eq!(w[1], w[0] + 1, "cells should be contiguous: got {cell_positions:?}");
+    }
+    // 'Hello' should appear after the table.
+    assert!(
+        hello_pos > *cell_positions.last().unwrap(),
+        "'Hello' should sit after the table; got hello_pos={hello_pos}, cells={cell_positions:?}"
+    );
+    // Typing in cell (0,0) should land in cell (0,0).
+    let (p00, l00) = cell_block_position(&doc, 0, 0).expect("cell (0,0)");
+    let c = doc.cursor_at(p00 + l00);
+    c.insert_text("X").unwrap();
+    assert_eq!(
+        cell_text(&doc, 0, 0).as_deref(),
+        Some("X"),
+        "typing in cell (0,0) of a before-the-block insertion should land in (0,0); positions: {:?}",
+        all_block_positions(&doc)
+    );
+    // 'Hello' content untouched.
+    assert!(
+        block_position_by_text(&doc, "Hello").is_some(),
+        "'Hello' content must survive a same-line insertion"
+    );
+}
+
+#[test]
+fn inserted_2x2_in_empty_document_starts_at_zero() {
+    // Empty doc still has an implicit empty block at position 0
+    // (TextDocument::new() creates it). insert_table at offset 0 of
+    // that empty block produces cells at positions 0..3 in row-major
+    // order, with the implicit empty block displaced past the table.
+    let doc = TextDocument::new();
+    let cursor = doc.cursor_at(0);
+    cursor.insert_table(2, 2).unwrap();
+
+    let positions = all_block_positions(&doc);
+    let cell_positions: Vec<usize> = positions
+        .iter()
+        .take(4) // first four entries are the cells in row-major order
+        .map(|(p, _, _)| *p)
+        .collect();
+    assert_eq!(
+        cell_positions[0], 0,
+        "first cell of insert_table in empty doc should sit at 0; positions: {positions:?}"
+    );
+    for w in cell_positions.windows(2) {
+        assert_eq!(w[1], w[0] + 1, "cells should be contiguous; positions: {positions:?}");
+    }
+    // Typing in cell (0,0) should land in cell (0,0).
+    let (p00, l00) = cell_block_position(&doc, 0, 0).expect("cell (0,0)");
+    let c = doc.cursor_at(p00 + l00);
+    c.insert_text("Y").unwrap();
+    assert_eq!(
+        cell_text(&doc, 0, 0).as_deref(),
+        Some("Y"),
+        "typing in cell (0,0) of an empty-doc insertion should land in (0,0); positions: {:?}",
+        all_block_positions(&doc)
+    );
+}
+
+#[test]
+fn inserted_2x2_in_middle_of_block_lands_after_it() {
+    // Cursor in the MIDDLE of a block (offset > 0) places the table
+    // *after* that block in the flow. The cells should start one
+    // boundary past the host block's end.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let cursor = doc.cursor_at(5); // between "Hello" and " world", inside the block
+    cursor.insert_table(2, 2).unwrap();
+
+    let positions = all_block_positions(&doc);
+    let host_pos = block_position_by_text(&doc, "Hello world")
+        .expect("host block should survive insertion as a single block");
+    let cell_positions: Vec<usize> = positions
+        .iter()
+        .filter_map(|(p, _, t)| if t.is_empty() { Some(*p) } else { None })
+        .collect();
+    assert_eq!(cell_positions.len(), 4);
+    // Cells should follow the host block (not precede it).
+    assert!(
+        cell_positions[0] > host_pos,
+        "cells should be after 'Hello world' (host_pos={host_pos}, cells={cell_positions:?})"
+    );
+    for w in cell_positions.windows(2) {
+        assert_eq!(w[1], w[0] + 1, "cells contiguous: {cell_positions:?}");
+    }
+    // Typing in cell (0,0) lands in cell (0,0).
+    let (p00, l00) = cell_block_position(&doc, 0, 0).expect("cell (0,0)");
+    let c = doc.cursor_at(p00 + l00);
+    c.insert_text("Z").unwrap();
+    assert_eq!(
+        cell_text(&doc, 0, 0).as_deref(),
+        Some("Z"),
+        "typing in cell (0,0) of an after-the-block insertion should land in (0,0)"
+    );
+}
+
 #[test]
 fn inserted_3x3_does_not_leak_into_following_block() {
     let doc = inserted_3x3_with_surrounding_text();

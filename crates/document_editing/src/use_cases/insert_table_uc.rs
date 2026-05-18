@@ -223,27 +223,39 @@ fn execute_insert_table(
         rope_insert_table_anchor(&uow.store(), created_table.id, target_block_id, after);
     }
 
-    // 4. Assign document_position to all cell blocks in row-major order.
+    // 4. Assign document_position to all cell blocks in row-major
+    // order, matching how `snapshot_from_child_order` in
+    // text_frame.rs computes the position of each new child:
     //
-    // The first cell sits *after* the boundary between the preceding
-    // block and the table, i.e. at `insert_pos + 1` in the document's
-    // position space — matching how the on-the-fly snapshot walk in
-    // `snapshot_from_child_order` computes it (`running_pos =
-    // previous_block_end + 1`). Each subsequent empty cell adds 1
-    // boundary position.
+    //   * "after" insertion (cursor offset > 0 within the found
+    //     block — table goes after that block in `child_order`):
+    //     the first cell sits at `insert_pos + 1`, i.e. one
+    //     boundary past the end of the preceding block.
+    //   * "before" insertion (cursor offset == 0 — table goes
+    //     before the found block) and the empty-document case:
+    //     the first cell sits at `insert_pos`, directly at the
+    //     spot the cursor occupies; the displaced block (if any)
+    //     shifts to `insert_pos + total_cells`.
     //
-    // (Bug history: this loop used `(insert_pos..)` which produced
-    // positions `insert_pos, insert_pos+1, …` — one less than the
-    // snapshot, so a cursor clicked into the snapshot-reported cell
-    // position landed on the *next* cell's `document_position` when
-    // `insert_text_uc` sorted blocks by that field, routing keystrokes
-    // into the wrong cell and quickly making bottom-right cells
-    // unreachable. See `inserted_3x3_typing_in_each_cell_lands_in_that_cell`
-    // in `table_editing_tests.rs`.)
+    // Either way, each subsequent empty cell adds 1 (the per-cell
+    // boundary) so cells occupy a contiguous run of N positions.
+    //
+    // (History: a prior revision assigned positions starting at
+    // `insert_pos` unconditionally, which was off by one for the
+    // "after" case and made typing in a cell land in the next cell —
+    // see `inserted_3x3_typing_in_each_cell_lands_in_that_cell`.
+    // The subsequent fix used `insert_pos + 1` unconditionally,
+    // which inverted the bug for the "before" and empty-doc cases:
+    // cell positions overlapped the displaced block and the table
+    // appeared to land in inconsistent locations — see
+    // `inserted_2x2_at_start_of_block_lands_before_it` and
+    // `inserted_2x2_in_empty_document_starts_at_zero`.)
+    let after_insertion = matches!(rope_anchor, Some((_, true)));
+    let cell_start_pos = insert_pos + if after_insertion { 1 } else { 0 };
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for (offset, cell_block) in cell_blocks.iter().enumerate() {
         let mut updated_block = cell_block.clone();
-        updated_block.document_position = insert_pos + offset as i64 + 1;
+        updated_block.document_position = cell_start_pos + offset as i64;
         updated_block.updated_at = now;
         blocks_to_update.push(updated_block);
     }
