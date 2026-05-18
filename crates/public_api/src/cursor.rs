@@ -1748,11 +1748,16 @@ impl TextCursor {
             };
             document_editing_commands::add_block_to_list(&inner.ctx, Some(inner.stack_id), &dto)?;
             inner.modified = true;
-            inner.queue_event(DocumentEvent::ContentsChanged {
+            // List membership is a formatting/layout concern, not a text
+            // change — fire FormatChanged so consumers re-layout (the
+            // block's horizontal position and list marker depend on
+            // its list assignment). ContentsChanged with position=0
+            // was misleading and caused incremental relayouts to
+            // re-shape the wrong block.
+            inner.queue_event(DocumentEvent::FormatChanged {
                 position: 0,
-                chars_removed: 0,
-                chars_added: 0,
-                blocks_affected: 1,
+                length: 0,
+                kind: crate::flow::FormatChangeKind::List,
             });
             self.queue_undo_redo_event(&mut inner)
         };
@@ -1785,11 +1790,12 @@ impl TextCursor {
                 &dto,
             )?;
             inner.modified = true;
-            inner.queue_event(DocumentEvent::ContentsChanged {
+            // See `add_block_to_list` — list-membership is a
+            // formatting/layout change, not a text content change.
+            inner.queue_event(DocumentEvent::FormatChanged {
                 position: 0,
-                chars_removed: 0,
-                chars_added: 0,
-                blocks_affected: 1,
+                length: 0,
+                kind: crate::flow::FormatChangeKind::List,
             });
             self.queue_undo_redo_event(&mut inner)
         };
