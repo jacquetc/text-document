@@ -218,7 +218,9 @@ impl<'a> RootTable for RootHashMapTable<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|r| read_field(r, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|r| read_field(r, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -252,7 +254,13 @@ impl<'a> RootTable for RootHashMapTable<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|r| read_field(r, field).into_iter().skip(offset).take(limit).collect())
+            .map(|r| {
+                read_field(r, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -380,7 +388,9 @@ impl<'a> RootTableRO for RootHashMapTableRO<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|r| read_field(r, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|r| read_field(r, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -414,7 +424,13 @@ impl<'a> RootTableRO for RootHashMapTableRO<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|r| read_field(r, field).into_iter().skip(offset).take(limit).collect())
+            .map(|r| {
+                read_field(r, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 

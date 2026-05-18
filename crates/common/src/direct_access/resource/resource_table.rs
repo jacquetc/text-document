@@ -62,7 +62,14 @@ impl<'a> ResourceTable for ResourceHashMapTable<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Resource>, RepositoryError> {
-        Ok(self.store.resources.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .resources
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn update(&mut self, entity: &Resource) -> Result<Resource, RepositoryError> {
@@ -80,7 +87,10 @@ impl<'a> ResourceTable for ResourceHashMapTable<'a> {
         Ok(result)
     }
 
-    fn update_with_relationships(&mut self, entity: &Resource) -> Result<Resource, RepositoryError> {
+    fn update_with_relationships(
+        &mut self,
+        entity: &Resource,
+    ) -> Result<Resource, RepositoryError> {
         self.update(entity)
     }
 
@@ -151,6 +161,13 @@ impl<'a> ResourceTableRO for ResourceHashMapTableRO<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Resource>, RepositoryError> {
-        Ok(self.store.resources.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .resources
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 }

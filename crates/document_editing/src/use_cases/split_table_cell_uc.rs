@@ -199,11 +199,10 @@ fn execute_split_table_cell(
             anchor.and_then(|f| f.parent_frame)
         };
         if let Some(parent_frame_id) = parent_frame_id_opt {
-            let mut next_byte = top_level_frame_end_byte(&store, parent_frame_id);
-            for cell_block in &new_cell_blocks {
+            let start_byte = top_level_frame_end_byte(&store, parent_frame_id);
+            for (next_byte, cell_block) in (start_byte..).zip(new_cell_blocks.iter()) {
                 // Newly-created cells are empty (`""`).
                 rope_insert_block_at(&store, next_byte, cell_block.id, "");
-                next_byte += 1;
             }
         }
     }

@@ -54,7 +54,9 @@ impl TextBlock {
             .flatten()
             .map(|b| {
                 let entity: common::entities::Block = b.into();
-                to_usize(common::database::rope_helpers::block_char_length(&entity, store))
+                to_usize(common::database::rope_helpers::block_char_length(
+                    &entity, store,
+                ))
             })
             .unwrap_or(0)
     }
@@ -348,7 +350,14 @@ fn find_parent_frame(inner: &TextDocumentInner, block_id: u64) -> Option<EntityI
 /// `find_table_cell_context` walks for documents that have no tables
 /// (e.g. typical markdown documents in an editor).
 fn document_has_no_tables(inner: &TextDocumentInner) -> bool {
-    inner.ctx.db_context.get_store().tables.read().unwrap().is_empty()
+    inner
+        .ctx
+        .db_context
+        .get_store()
+        .tables
+        .read()
+        .unwrap()
+        .is_empty()
 }
 
 /// Find table cell context for a block (snapshot-friendly, no live handles).
@@ -543,6 +552,7 @@ fn build_raw_fragments(
     // Helper to push a formatted text fragment for bytes [a..b) with the
     // given run's format. Used both for whole runs and for the
     // before-image / after-image slices when an image sits inside a run.
+    #[allow(clippy::too_many_arguments)]
     fn emit_run_text(
         fragments: &mut Vec<FragmentContent>,
         plain: &str,
@@ -888,7 +898,9 @@ pub(crate) fn build_block_snapshot_with_position_and_parent(
     let entity: common::entities::Block = block_dto.clone().into();
     let store = inner.ctx.db_context.get_store();
     let text = common::database::rope_helpers::block_content_via_store(&entity, store);
-    let length = to_usize(common::database::rope_helpers::block_char_length(&entity, store));
+    let length = to_usize(common::database::rope_helpers::block_char_length(
+        &entity, store,
+    ));
     let fragments = build_fragments_with_text(inner, block_id, Some(&text));
 
     Some(BlockSnapshot {

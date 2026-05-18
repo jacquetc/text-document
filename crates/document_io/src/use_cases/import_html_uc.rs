@@ -3,11 +3,12 @@ use crate::ImportHtmlDto;
 use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::block_char_length;
 use common::database::rope_helpers::{
     rope_append_block, rope_append_table_anchor, rope_insert_block_boundary, rope_reset,
 };
-use common::entities::{Block, Document, Frame, FramePosition, List, Resource, Root, Table, TableCell};
+use common::entities::{
+    Block, Document, Frame, FramePosition, List, Resource, Root, Table, TableCell,
+};
 
 use common::long_operation::LongOperation;
 use common::parser_tools::content_parser::{

@@ -92,7 +92,8 @@ impl GetTextAtPositionUseCase {
         let first_block_idx = blocks
             .iter()
             .position(|b| {
-                position >= b.document_position && position <= b.document_position + block_char_length(&b, &store)
+                position >= b.document_position
+                    && position <= b.document_position + block_char_length(b, &store)
             })
             .ok_or_else(|| anyhow!("Position {} is out of document range", position))?;
 
@@ -128,8 +129,7 @@ impl GetTextAtPositionUseCase {
             // Synthesize this block's segments from format_runs to find the first
             // element ID and extract text.
             let block_text = block_content_via_store(block, &uow.store());
-            let owned_segments =
-                inline_segments_for_block(&uow.store(), block.id, &block_text);
+            let owned_segments = inline_segments_for_block(&uow.store(), block.id, &block_text);
 
             let mut current_char_offset: usize = 0;
             let mut current_byte_offset: u32 = 0;
@@ -170,8 +170,8 @@ impl GetTextAtPositionUseCase {
                 // Advance byte offset (Text contributes its UTF-8 length, Image contributes 0)
                 match &seg.content {
                     InlineContent::Text(s) => current_byte_offset += s.len() as u32,
-                    InlineContent::Image { .. } => {},
-                    InlineContent::Empty => {},
+                    InlineContent::Image { .. } => {}
+                    InlineContent::Empty => {}
                 }
 
                 current_char_offset += elem_char_len;

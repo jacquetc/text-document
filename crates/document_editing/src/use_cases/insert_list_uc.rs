@@ -97,7 +97,8 @@ fn execute_insert_list(
     blocks.sort_by_key(|b| b.document_position);
 
     // Find block at position to determine insert index
-    let (_current_block, block_idx, _offset) = find_block_at_position(&blocks, position, &uow.store())?;
+    let (_current_block, block_idx, _offset) =
+        find_block_at_position(&blocks, position, &uow.store())?;
 
     let now = chrono::Utc::now();
 

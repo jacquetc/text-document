@@ -148,16 +148,14 @@ fn execute_merge_text_format(
             continue;
         }
 
-        let local_char_start =
-            std::cmp::max(0, range_start - block_start) as usize;
+        let local_char_start = std::cmp::max(0, range_start - block_start) as usize;
         let local_char_end =
             std::cmp::min(block_char_length(block, &store), range_end - block_start) as usize;
 
         // Rope-native char->byte translation (clamps internally).
         let (byte_start, content_byte_len) =
             block_char_to_byte_in_block(&store, block.id, local_char_start);
-        let (byte_end, _) =
-            block_char_to_byte_in_block(&store, block.id, local_char_end);
+        let (byte_end, _) = block_char_to_byte_in_block(&store, block.id, local_char_end);
 
         if byte_start >= byte_end {
             continue;

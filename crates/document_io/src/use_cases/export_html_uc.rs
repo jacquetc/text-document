@@ -4,10 +4,9 @@ use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::database::rope_helpers::block_content_via_store;
 use common::entities::{
-    Alignment, Block, Document, Frame, List, ListStyle, Root, Table,
-    TableCell, TextDirection,
+    Alignment, Block, Document, Frame, List, ListStyle, Root, Table, TableCell, TextDirection,
 };
-use common::format_runs::{InlineContent};
+use common::format_runs::InlineContent;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
 

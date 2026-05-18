@@ -31,7 +31,8 @@ pub fn block_content_via_store(block: &Block, store: &Store) -> String {
     let content_end = if has_successor && be > bs { be - 1 } else { be };
     drop(offsets);
     let rope = store.rope.read().unwrap();
-    rope.byte_slice(bs as usize..content_end as usize).to_string()
+    rope.byte_slice(bs as usize..content_end as usize)
+        .to_string()
 }
 
 /// Logical character count of a block — what the old
@@ -65,7 +66,7 @@ pub fn block_char_length(block: &Block, store: &Store) -> i64 {
 /// Replaces the per-keystroke hot path in editing use cases
 /// (`find_block_at_position_sequential`) which fetched every block
 /// + called `block_char_length` per block. For an N-block document
-/// each editor keystroke now costs O(log n) lookups instead of O(N).
+///   each editor keystroke now costs O(log n) lookups instead of O(N).
 ///
 /// Returns `None` for documents containing tables — table cell content
 /// lives in separate byte ranges later in the rope (plan §1.6), so the
@@ -75,10 +76,7 @@ pub fn block_char_length(block: &Block, store: &Store) -> i64 {
 ///
 /// `position` past the document end clamps to the last block's
 /// end-of-content.
-pub fn find_block_at_char_position(
-    store: &Store,
-    position: i64,
-) -> Option<(EntityId, i64, i64)> {
+pub fn find_block_at_char_position(store: &Store, position: i64) -> Option<(EntityId, i64, i64)> {
     // Fast path is only valid when EVERY block in the document is
     // mirrored to the rope. Disqualifying cases:
     //
@@ -119,8 +117,7 @@ pub fn find_block_at_char_position(
 
     let offsets = store.block_offsets.read().unwrap();
     let block_id = offsets.marker_at_byte(abs_byte as u32)?.as_block()?;
-    let (bs, be, has_successor) =
-        offsets.range_with_successor(OffsetMarker::Block(block_id))?;
+    let (bs, be, has_successor) = offsets.range_with_successor(OffsetMarker::Block(block_id))?;
     let content_end = if has_successor && be > bs { be - 1 } else { be };
 
     drop(offsets);
@@ -290,7 +287,11 @@ pub fn rope_insert_block_at(store: &Store, byte_pos: u32, block_id: EntityId, te
     // (the prior empty block) stay where they are — the new `\n`
     // is conceptually "after" them.
     offsets.shift_after(byte_pos + 1, delta);
-    offsets.insert_at(new_entry_vec_pos, OffsetMarker::Block(block_id), byte_pos + 1);
+    offsets.insert_at(
+        new_entry_vec_pos,
+        OffsetMarker::Block(block_id),
+        byte_pos + 1,
+    );
 }
 
 /// Walks up `frame.parent_frame` to find the top-level ancestor of
@@ -348,7 +349,11 @@ pub fn rope_insert_block_boundary(store: &Store) {
     let new_total = rope.len_bytes() as u32;
     drop(rope);
 
-    store.block_offsets.write().unwrap().set_total_bytes(new_total);
+    store
+        .block_offsets
+        .write()
+        .unwrap()
+        .set_total_bytes(new_total);
 }
 
 /// Insert `text` at `byte_offset_in_block` inside the block identified
@@ -574,28 +579,28 @@ pub fn rope_insert_table_anchor(
     };
 
     // Insertion strategy:
-    let (rope_inserted, marker_byte_start, new_entry_pos, shift_threshold, shift_delta) =
-        if !after {
-            // Before target: "\u{FFFC}\n" at target.byte_start
-            ("\u{FFFC}\n", insert_pos, target_idx, insert_pos, 4i32)
-        } else if !target_is_last {
-            // After target, with following entries: "\u{FFFC}\n"
-            // at target.byte_end. The TableAnchor sits where the
-            // next block USED to start; that following entry
-            // shifts by 4.
-            (
-                "\u{FFFC}\n",
-                insert_pos,
-                target_idx + 1,
-                insert_pos,
-                4i32,
-            )
-        } else {
-            // After target which is last: "\n\u{FFFC}" appended.
-            // TableAnchor's byte_start sits 1 past the original
-            // total (after the new `\n`).
-            ("\n\u{FFFC}", insert_pos + 1, target_idx + 1, insert_pos, 4i32)
-        };
+    let (rope_inserted, marker_byte_start, new_entry_pos, shift_threshold, shift_delta) = if !after
+    {
+        // Before target: "\u{FFFC}\n" at target.byte_start
+        ("\u{FFFC}\n", insert_pos, target_idx, insert_pos, 4i32)
+    } else if !target_is_last {
+        // After target, with following entries: "\u{FFFC}\n"
+        // at target.byte_end. The TableAnchor sits where the
+        // next block USED to start; that following entry
+        // shifts by 4.
+        ("\u{FFFC}\n", insert_pos, target_idx + 1, insert_pos, 4i32)
+    } else {
+        // After target which is last: "\n\u{FFFC}" appended.
+        // TableAnchor's byte_start sits 1 past the original
+        // total (after the new `\n`).
+        (
+            "\n\u{FFFC}",
+            insert_pos + 1,
+            target_idx + 1,
+            insert_pos,
+            4i32,
+        )
+    };
 
     // 1. Splice the literal bytes into the rope.
     {
@@ -890,12 +895,12 @@ pub fn recompute_all_frame_byte_ranges(store: &Store) {
     for fid in frame_ids {
         let new_range = compute_frame_byte_range_recursive(store, fid);
         let mut frames = store.frames.write().unwrap();
-        if let Some(f) = frames.get(&fid).cloned() {
-            if f.byte_range != new_range {
-                let mut updated = f;
-                updated.byte_range = new_range;
-                frames.insert(fid, updated);
-            }
+        if let Some(f) = frames.get(&fid).cloned()
+            && f.byte_range != new_range
+        {
+            let mut updated = f;
+            updated.byte_range = new_range;
+            frames.insert(fid, updated);
         }
     }
 }
@@ -929,10 +934,10 @@ fn walk_frame_bounds(store: &Store, frame_id: EntityId, bounds: &mut Option<(u32
                 merge(bounds, s, e);
             }
         }
-        if let Some(tid) = table_id {
-            if let Some((s, e)) = offsets.range_of(OffsetMarker::TableAnchor(tid)) {
-                merge(bounds, s, e);
-            }
+        if let Some(tid) = table_id
+            && let Some((s, e)) = offsets.range_of(OffsetMarker::TableAnchor(tid))
+        {
+            merge(bounds, s, e);
         }
     }
 
@@ -945,7 +950,10 @@ fn walk_frame_bounds(store: &Store, frame_id: EntityId, bounds: &mut Option<(u32
     if let Some(tid) = table_id {
         let cell_ids: Vec<EntityId> = {
             let tables = store.tables.read().unwrap();
-            tables.get(&tid).map(|t| t.cells.clone()).unwrap_or_default()
+            tables
+                .get(&tid)
+                .map(|t| t.cells.clone())
+                .unwrap_or_default()
         };
         for cell_id in &cell_ids {
             let cell_frame_id = {

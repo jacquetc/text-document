@@ -221,8 +221,7 @@ fn execute_set_text_format(
         }
 
         // Char-relative range within this block.
-        let local_char_start =
-            std::cmp::max(0, range_start - block_start) as usize;
+        let local_char_start = std::cmp::max(0, range_start - block_start) as usize;
         let local_char_end =
             std::cmp::min(block_char_length(block, &store), range_end - block_start) as usize;
 
@@ -231,8 +230,7 @@ fn execute_set_text_format(
         // separate plain_text_len/min clamp is needed here.
         let (byte_start, content_byte_len) =
             block_char_to_byte_in_block(&store, block.id, local_char_start);
-        let (byte_end, _) =
-            block_char_to_byte_in_block(&store, block.id, local_char_end);
+        let (byte_end, _) = block_char_to_byte_in_block(&store, block.id, local_char_end);
 
         if byte_start >= byte_end {
             continue;

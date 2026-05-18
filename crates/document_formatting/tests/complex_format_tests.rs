@@ -13,9 +13,9 @@ use document_formatting::{
 };
 
 use test_harness::{
-    block_controller, create_list, export_text, frame_controller, get_all_block_ids,
-    get_block_ids, get_frame_id, get_sorted_cells, insert_frame, insert_image, insert_table,
-    list_controller, setup_with_text, table_cell_controller, table_controller,
+    block_controller, create_list, export_text, frame_controller, get_all_block_ids, get_block_ids,
+    get_frame_id, get_sorted_cells, insert_frame, insert_image, insert_table, list_controller,
+    setup_with_text, table_cell_controller, table_controller,
 };
 
 #[test]
@@ -464,8 +464,7 @@ fn test_format_blocks_across_multiple_frames() -> Result<()> {
         min_pos = min_pos.min(b.document_position);
         let entity: common::entities::Block = b.clone().into();
         max_end = max_end.max(
-            b.document_position
-                + common::database::rope_helpers::block_char_length(&entity, store),
+            b.document_position + common::database::rope_helpers::block_char_length(&entity, store),
         );
     }
 

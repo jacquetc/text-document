@@ -3,8 +3,8 @@ use crate::InsertMarkdownAtPositionDto;
 use crate::InsertMarkdownAtPositionResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_char_length, 
-    block_content_via_store, rope_insert_block_at, rope_insert_in_block,
+use common::database::rope_helpers::{
+    block_char_length, block_content_via_store, rope_insert_block_at, rope_insert_in_block,
     rope_replace_block_content,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
@@ -12,8 +12,8 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, List, Root};
 use common::format_runs::{
-    FormatRun, coalesce_in_place, logical_offset_to_byte,
-    shift_images_for_insert, shift_runs_for_insert, splice_range, split_images_at, split_runs_at,
+    FormatRun, coalesce_in_place, logical_offset_to_byte, shift_images_for_insert,
+    shift_runs_for_insert, splice_range, split_images_at, split_runs_at,
 };
 
 use common::parser_tools::content_parser::{self, ParsedBlock, format_runs_from_spans};
@@ -123,7 +123,8 @@ fn execute_content_insert(
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    let (current_block, block_idx, offset) = find_block_at_position(&blocks, position, &uow.store())?;
+    let (current_block, block_idx, offset) =
+        find_block_at_position(&blocks, position, &uow.store())?;
 
     // Snapshot the current block's format runs and images so we can split /
     // shift them without holding a long-lived borrow on the store.
@@ -149,8 +150,7 @@ fn execute_content_insert(
     let current_block_text = block_content_via_store(&current_block, &store);
     let original_current_char_length =
         current_block_text.chars().count() as i64 + current_images.len() as i64;
-    let byte_offset =
-        logical_offset_to_byte(&current_block_text, &current_images, offset);
+    let byte_offset = logical_offset_to_byte(&current_block_text, &current_images, offset);
 
     let now = chrono::Utc::now();
 
@@ -167,8 +167,7 @@ fn execute_content_insert(
         let inserted_bytes = inserted_plain.len() as u32;
 
         // Build the new plain_text.
-        let mut new_plain =
-            String::with_capacity(current_block_text.len() + inserted_plain.len());
+        let mut new_plain = String::with_capacity(current_block_text.len() + inserted_plain.len());
         new_plain.push_str(&current_block_text[..byte_offset as usize]);
         new_plain.push_str(&inserted_plain);
         new_plain.push_str(&current_block_text[byte_offset as usize..]);
@@ -230,11 +229,11 @@ fn execute_content_insert(
     // ── Block-splitting path (multi-block or block-level formatting) ──
     let text_before = current_block_text[..byte_offset as usize].to_string();
     let text_after = current_block_text[byte_offset as usize..].to_string();
-    let text_after_chars = text_after.chars().count() as i64;
+    let _text_after_chars = text_after.chars().count() as i64;
 
     let (left_runs, right_runs) = split_runs_at(&current_runs, byte_offset);
     let (left_images, right_images) = split_images_at(&current_images, byte_offset);
-    let left_image_count = left_images.len() as i64;
+    let _left_image_count = left_images.len() as i64;
 
     if parsed_blocks.len() >= 2 {
         // ── Multi-block: merge inline-only first/last, standalone otherwise ──
@@ -266,7 +265,7 @@ fn execute_content_insert(
         } else {
             (text_before.clone(), left_runs.clone())
         };
-        let head_chars = head_plain.chars().count() as i64;
+        let _head_chars = head_plain.chars().count() as i64;
         updated_current.updated_at = now;
         write_block_state(uow, current_block.id, head_runs, left_images);
 
@@ -306,9 +305,7 @@ fn execute_content_insert(
             let block_text_len = block_plain.chars().count() as i64;
 
             let list_id = if let Some(ref list_style) = parsed.list_style {
-                if let Some(existing_id) =
-                    list_grouper.try_reuse(list_style, parsed.list_indent)
-                {
+                if let Some(existing_id) = list_grouper.try_reuse(list_style, parsed.list_indent) {
                     Some(existing_id)
                 } else {
                     let list = List {
@@ -321,11 +318,7 @@ fn execute_content_insert(
                         suffix: String::new(),
                     };
                     let created_list = uow.create_list(&list, doc_id, -1)?;
-                    list_grouper.register(
-                        created_list.id,
-                        list_style.clone(),
-                        parsed.list_indent,
-                    );
+                    list_grouper.register(created_list.id, list_style.clone(), parsed.list_indent);
                     Some(created_list.id)
                 }
             } else {
@@ -462,8 +455,7 @@ fn execute_content_insert(
 
         let standalone_count = (middle_end - middle_start) as i64;
         let blocks_added = standalone_count + 1;
-        let original_next_pos =
-            current_block.document_position + original_current_char_length + 1;
+        let original_next_pos = current_block.document_position + original_current_char_length + 1;
         let new_next_pos = running_position + block_char_length(&created_tail, &store) + 1;
         let pos_shift = new_next_pos - original_next_pos;
 
@@ -618,8 +610,7 @@ fn execute_content_insert(
         uow.update_frame(&updated_frame)?;
 
         let blocks_added: i64 = 2;
-        let original_next_pos =
-            current_block.document_position + original_current_char_length + 1;
+        let original_next_pos = current_block.document_position + original_current_char_length + 1;
         let new_next_pos = running_position + block_char_length(&created_tail, &store) + 1;
         let pos_shift = new_next_pos - original_next_pos;
 

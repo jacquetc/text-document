@@ -217,10 +217,7 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
         .expect("last block should exist");
     let last_entity: common::entities::Block = last_block.clone().into();
     let insert_pos = last_block.document_position
-        + common::database::rope_helpers::block_char_length(
-            &last_entity,
-            db_context.get_store(),
-        );
+        + common::database::rope_helpers::block_char_length(&last_entity, db_context.get_store());
 
     document_editing_controller::insert_fragment(
         &db_context,
@@ -377,10 +374,7 @@ fn test_extract_insert_with_list() -> Result<()> {
         block_controller::get(&db_context, all_block_ids.last().unwrap())?.expect("last block");
     let last_entity: common::entities::Block = last_block.clone().into();
     let insert_pos = last_block.document_position
-        + common::database::rope_helpers::block_char_length(
-            &last_entity,
-            db_context.get_store(),
-        );
+        + common::database::rope_helpers::block_char_length(&last_entity, db_context.get_store());
 
     document_editing_controller::insert_fragment(
         &db_context,
@@ -607,8 +601,7 @@ fn test_extract_fragment_multiple_formats() -> Result<()> {
     let mut found_bold = false;
     let mut found_italic = false;
     for block_id in &block_ids {
-        let elem_ids =
-            get_element_ids(&db2, block_id)?;
+        let elem_ids = get_element_ids(&db2, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db2, elem_id)?.unwrap();
             if elem.fmt_font_bold == Some(true) {

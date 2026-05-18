@@ -59,7 +59,7 @@ text-document = { version = "1.4.2", path = "crates/public_api" }
 test_harness = { version = "1.4.2", path = "crates/test_harness", package = "text-document-test-harness" }
 
 [profile.release]
-lto = "fat"
+lto = "thin"
 panic = "abort"
 strip = true
 codegen-units = 1

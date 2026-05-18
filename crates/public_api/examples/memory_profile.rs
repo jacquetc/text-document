@@ -30,7 +30,10 @@ unsafe impl GlobalAlloc for Counting {
 static A: Counting = Counting;
 
 fn snapshot() -> (usize, usize) {
-    (CURRENT.load(Ordering::Relaxed), PEAK.load(Ordering::Relaxed))
+    (
+        CURRENT.load(Ordering::Relaxed),
+        PEAK.load(Ordering::Relaxed),
+    )
 }
 
 fn reset_peak() {
@@ -135,7 +138,10 @@ fn main() {
         SAMPLE.chars().count()
     );
     println!();
-    println!("  {:<46}  {:<22}  {}", "Scenario", "Live (after build)", "Peak during build");
+    println!(
+        "  {:<46}  {:<22}  Peak during build",
+        "Scenario", "Live (after build)"
+    );
     println!("  {}", "-".repeat(94));
 
     let a = measure("A. baseline doc (undo cleared)", build_baseline);
@@ -207,7 +213,10 @@ fn main() {
     let g = measure("G. 100 blocks × 1 KB each (undo cleared)", || {
         let d = TextDocument::new();
         let para: String = "x".repeat(1024);
-        let text = (0..100).map(|_| para.as_str()).collect::<Vec<_>>().join("\n");
+        let text = (0..100)
+            .map(|_| para.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         d.set_plain_text(&text).unwrap();
         d.clear_undo_redo();
         d
@@ -235,20 +244,23 @@ fn main() {
         d
     });
 
-    let i = measure("I. 10×10 table filled with 20-char cells (undo cleared)", || {
-        let d = TextDocument::new();
-        d.set_plain_text("").unwrap();
-        let cur = d.cursor_at(0);
-        let _ = cur.insert_table(10, 10).unwrap();
-        // Fill each cell with 20 chars. Walk the cell grid via cursor moves
-        // is fragile across versions; rely on the cursor landing inside the
-        // first cell after insert_table and stepping through with Tab-style
-        // motion via re-positioning by character count is unreliable, so
-        // we only measure the empty-table cost here. This isolates the
-        // structural overhead of 100 cells without per-cell content noise.
-        d.clear_undo_redo();
-        d
-    });
+    let i = measure(
+        "I. 10×10 table filled with 20-char cells (undo cleared)",
+        || {
+            let d = TextDocument::new();
+            d.set_plain_text("").unwrap();
+            let cur = d.cursor_at(0);
+            let _ = cur.insert_table(10, 10).unwrap();
+            // Fill each cell with 20 chars. Walk the cell grid via cursor moves
+            // is fragile across versions; rely on the cursor landing inside the
+            // first cell after insert_table and stepping through with Tab-style
+            // motion via re-positioning by character count is unreliable, so
+            // we only measure the empty-table cost here. This isolates the
+            // structural overhead of 100 cells without per-cell content noise.
+            d.clear_undo_redo();
+            d
+        },
+    );
 
     let j = measure("J. 100 KB doc + 1000 small inserts (undo KEPT)", || {
         let d = TextDocument::new();
@@ -265,19 +277,43 @@ fn main() {
 
     let (residual, _) = snapshot();
     println!();
-    println!("Residual heap after all docs dropped: {}", fmt(residual as isize));
+    println!(
+        "Residual heap after all docs dropped: {}",
+        fmt(residual as isize)
+    );
 
     println!();
     println!("Deltas:");
-    println!("  undo cost, 10 small ops    B - B'      = {}", fmt(b.0 - b_prime.0));
-    println!("  undo cost, 1 paste op      C - C'      = {}", fmt(c.0 - c_prime.0));
-    println!("  data cost of 2× content    D - A       = {}", fmt(d.0 - a.0));
-    println!("  paste residue vs raw 2×    C' - D      = {}", fmt(c_prime.0 - d.0));
-    println!("  10 small ops residual data B' - A      = {}", fmt(b_prime.0 - a.0));
+    println!(
+        "  undo cost, 10 small ops    B - B'      = {}",
+        fmt(b.0 - b_prime.0)
+    );
+    println!(
+        "  undo cost, 1 paste op      C - C'      = {}",
+        fmt(c.0 - c_prime.0)
+    );
+    println!(
+        "  data cost of 2× content    D - A       = {}",
+        fmt(d.0 - a.0)
+    );
+    println!(
+        "  paste residue vs raw 2×    C' - D      = {}",
+        fmt(c_prime.0 - d.0)
+    );
+    println!(
+        "  10 small ops residual data B' - A      = {}",
+        fmt(b_prime.0 - a.0)
+    );
     println!("  empty doc floor            E           = {}", fmt(e.0));
     println!("  data + structure 1MB plain F           = {}", fmt(f.0));
     println!("  100×1KB blocks             G           = {}", fmt(g.0));
-    println!("  format-run-heavy 3KB doc   H - A       = {}", fmt(h.0 - a.0));
-    println!("  100-cell table cost        I - E       = {}", fmt(i.0 - e.0));
+    println!(
+        "  format-run-heavy 3KB doc   H - A       = {}",
+        fmt(h.0 - a.0)
+    );
+    println!(
+        "  100-cell table cost        I - E       = {}",
+        fmt(i.0 - e.0)
+    );
     println!("  1000 inserts undo cost     J (live)    = {}", fmt(j.0));
 }

@@ -140,7 +140,11 @@ impl BlockOffsetIndex {
     /// Remove a contiguous range of entries, equivalent to
     /// `entries.drain(start..=end_inclusive)` plus the matching
     /// marker_index maintenance. Returns the removed entries.
-    pub fn drain_inclusive(&mut self, start: usize, end_inclusive: usize) -> Vec<(OffsetMarker, u32)> {
+    pub fn drain_inclusive(
+        &mut self,
+        start: usize,
+        end_inclusive: usize,
+    ) -> Vec<(OffsetMarker, u32)> {
         let removed: Vec<_> = self.entries.drain(start..=end_inclusive).collect();
         for (m, _) in &removed {
             self.marker_index.remove(m);

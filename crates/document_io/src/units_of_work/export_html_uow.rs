@@ -7,9 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{
-    Block, Document, Frame, List, Resource, Root, Table, TableCell,
-};
+use common::entities::{Block, Document, Frame, List, Resource, Root, Table, TableCell};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]

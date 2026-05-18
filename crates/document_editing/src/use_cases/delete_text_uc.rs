@@ -97,14 +97,22 @@ fn clear_block(
     uow.update_block(&updated)?;
     let store = uow.store();
     common::database::rope_helpers::rope_replace_block_content(&store, block.id, "");
-    store.format_runs.write().unwrap().insert(block.id, Vec::new());
-    store.block_images.write().unwrap().insert(block.id, Vec::new());
+    store
+        .format_runs
+        .write()
+        .unwrap()
+        .insert(block.id, Vec::new());
+    store
+        .block_images
+        .write()
+        .unwrap()
+        .insert(block.id, Vec::new());
     Ok(())
 }
 
 /// Drop the per-block run/image/inline_elements tables for a block that's
 /// about to be removed entirely. Idempotent.
-fn drop_block_runs_and_images(uow: &Box<dyn DeleteTextUnitOfWorkTrait>, block_id: EntityId) {
+fn drop_block_runs_and_images(uow: &dyn DeleteTextUnitOfWorkTrait, block_id: EntityId) {
     let store = uow.store();
     store.format_runs.write().unwrap().remove(&block_id);
     store.block_images.write().unwrap().remove(&block_id);
@@ -191,7 +199,7 @@ fn execute_delete(
                 b.document_position = running;
                 blocks_to_refresh.push(b.clone());
             }
-            running += block_char_length(&b, &store) + 1;
+            running += block_char_length(b, &store) + 1;
         }
     }
     if !blocks_to_refresh.is_empty() {
@@ -199,7 +207,8 @@ fn execute_delete(
     }
     blocks.sort_by_key(|b| b.document_position);
 
-    let (start_block, start_block_idx, start_offset) = find_block_at_position(&blocks, start, &uow.store())?;
+    let (start_block, start_block_idx, start_offset) =
+        find_block_at_position(&blocks, start, &uow.store())?;
 
     // ── Cell selection safety: detect cross-cell deletion ──────────
     let table_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Tables)?;
@@ -223,7 +232,8 @@ fn execute_delete(
         let mut first_cell: Option<Option<EntityId>> = None;
         let mut cross = false;
         for block in &blocks {
-            if block.document_position + block_char_length(&block, &store) < start || block.document_position > end
+            if block.document_position + block_char_length(block, &store) < start
+                || block.document_position > end
             {
                 continue;
             }
@@ -248,7 +258,7 @@ fn execute_delete(
             std::collections::HashSet::new();
         let mut affected_cell_frames: Vec<EntityId> = Vec::new();
         for block in &blocks {
-            if block.document_position + block_char_length(&block, &store) >= start
+            if block.document_position + block_char_length(block, &store) >= start
                 && block.document_position <= end
                 && let Some(&cf_id) = block_to_cell_frame.get(&block.id)
                 && affected_set.insert(cf_id)
@@ -270,14 +280,17 @@ fn execute_delete(
                 continue;
             }
 
-            let cell_chars: i64 = cell_blocks.iter().map(|b| block_char_length(&b, &store)).sum();
+            let cell_chars: i64 = cell_blocks
+                .iter()
+                .map(|b| block_char_length(b, &store))
+                .sum();
             total_chars_removed += cell_chars;
 
             clear_block(uow, &cell_blocks[0], now)?;
 
             let extra_block_ids: Vec<EntityId> = cell_blocks[1..].iter().map(|b| b.id).collect();
             for &eid in &extra_block_ids {
-                drop_block_runs_and_images(uow, eid);
+                drop_block_runs_and_images(uow.as_ref(), eid);
                 uow.remove_block(&eid)?;
             }
 
@@ -309,7 +322,8 @@ fn execute_delete(
                     let blk_opts = uow.get_block_multi(&blk_ids)?;
                     for b in blk_opts.into_iter().flatten() {
                         table_min_pos = table_min_pos.min(b.document_position);
-                        table_max_pos = table_max_pos.max(b.document_position + block_char_length(&b, &store));
+                        table_max_pos =
+                            table_max_pos.max(b.document_position + block_char_length(&b, &store));
                     }
                 }
             }
@@ -350,9 +364,9 @@ fn execute_delete(
             updated_root.child_order.retain(|entry| {
                 if *entry < 0 {
                     let anchor_id = (-entry) as EntityId;
-                    !tables_to_remove.iter().any(|_| {
-                        uow.get_frame(&anchor_id).ok().flatten().is_none()
-                    })
+                    !tables_to_remove
+                        .iter()
+                        .any(|_| uow.get_frame(&anchor_id).ok().flatten().is_none())
                 } else {
                     true
                 }
@@ -368,7 +382,7 @@ fn execute_delete(
 
         for block in &blocks {
             let block_start = block.document_position;
-            let block_end = block_start + block_char_length(&block, &store);
+            let block_end = block_start + block_char_length(block, &store);
             if block_end < start || block_start >= end {
                 continue;
             }
@@ -385,11 +399,11 @@ fn execute_delete(
         let last_id = last_non_cell.map(|b| b.id);
         let first_is_partial = first_non_cell.is_some_and(|b| start > b.document_position);
         let last_is_partial =
-            last_non_cell.is_some_and(|b| end < b.document_position + block_char_length(&b, &store));
+            last_non_cell.is_some_and(|b| end < b.document_position + block_char_length(b, &store));
 
         for block in &blocks {
             let block_start = block.document_position;
-            let block_end = block_start + block_char_length(&block, &store);
+            let block_end = block_start + block_char_length(block, &store);
             if block_end < start || block_start >= end {
                 continue;
             }
@@ -401,16 +415,22 @@ fn execute_delete(
             let is_last = Some(block.id) == last_id && last_is_partial;
 
             if is_first || is_last {
-                let local_char_start =
-                    if is_first { (start - block_start) as i64 } else { 0 };
-                let local_char_end =
-                    if is_last { (end - block_start) as i64 } else { block_char_length(&block, &store) };
+                let local_char_start = if is_first {
+                    (start - block_start) as i64
+                } else {
+                    0
+                };
+                let local_char_end = if is_last {
+                    (end - block_start) as i64
+                } else {
+                    block_char_length(block, &store)
+                };
                 let chars_removed_this =
                     delete_char_range_in_block(uow, block, local_char_start, local_char_end)?;
                 total_chars_removed += chars_removed_this;
             } else {
-                total_chars_removed += block_char_length(&block, &store);
-                drop_block_runs_and_images(uow, block.id);
+                total_chars_removed += block_char_length(block, &store);
+                drop_block_runs_and_images(uow.as_ref(), block.id);
                 uow.remove_block(&block.id)?;
                 non_cell_blocks_to_remove.push(block.id);
             }
@@ -540,10 +560,7 @@ fn execute_delete(
             // re-register a single empty block matching the entity we just
             // created. No-op under default backend.
             common::database::rope_helpers::rope_reset(&uow.store());
-            common::database::rope_helpers::rope_append_empty_block(
-                &uow.store(),
-                created.id,
-            );
+            common::database::rope_helpers::rope_append_empty_block(&uow.store(), created.id);
         }
 
         let actual_block_count = {
@@ -575,7 +592,8 @@ fn execute_delete(
     }
     // ── End cell selection safety ──────────────────────────────────
 
-    let (end_block, end_block_idx, end_offset) = find_block_at_position(&blocks, end, &uow.store())?;
+    let (end_block, end_block_idx, end_offset) =
+        find_block_at_position(&blocks, end, &uow.store())?;
     let delete_len = end - start;
 
     if start_block_idx == end_block_idx {
@@ -586,12 +604,10 @@ fn execute_delete(
         let byte_so = logical_offset_to_byte(&start_block_text, &images, start_offset);
         let byte_eo = logical_offset_to_byte(&start_block_text, &images, end_offset);
 
-        let deleted_text: String =
-            start_block_text[byte_so as usize..byte_eo as usize].to_string();
+        let deleted_text: String = start_block_text[byte_so as usize..byte_eo as usize].to_string();
 
-        let mut new_plain = String::with_capacity(
-            start_block_text.len() - (byte_eo - byte_so) as usize,
-        );
+        let mut new_plain =
+            String::with_capacity(start_block_text.len() - (byte_eo - byte_so) as usize);
         new_plain.push_str(&start_block_text[..byte_so as usize]);
         new_plain.push_str(&start_block_text[byte_eo as usize..]);
         {
@@ -767,7 +783,7 @@ fn execute_delete(
         let removed_count = blocks_to_remove.len() as i64;
 
         for block_id in &blocks_to_remove {
-            drop_block_runs_and_images(uow, *block_id);
+            drop_block_runs_and_images(uow.as_ref(), *block_id);
             // `rope_merge_block_range` only drains entries in the
             // rope-adjacent slice [start_idx+1..=end_idx]. Blocks
             // whose rope position is outside that slice (notably
@@ -861,9 +877,7 @@ fn delete_char_range_in_block(
         .chars()
         .count() as i64;
 
-    let mut new_plain = String::with_capacity(
-        block_text.len() - (byte_end - byte_start) as usize,
-    );
+    let mut new_plain = String::with_capacity(block_text.len() - (byte_end - byte_start) as usize);
     new_plain.push_str(&block_text[..byte_start as usize]);
     new_plain.push_str(&block_text[byte_end as usize..]);
 

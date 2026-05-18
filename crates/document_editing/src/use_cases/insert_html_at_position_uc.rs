@@ -3,8 +3,8 @@ use crate::InsertHtmlAtPositionDto;
 use crate::InsertHtmlAtPositionResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_char_length, 
-    block_content_via_store, rope_insert_block_at, rope_insert_in_block,
+use common::database::rope_helpers::{
+    block_char_length, block_content_via_store, rope_insert_block_at, rope_insert_in_block,
     rope_replace_block_content,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
@@ -12,8 +12,8 @@ use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::entities::{Block, Document, Frame, List, Root};
 use common::format_runs::{
-    FormatRun, coalesce_in_place, logical_offset_to_byte,
-    shift_images_for_insert, shift_runs_for_insert, splice_range, split_images_at, split_runs_at,
+    FormatRun, coalesce_in_place, logical_offset_to_byte, shift_images_for_insert,
+    shift_runs_for_insert, splice_range, split_images_at, split_runs_at,
 };
 
 use common::parser_tools::content_parser::{self, ParsedBlock, format_runs_from_spans};
@@ -122,7 +122,8 @@ fn execute_content_insert(
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    let (current_block, block_idx, offset) = find_block_at_position(&blocks, position, &uow.store())?;
+    let (current_block, block_idx, offset) =
+        find_block_at_position(&blocks, position, &uow.store())?;
 
     let store = uow.store();
     let (current_runs, current_images) = {
@@ -165,8 +166,7 @@ fn execute_content_insert(
         }
 
         let inserted_bytes = inserted_plain.len() as u32;
-        let mut new_plain =
-            String::with_capacity(current_block_text.len() + inserted_plain.len());
+        let mut new_plain = String::with_capacity(current_block_text.len() + inserted_plain.len());
         new_plain.push_str(&current_block_text[..byte_offset as usize]);
         new_plain.push_str(&inserted_plain);
         new_plain.push_str(&current_block_text[byte_offset as usize..]);
@@ -245,16 +245,15 @@ fn execute_content_insert(
         let overwrite_head = text_before.is_empty() && !merge_first;
 
         let mut list_grouper = ListGrouper::new();
-        if !overwrite_head {
-            if let Some(list_id) = current_block.list
-                && let Ok(Some(list_entity)) = uow.get_list(&list_id)
-            {
-                list_grouper.register(
-                    list_id,
-                    list_entity.style.clone(),
-                    list_entity.indent as u32,
-                );
-            }
+        if !overwrite_head
+            && let Some(list_id) = current_block.list
+            && let Ok(Some(list_entity)) = uow.get_list(&list_id)
+        {
+            list_grouper.register(
+                list_id,
+                list_entity.style.clone(),
+                list_entity.indent as u32,
+            );
         }
 
         let mut updated_current = current_block.clone();
@@ -298,8 +297,7 @@ fn execute_content_insert(
             // rebuild from the new (plain_text, runs, images).
             (first_plain.clone(), first_runs_at_zero.clone(), Vec::new())
         } else if merge_first {
-            let mut hp =
-                String::with_capacity(text_before.len() + first_plain.len());
+            let mut hp = String::with_capacity(text_before.len() + first_plain.len());
             hp.push_str(&text_before);
             hp.push_str(&first_plain);
             let mut runs = left_runs.clone();
@@ -363,9 +361,7 @@ fn execute_content_insert(
             let block_text_len = block_plain.chars().count() as i64;
 
             let list_id = if let Some(ref list_style) = parsed.list_style {
-                if let Some(existing_id) =
-                    list_grouper.try_reuse(list_style, parsed.list_indent)
-                {
+                if let Some(existing_id) = list_grouper.try_reuse(list_style, parsed.list_indent) {
                     Some(existing_id)
                 } else {
                     let list = List {
@@ -378,11 +374,7 @@ fn execute_content_insert(
                         suffix: String::new(),
                     };
                     let created_list = uow.create_list(&list, doc_id, -1)?;
-                    list_grouper.register(
-                        created_list.id,
-                        list_style.clone(),
-                        parsed.list_indent,
-                    );
+                    list_grouper.register(created_list.id, list_style.clone(), parsed.list_indent);
                     Some(created_list.id)
                 }
             } else {
@@ -434,7 +426,7 @@ fn execute_content_insert(
         let (last_plain, last_runs_at_zero) = parsed_block_payload(last_parsed);
         let last_len = last_plain.chars().count() as i64;
 
-        let (tail_plain, tail_runs, tail_images, tail_chars) = if merge_last {
+        let (tail_plain, tail_runs, tail_images, _tail_chars) = if merge_last {
             let mut tp = String::with_capacity(last_plain.len() + text_after.len());
             tp.push_str(&last_plain);
             tp.push_str(&text_after);
@@ -480,7 +472,11 @@ fn execute_content_insert(
                 id: 0,
                 created_at: now,
                 updated_at: now,
-                list: if overwrite_head { None } else { current_block.list },
+                list: if overwrite_head {
+                    None
+                } else {
+                    current_block.list
+                },
                 document_position: running_position,
                 fmt_alignment: if overwrite_head {
                     None
@@ -593,8 +589,7 @@ fn execute_content_insert(
 
         let standalone_count = (middle_end - middle_start) as i64;
         let blocks_added = standalone_count + if skip_tail { 0 } else { 1 };
-        let original_next_pos =
-            current_block.document_position + original_current_char_length + 1;
+        let original_next_pos = current_block.document_position + original_current_char_length + 1;
         let pos_shift = running_position - original_next_pos;
 
         let mut blocks_to_update: Vec<Block> = Vec::new();
@@ -657,12 +652,7 @@ fn execute_content_insert(
             updated_current.fmt_background_color = parsed.background_color.clone();
             updated_current.updated_at = now;
             uow.update_block_with_relationships(&updated_current)?;
-            write_block_state(
-                uow,
-                current_block.id,
-                block_runs,
-                Vec::new(),
-            );
+            write_block_state(uow, current_block.id, block_runs, Vec::new());
 
             // Mirror the head's new content into the rope (skipped
             // when the head wasn't in the rope, e.g. unseeded tests).
@@ -728,8 +718,7 @@ fn execute_content_insert(
 
             if !new_block_ids.is_empty() {
                 let mut updated_frame = frame.clone();
-                let child_order_insert_pos =
-                    (block_idx + 1).min(updated_frame.child_order.len());
+                let child_order_insert_pos = (block_idx + 1).min(updated_frame.child_order.len());
                 for (i, &block_id) in new_block_ids.iter().enumerate() {
                     updated_frame
                         .child_order
@@ -742,7 +731,8 @@ fn execute_content_insert(
             }
 
             let blocks_added: i64 = if skip_tail { 0 } else { 1 };
-            let head_delta = block_char_length(&updated_current, &store) - original_current_char_length;
+            let head_delta =
+                block_char_length(&updated_current, &store) - original_current_char_length;
             let original_next_pos =
                 current_block.document_position + original_current_char_length + 1;
             let pos_shift = running_position - original_next_pos;

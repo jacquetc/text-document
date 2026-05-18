@@ -114,7 +114,7 @@ impl ExtractFragmentUseCase {
             let mut first_cell: Option<Option<EntityId>> = None;
             let mut cross = false;
             for block in &blocks {
-                if block.document_position + block_char_length(&block, &store) < start
+                if block.document_position + block_char_length(block, &store) < start
                     || block.document_position >= end
                 {
                     continue;
@@ -142,7 +142,7 @@ impl ExtractFragmentUseCase {
 
             for block in &blocks {
                 let block_start = block.document_position;
-                let block_end = block_start + block_char_length(&block, &store);
+                let block_end = block_start + block_char_length(block, &store);
 
                 if block_end < start || block_start >= end {
                     continue;
@@ -229,15 +229,11 @@ impl ExtractFragmentUseCase {
                     let local_end = if end < block_end {
                         (end - block_start) as usize
                     } else {
-                        block_char_length(&block, &store) as usize
+                        block_char_length(block, &store) as usize
                     };
 
                     let block_text = block_content_via_store(block, &uow.store());
-                    let elements = inline_segments_for_block(
-                        &uow.store(),
-                        block.id,
-                        &block_text,
-                    );
+                    let elements = inline_segments_for_block(&uow.store(), block.id, &block_text);
 
                     let list = if let Some(list_id) = block.list {
                         uow.get_list(&list_id)?
@@ -256,8 +252,8 @@ impl ExtractFragmentUseCase {
                     // it, so covering its entire text is sufficient.
                     let is_last_block = block.id == blocks.last().map(|b| b.id).unwrap_or_default();
                     let is_full_block = local_start == 0
-                        && local_end == block_char_length(&block, &store) as usize
-                        && (end > block_start + block_char_length(&block, &store) || is_last_block);
+                        && local_end == block_char_length(block, &store) as usize
+                        && (end > block_start + block_char_length(block, &store) || is_last_block);
 
                     plain_texts.push(extracted_text.clone());
                     fragment_blocks.push(block_to_fragment_block(
@@ -294,7 +290,7 @@ impl ExtractFragmentUseCase {
 
         for block in &blocks {
             let block_start = block.document_position;
-            let block_end = block_start + block_char_length(&block, &store);
+            let block_end = block_start + block_char_length(block, &store);
 
             if block_end < start || block_start >= end {
                 continue;
@@ -308,15 +304,11 @@ impl ExtractFragmentUseCase {
             let local_end = if end < block_end {
                 (end - block_start) as usize
             } else {
-                block_char_length(&block, &store) as usize
+                block_char_length(block, &store) as usize
             };
 
             let block_text = block_content_via_store(block, &uow.store());
-            let elements = inline_segments_for_block(
-                &uow.store(),
-                block.id,
-                &block_text,
-            );
+            let elements = inline_segments_for_block(&uow.store(), block.id, &block_text);
 
             let list = if let Some(list_id) = block.list {
                 uow.get_list(&list_id)?
@@ -333,8 +325,8 @@ impl ExtractFragmentUseCase {
             // it, so covering its entire text is sufficient.
             let is_last_block = block.id == blocks.last().map(|b| b.id).unwrap_or_default();
             let is_full_block = local_start == 0
-                && local_end == block_char_length(&block, &store) as usize
-                && (end > block_start + block_char_length(&block, &store) || is_last_block);
+                && local_end == block_char_length(block, &store) as usize
+                && (end > block_start + block_char_length(block, &store) || is_last_block);
 
             plain_texts.push(extracted_text.clone());
             fragment_blocks.push(block_to_fragment_block(

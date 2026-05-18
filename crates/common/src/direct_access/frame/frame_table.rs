@@ -84,7 +84,14 @@ impl<'a> FrameTable for FrameHashMapTable<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Frame>, RepositoryError> {
-        Ok(self.store.frames.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .frames
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn update(&mut self, entity: &Frame) -> Result<Frame, RepositoryError> {
@@ -234,7 +241,9 @@ impl<'a> FrameTable for FrameHashMapTable<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|f| read_field(f, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|f| read_field(f, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -268,7 +277,13 @@ impl<'a> FrameTable for FrameHashMapTable<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|f| read_field(f, field).into_iter().skip(offset).take(limit).collect())
+            .map(|f| {
+                read_field(f, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -354,7 +369,14 @@ impl<'a> FrameTableRO for FrameHashMapTableRO<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Frame>, RepositoryError> {
-        Ok(self.store.frames.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .frames
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn get_relationship(
@@ -382,7 +404,9 @@ impl<'a> FrameTableRO for FrameHashMapTableRO<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|f| read_field(f, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|f| read_field(f, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -416,7 +440,13 @@ impl<'a> FrameTableRO for FrameHashMapTableRO<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|f| read_field(f, field).into_iter().skip(offset).take(limit).collect())
+            .map(|f| {
+                read_field(f, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 

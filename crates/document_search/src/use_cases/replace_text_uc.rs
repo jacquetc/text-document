@@ -139,8 +139,8 @@ fn replace_in_block(
     new_plain.push_str(&block_text[byte_end as usize..]);
 
     let inserted_byte_len = replacement.len() as u32;
-    let replacement_char_len = replacement.chars().count() as i64;
-    let removed_text_chars = block_text[byte_start as usize..byte_end as usize]
+    let _replacement_char_len = replacement.chars().count() as i64;
+    let _removed_text_chars = block_text[byte_start as usize..byte_end as usize]
         .chars()
         .count() as i64;
 
@@ -157,7 +157,7 @@ fn replace_in_block(
         shift_runs_for_insert(runs, byte_start, inserted_byte_len);
         debug_assert_well_formed(runs, new_plain.len());
     }
-    let images_removed = {
+    let _images_removed = {
         let mut images_map = store.block_images.write().unwrap();
         let images = images_map.entry(block.id).or_default();
         let removed = shift_images_for_delete(images, byte_start, byte_end);

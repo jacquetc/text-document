@@ -3,16 +3,13 @@ use crate::ImportMarkdownDto;
 use crate::ImportMarkdownResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::block_char_length;
 use common::database::rope_helpers::{
     rope_append_block, rope_append_table_anchor, rope_insert_block_boundary, rope_reset,
 };
 use common::entities::{Block, Document, Frame, FramePosition, List, Root, Table, TableCell};
 
 use common::long_operation::LongOperation;
-use common::parser_tools::content_parser::{
-    ParsedElement, format_runs_from_spans, parse_markdown,
-};
+use common::parser_tools::content_parser::{ParsedElement, format_runs_from_spans, parse_markdown};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::sync::Arc;
@@ -293,8 +290,7 @@ fn import_parsed_elements(
                         let cell_frame = Frame::default();
                         let created_cell_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
 
-                        let (plain_text, format_runs) =
-                            format_runs_from_spans(&cell.spans, false);
+                        let (plain_text, format_runs) = format_runs_from_spans(&cell.spans, false);
 
                         // Create block in cell frame
                         let block = Block {

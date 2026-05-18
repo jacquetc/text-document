@@ -4,8 +4,8 @@
 extern crate text_document_search as document_search;
 
 use anyhow::Result;
-use document_search::document_search_controller;
 use document_search::ReplaceTextDto;
+use document_search::document_search_controller;
 use test_harness::setup_with_imported_text;
 
 /// `replace_text` mutates `block.plain_text` and must also mirror

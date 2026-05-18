@@ -62,12 +62,12 @@ fn find_frame_at_position(
 
         if let (Some(first), Some(last)) = (blocks.first(), blocks.last()) {
             let frame_start = first.document_position;
-            let frame_end = last.document_position + block_char_length(&last, &store);
+            let frame_end = last.document_position + block_char_length(last, &store);
             if position >= frame_start && position <= frame_end {
                 // Find block index closest to position
                 let mut block_idx = 0;
                 for (i, block) in blocks.iter().enumerate() {
-                    if position <= block.document_position + block_char_length(&block, &store) {
+                    if position <= block.document_position + block_char_length(block, &store) {
                         block_idx = i;
                         break;
                     }

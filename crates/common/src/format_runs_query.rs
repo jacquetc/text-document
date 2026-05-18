@@ -47,4 +47,3 @@ pub fn inline_segments_for_block(
     let images = get_block_images(store, block_id);
     inline_segments_view(block_plain_text, &runs, &images)
 }
-

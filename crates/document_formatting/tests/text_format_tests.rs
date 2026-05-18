@@ -10,8 +10,7 @@ use document_formatting::{CharVerticalAlignment, SetTextFormatDto, UnderlineStyl
 
 use test_harness::{
     FrameRelationshipField, UpdateBlockDto, block_controller, create_list, frame_controller,
-    get_block_ids, get_sorted_cells, insert_image, insert_table,
-    setup_with_text,
+    get_block_ids, get_sorted_cells, insert_image, insert_table, setup_with_text,
 };
 
 #[test]
@@ -206,7 +205,7 @@ fn test_set_text_format_in_table_cell() -> Result<()> {
         cell_block.id,
         "Cell text",
     );
-    let mut update_block: UpdateBlockDto = cell_block.into();
+    let update_block: UpdateBlockDto = cell_block.into();
     block_controller::update(&db, &hub, &mut urm, None, &update_block)?;
 
     document_formatting_controller::set_text_format(
@@ -225,8 +224,7 @@ fn test_set_text_format_in_table_cell() -> Result<()> {
 
     let cell_block_ids_after =
         frame_controller::get_relationship(&db, &cell_frame_id, &FrameRelationshipField::Blocks)?;
-    let elements_after =
-        test_harness::synth_block_elements(&db, cell_block_ids_after[0])?;
+    let elements_after = test_harness::synth_block_elements(&db, cell_block_ids_after[0])?;
     let mut found_bold_cell = false;
     for elem in &elements_after {
         if elem.fmt_font_bold == Some(true)

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::entities::*;
-use crate::format_runs::{InlineSegment, InlineContent};
+use crate::format_runs::{InlineContent, InlineSegment};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FragmentData {
@@ -130,7 +130,6 @@ impl FragmentElement {
             fmt_vertical_alignment: seg.fmt_vertical_alignment.clone(),
         }
     }
-
 }
 
 impl FragmentBlock {
@@ -154,7 +153,6 @@ impl FragmentBlock {
             && self.is_code_block.is_none()
             && self.code_language.is_none()
     }
-
 }
 
 impl FragmentList {

@@ -41,7 +41,7 @@ fn set_html_populates_rope() {
     let offsets = store.block_offsets.read().unwrap();
     assert_eq!(offsets.entries.len(), 3);
     assert_eq!(offsets.entries[0].1, 0);
-    assert_eq!(offsets.entries[1].1, 6);  // "alpha\n".len()
+    assert_eq!(offsets.entries[1].1, 6); // "alpha\n".len()
     assert_eq!(offsets.entries[2].1, 11); // "alpha\nbeta\n".len()
     assert_eq!(offsets.total_bytes(), 16); // full "alpha\nbeta\ngamma"
 }

@@ -3,7 +3,7 @@ use crate::InsertBlockDto;
 use crate::InsertBlockResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_char_length, block_content_via_store, rope_split_block};
+use common::database::rope_helpers::{block_content_via_store, rope_split_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
@@ -90,7 +90,8 @@ fn execute_insert_block(
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
 
-    let (current_block, block_idx, offset) = find_block_at_position(&blocks, position, &uow.store())?;
+    let (current_block, block_idx, offset) =
+        find_block_at_position(&blocks, position, &uow.store())?;
 
     // Split byte offset inside current_block.plain_text accounting for images.
     let store = uow.store();
@@ -144,7 +145,8 @@ fn execute_insert_block(
     // rope split mirror (`rope_split_block` below) hasn't run yet — at this
     // point in the function `block_char_length(updated_current)` would still
     // return the unsplit length (chars in both halves).
-    let new_block_position = current_block.document_position + text_before_chars + left_image_count + 1;
+    let new_block_position =
+        current_block.document_position + text_before_chars + left_image_count + 1;
     let new_block = Block {
         id: 0,
         created_at: now,
@@ -193,8 +195,7 @@ fn execute_insert_block(
         }
         Ok(None)
     }
-    let owner_frame_id =
-        find_owner_frame(&**uow, &frame_id, current_block.id)?.unwrap_or(frame_id);
+    let owner_frame_id = find_owner_frame(&**uow, &frame_id, current_block.id)?.unwrap_or(frame_id);
 
     let created_block = uow.create_block(&new_block, owner_frame_id, -1)?;
 

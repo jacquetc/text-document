@@ -235,8 +235,7 @@ pub(crate) fn build_flow_snapshot(
     };
 
     if !frame_dto.child_order.is_empty() {
-        let (elements, _) =
-            snapshot_from_child_order(inner, &frame_dto.child_order, 0, frame_id);
+        let (elements, _) = snapshot_from_child_order(inner, &frame_dto.child_order, 0, frame_id);
         elements
     } else {
         snapshot_fallback(inner, &frame_dto)
@@ -260,14 +259,12 @@ fn snapshot_from_child_order(
     for &entry in child_order {
         if entry > 0 {
             let block_id = entry as u64;
-            if let Some(snap) =
-                crate::text_block::build_block_snapshot_with_position_and_parent(
-                    inner,
-                    block_id,
-                    Some(running_pos),
-                    Some(parent_frame_id),
-                )
-            {
+            if let Some(snap) = crate::text_block::build_block_snapshot_with_position_and_parent(
+                inner,
+                block_id,
+                Some(running_pos),
+                Some(parent_frame_id),
+            ) {
                 running_pos += snap.length + 1; // +1 for block separator
                 elements.push(FlowElementSnapshot::Block(snap));
             }

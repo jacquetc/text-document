@@ -3,9 +3,7 @@ use crate::ExportMarkdownDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::database::rope_helpers::block_content_via_store;
-use common::entities::{
-    Block, Document, Frame, List, ListStyle, Root, Table, TableCell,
-};
+use common::entities::{Block, Document, Frame, List, ListStyle, Root, Table, TableCell};
 use common::format_runs::{InlineContent, InlineSegment};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
@@ -262,10 +260,10 @@ impl ExportMarkdownUseCase {
             let lang = block.fmt_code_language.as_deref().unwrap_or("");
             let block_text = block_content_via_store(block, &uow.store());
             let elements = common::format_runs_query::inline_segments_for_block(
-            &uow.store(),
-            block.id,
-            &block_text,
-        );
+                &uow.store(),
+                block.id,
+                &block_text,
+            );
 
             // Concatenate raw text from elements, no formatting
             let mut raw_text = String::new();

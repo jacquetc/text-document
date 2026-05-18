@@ -177,10 +177,8 @@ fn root_frame_byte_range_covers_rope_after_edits() -> Result<()> {
     let store = db_context.get_store();
     let frames = store.frames.read().unwrap();
     let table_cells = store.table_cells.read().unwrap();
-    let cell_frame_ids: std::collections::HashSet<u64> = table_cells
-        .values()
-        .filter_map(|c| c.cell_frame)
-        .collect();
+    let cell_frame_ids: std::collections::HashSet<u64> =
+        table_cells.values().filter_map(|c| c.cell_frame).collect();
 
     // There is exactly one true top-level frame (the import created it).
     let top_level: Vec<_> = frames
@@ -204,7 +202,9 @@ fn root_frame_byte_range_covers_rope_after_edits() -> Result<()> {
             continue;
         }
         let Some(pid) = f.parent_frame else { continue };
-        let Some(parent) = frames.get(&pid) else { continue };
+        let Some(parent) = frames.get(&pid) else {
+            continue;
+        };
         let (clo, chi) = f.byte_range;
         let (plo, phi) = parent.byte_range;
         if (clo, chi) == (0, 0) {

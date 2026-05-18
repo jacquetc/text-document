@@ -78,7 +78,14 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Block>, RepositoryError> {
-        Ok(self.store.blocks.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .blocks
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn update(&mut self, entity: &Block) -> Result<Block, RepositoryError> {
@@ -207,7 +214,9 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|b| read_field(b, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|b| read_field(b, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -241,7 +250,13 @@ impl<'a> BlockTable for BlockHashMapTable<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|b| read_field(b, field).into_iter().skip(offset).take(limit).collect())
+            .map(|b| {
+                read_field(b, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -327,7 +342,14 @@ impl<'a> BlockTableRO for BlockHashMapTableRO<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Block>, RepositoryError> {
-        Ok(self.store.blocks.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .blocks
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn get_relationship(
@@ -355,7 +377,9 @@ impl<'a> BlockTableRO for BlockHashMapTableRO<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|b| read_field(b, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|b| read_field(b, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -389,7 +413,13 @@ impl<'a> BlockTableRO for BlockHashMapTableRO<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|b| read_field(b, field).into_iter().skip(offset).take(limit).collect())
+            .map(|b| {
+                read_field(b, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 

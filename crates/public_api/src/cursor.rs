@@ -1851,8 +1851,7 @@ impl TextCursor {
         let local_char = pos.saturating_sub(block_dto.document_position as usize);
         let store = inner.ctx.db_context.get_store();
         let entity: common::entities::Block = block_dto.clone().into();
-        let plain_owned =
-            common::database::rope_helpers::block_content_via_store(&entity, store);
+        let plain_owned = common::database::rope_helpers::block_content_via_store(&entity, store);
         let plain: &str = &plain_owned;
         let byte_offset: u32 = plain
             .char_indices()

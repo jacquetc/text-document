@@ -496,8 +496,8 @@ mod tests {
     fn test_get_relationship_count_default() {
         let mut ctx = TestContext::new();
         let created = create_one(&mut ctx);
-        let count = get_relationship_count(&ctx.db, &created.id, &BlockRelationshipField::List)
-            .unwrap();
+        let count =
+            get_relationship_count(&ctx.db, &created.id, &BlockRelationshipField::List).unwrap();
         assert_eq!(count, 0);
     }
 }

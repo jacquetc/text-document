@@ -87,7 +87,14 @@ impl<'a> DocumentTable for DocumentHashMapTable<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Document>, RepositoryError> {
-        Ok(self.store.documents.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .documents
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn update(&mut self, entity: &Document) -> Result<Document, RepositoryError> {
@@ -194,7 +201,9 @@ impl<'a> DocumentTable for DocumentHashMapTable<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|d| read_field(d, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|d| read_field(d, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -228,7 +237,13 @@ impl<'a> DocumentTable for DocumentHashMapTable<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|d| read_field(d, field).into_iter().skip(offset).take(limit).collect())
+            .map(|d| {
+                read_field(d, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -317,7 +332,14 @@ impl<'a> DocumentTableRO for DocumentHashMapTableRO<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Document>, RepositoryError> {
-        Ok(self.store.documents.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .documents
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn get_relationship(
@@ -345,7 +367,9 @@ impl<'a> DocumentTableRO for DocumentHashMapTableRO<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|d| read_field(d, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|d| read_field(d, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -379,7 +403,13 @@ impl<'a> DocumentTableRO for DocumentHashMapTableRO<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|d| read_field(d, field).into_iter().skip(offset).take(limit).collect())
+            .map(|d| {
+                read_field(d, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 

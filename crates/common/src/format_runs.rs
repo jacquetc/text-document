@@ -140,8 +140,7 @@ pub fn debug_assert_well_formed(runs: &[FormatRun], block_text_len: usize) {
             runs[i + 1]
         );
         debug_assert!(
-            !(runs[i].byte_end == runs[i + 1].byte_start
-                && runs[i].format == runs[i + 1].format),
+            !(runs[i].byte_end == runs[i + 1].byte_start && runs[i].format == runs[i + 1].format),
             "adjacent identical format runs at {i} not coalesced: {:?}",
             runs[i]
         );
@@ -160,8 +159,7 @@ pub fn coalesce_in_place(runs: &mut Vec<FormatRun>) {
     }
     let mut write = 0usize;
     for read in 1..runs.len() {
-        if runs[write].byte_end == runs[read].byte_start
-            && runs[write].format == runs[read].format
+        if runs[write].byte_end == runs[read].byte_start && runs[write].format == runs[read].format
         {
             runs[write].byte_end = runs[read].byte_end;
         } else {
@@ -283,7 +281,7 @@ pub fn capture_image_formats_in_range(
 /// (the caller should have spliced them first).
 ///
 /// Panics in debug mode if `delta` would underflow a run's offset.
-pub fn shift_after(runs: &mut Vec<FormatRun>, threshold: u32, delta: i32) {
+pub fn shift_after(runs: &mut [FormatRun], threshold: u32, delta: i32) {
     for run in runs.iter_mut() {
         if run.byte_start >= threshold {
             let new_start = (run.byte_start as i64) + (delta as i64);
@@ -337,7 +335,7 @@ pub fn shift_images_after(images: &mut [ImageAnchor], threshold: u32, delta: i32
 /// unchanged; runs strictly after are shifted by +inserted_bytes; runs
 /// that straddle the offset are extended (the inserted text inherits
 /// the surrounding run's format — Qt / ProseMirror convention).
-pub fn shift_runs_for_insert(runs: &mut Vec<FormatRun>, byte_offset: u32, inserted_bytes: u32) {
+pub fn shift_runs_for_insert(runs: &mut [FormatRun], byte_offset: u32, inserted_bytes: u32) {
     if inserted_bytes == 0 {
         return;
     }
@@ -372,11 +370,7 @@ pub fn shift_runs_for_delete(runs: &mut Vec<FormatRun>, byte_start: u32, byte_en
 
 /// Apply an "insert" shift to a block's image anchors. Anchors at or
 /// past the offset move forward by `inserted_bytes`.
-pub fn shift_images_for_insert(
-    images: &mut [ImageAnchor],
-    byte_offset: u32,
-    inserted_bytes: u32,
-) {
+pub fn shift_images_for_insert(images: &mut [ImageAnchor], byte_offset: u32, inserted_bytes: u32) {
     if inserted_bytes == 0 {
         return;
     }
@@ -415,20 +409,14 @@ pub fn shift_images_for_delete(
 ///
 /// Images contribute 1 logical character but 0 bytes in `plain_text`.
 /// Images at the same byte_offset are visited in their stored order.
-pub fn logical_offset_to_byte(
-    plain_text: &str,
-    images: &[ImageAnchor],
-    char_offset: i64,
-) -> u32 {
+pub fn logical_offset_to_byte(plain_text: &str, images: &[ImageAnchor], char_offset: i64) -> u32 {
     if char_offset <= 0 {
         return 0;
     }
     let mut logical: i64 = 0;
     let mut images_consumed = 0usize;
     for (b, _) in plain_text.char_indices() {
-        while images_consumed < images.len()
-            && images[images_consumed].byte_offset <= b as u32
-        {
+        while images_consumed < images.len() && images[images_consumed].byte_offset <= b as u32 {
             if logical == char_offset {
                 return b as u32;
             }
@@ -455,10 +443,7 @@ pub fn logical_offset_to_byte(
 /// vector has its run offsets re-based so they start at byte 0 of the
 /// new (right) block. Straddling runs are split with their `format`
 /// cloned to both halves.
-pub fn split_runs_at(
-    runs: &[FormatRun],
-    byte_offset: u32,
-) -> (Vec<FormatRun>, Vec<FormatRun>) {
+pub fn split_runs_at(runs: &[FormatRun], byte_offset: u32) -> (Vec<FormatRun>, Vec<FormatRun>) {
     let mut left = Vec::new();
     let mut right = Vec::new();
     for run in runs {
@@ -572,25 +557,22 @@ pub fn inline_segments_view(
     let mut img_iter = images.iter().peekable();
     let mut cursor: u32 = 0;
 
-    let emit_text = |out: &mut Vec<InlineSegment>,
-                     bytes: &[u8],
-                     start: u32,
-                     end: u32,
-                     fmt: CharacterFormat| {
-        if start >= end {
-            return;
-        }
-        let slice = &bytes[start as usize..end as usize];
-        let s = std::str::from_utf8(slice)
-            .expect("block plain_text must be valid UTF-8")
-            .to_string();
-        let mut seg = InlineSegment {
-            content: InlineContent::Text(s),
-            ..Default::default()
+    let emit_text =
+        |out: &mut Vec<InlineSegment>, bytes: &[u8], start: u32, end: u32, fmt: CharacterFormat| {
+            if start >= end {
+                return;
+            }
+            let slice = &bytes[start as usize..end as usize];
+            let s = std::str::from_utf8(slice)
+                .expect("block plain_text must be valid UTF-8")
+                .to_string();
+            let mut seg = InlineSegment {
+                content: InlineContent::Text(s),
+                ..Default::default()
+            };
+            apply_character_format_to_segment(&mut seg, &fmt);
+            out.push(seg);
         };
-        apply_character_format_to_segment(&mut seg, &fmt);
-        out.push(seg);
-    };
 
     let emit_image = |out: &mut Vec<InlineSegment>, anchor: &ImageAnchor| {
         let mut seg = InlineSegment {
@@ -671,7 +653,6 @@ pub fn inline_segments_view(
     out
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,5 +718,4 @@ mod tests {
         assert_eq!(rs[1].byte_start, 13);
         assert_eq!(rs[1].byte_end, 18);
     }
-
 }

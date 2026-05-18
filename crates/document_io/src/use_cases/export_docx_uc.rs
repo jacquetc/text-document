@@ -4,10 +4,8 @@ use crate::ExportDocxResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
 use common::database::rope_helpers::block_content_via_store;
-use common::entities::{
-    Block, Document, Frame, List, Root, Table, TableCell,
-};
-use common::format_runs::{InlineContent};
+use common::entities::{Block, Document, Frame, List, Root, Table, TableCell};
+use common::format_runs::InlineContent;
 use common::long_operation::LongOperation;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
@@ -168,10 +166,10 @@ impl LongOperation for ExportDocxUseCase {
 
                 let block_text = block_content_via_store(block, &uow.store());
                 let elements = common::format_runs_query::inline_segments_for_block(
-            &uow.store(),
-            block.id,
-            &block_text,
-        );
+                    &uow.store(),
+                    block.id,
+                    &block_text,
+                );
 
                 let mut paragraph = Paragraph::new();
 

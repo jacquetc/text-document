@@ -22,15 +22,27 @@ fn assert_states_eq(a: &RopeStore, b: &RopeStore) {
         *b.documents.read().unwrap(),
         "documents"
     );
-    assert_eq!(*a.frames.read().unwrap(), *b.frames.read().unwrap(), "frames");
-    assert_eq!(*a.blocks.read().unwrap(), *b.blocks.read().unwrap(), "blocks");
+    assert_eq!(
+        *a.frames.read().unwrap(),
+        *b.frames.read().unwrap(),
+        "frames"
+    );
+    assert_eq!(
+        *a.blocks.read().unwrap(),
+        *b.blocks.read().unwrap(),
+        "blocks"
+    );
     assert_eq!(*a.lists.read().unwrap(), *b.lists.read().unwrap(), "lists");
     assert_eq!(
         *a.resources.read().unwrap(),
         *b.resources.read().unwrap(),
         "resources"
     );
-    assert_eq!(*a.tables.read().unwrap(), *b.tables.read().unwrap(), "tables");
+    assert_eq!(
+        *a.tables.read().unwrap(),
+        *b.tables.read().unwrap(),
+        "tables"
+    );
     assert_eq!(
         *a.table_cells.read().unwrap(),
         *b.table_cells.read().unwrap(),
@@ -60,7 +72,11 @@ fn populate_some_state(store: &RopeStore) {
     const BLOCK_ID: u64 = 2;
     const FRAME_ID: u64 = 3;
 
-    store.rope.write().unwrap().insert(0, "hello world\nsecond paragraph\n");
+    store
+        .rope
+        .write()
+        .unwrap()
+        .insert(0, "hello world\nsecond paragraph\n");
     store.roots.write().unwrap().insert(
         ROOT_ID,
         Root {
@@ -94,11 +110,7 @@ fn populate_some_state(store: &RopeStore) {
             },
         }],
     );
-    store
-        .block_offsets
-        .write()
-        .unwrap()
-        .push_block(BLOCK_ID, 0);
+    store.block_offsets.write().unwrap().push_block(BLOCK_ID, 0);
 
     // Pre-set counters so populate is deterministic (would otherwise
     // depend on call order).
@@ -194,7 +206,14 @@ fn savepoint_create_restore_discard() {
     // Restore.
     store.restore_savepoint(sp);
     assert!(!store.blocks.read().unwrap().is_empty());
-    assert!(!store.rope.read().unwrap().to_string().starts_with("MUTATION"));
+    assert!(
+        !store
+            .rope
+            .read()
+            .unwrap()
+            .to_string()
+            .starts_with("MUTATION")
+    );
 
     // Discard is just a memory cleanup — restoring after discard panics.
     store.discard_savepoint(sp);

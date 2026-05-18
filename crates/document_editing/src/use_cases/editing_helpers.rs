@@ -1,9 +1,9 @@
 use anyhow::{Result, anyhow};
+use common::database::Store;
+use common::database::rope_helpers::block_char_length;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::entities::{Block, Frame};
 use common::format_runs::{InlineContent, InlineSegment};
-use common::database::rope_helpers::block_char_length;
-use common::database::Store;
 use common::types::EntityId;
 
 /// Trait for UoW operations needed to create a cell frame. All
@@ -62,7 +62,6 @@ pub fn create_cell_frame(
         ..Block::default()
     };
     let created_block = uow.cfc_create_block(&block, created_frame.id, -1)?;
-
 
     let mut updated_frame = created_frame.clone();
     updated_frame.child_order = vec![created_block.id as i64];

@@ -139,7 +139,9 @@ impl GetBlockAtPositionUseCase {
             }
 
             // Within block text, or empty block at exactly this position
-            if position < block_end || (block_char_length(&block, &store) == 0 && position == running_pos) {
+            if position < block_end
+                || (block_char_length(&block, &store) == 0 && position == running_pos)
+            {
                 uow.end_transaction()?;
                 return Ok(BlockInfoDto {
                     block_id: block.id as i64,

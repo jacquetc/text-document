@@ -3,17 +3,17 @@ use crate::InsertFormattedTextDto;
 use crate::InsertFormattedTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{
+    block_char_length, block_content_via_store, rope_delete_in_block, rope_insert_in_block,
+};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, Root, TableCell};
-use common::database::rope_helpers::{block_char_length, 
-    block_content_via_store, rope_delete_in_block, rope_insert_in_block,
-};
 use common::format_runs::{
-    CharacterFormat, FormatRun, ImageAnchor, debug_assert_well_formed,
-    logical_offset_to_byte, shift_images_for_delete, shift_images_for_insert,
-    shift_runs_for_delete, shift_runs_for_insert, splice_range,
+    CharacterFormat, FormatRun, ImageAnchor, debug_assert_well_formed, logical_offset_to_byte,
+    shift_images_for_delete, shift_images_for_insert, shift_runs_for_delete, shift_runs_for_insert,
+    splice_range,
 };
 
 use common::types::{EntityId, ROOT_ENTITY_ID};
@@ -118,9 +118,7 @@ fn delete_range_in_block(
         .chars()
         .count() as i64;
 
-    let mut new_plain = String::with_capacity(
-        block_text.len() - (byte_end - byte_start) as usize,
-    );
+    let mut new_plain = String::with_capacity(block_text.len() - (byte_end - byte_start) as usize);
     new_plain.push_str(&block_text[..byte_start as usize]);
     new_plain.push_str(&block_text[byte_end as usize..]);
 
@@ -164,8 +162,7 @@ fn insert_formatted_at(
         .cloned()
         .unwrap_or_default();
     let block_text = block_content_via_store(block, &store);
-    let byte_offset =
-        logical_offset_to_byte(&block_text, &images_before, char_offset);
+    let byte_offset = logical_offset_to_byte(&block_text, &images_before, char_offset);
     let inserted_byte_len = dto.text.len() as u32;
 
     let mut new_plain = block_text.clone();
@@ -358,8 +355,7 @@ fn execute_insert_simple(
         .cloned()
         .unwrap_or_default();
 
-    let (inserted_byte_offset, inserted_byte_len) =
-        insert_formatted_at(uow, &block, offset, dto)?;
+    let (inserted_byte_offset, inserted_byte_len) = insert_formatted_at(uow, &block, offset, dto)?;
 
     let text_len = dto.text.chars().count() as i64;
     let mut updated_doc = document.clone();

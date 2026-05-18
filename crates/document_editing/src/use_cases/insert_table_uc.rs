@@ -315,14 +315,13 @@ fn execute_insert_table(
     // No-op under default backend.
     {
         let store = uow.store();
-        let mut next_byte = top_level_frame_end_byte(&store, parent_frame_id);
-        for cell_block in &cell_blocks {
+        let start_byte = top_level_frame_end_byte(&store, parent_frame_id);
+        for (next_byte, cell_block) in (start_byte..).zip(cell_blocks.iter()) {
             // Newly-created cells via `create_cell_frame` are empty,
             // so we know the content is "" — no need to read from the
             // store/entity (the block hasn't been registered in the
             // rope yet anyway).
             rope_insert_block_at(&store, next_byte, cell_block.id, "");
-            next_byte += 1;
         }
     }
 

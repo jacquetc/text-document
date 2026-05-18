@@ -78,7 +78,14 @@ impl<'a> TableTable for TableHashMapTable<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Table>, RepositoryError> {
-        Ok(self.store.tables.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .tables
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn update(&mut self, entity: &Table) -> Result<Table, RepositoryError> {
@@ -199,7 +206,9 @@ impl<'a> TableTable for TableHashMapTable<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|t| read_field(t, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|t| read_field(t, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -233,7 +242,13 @@ impl<'a> TableTable for TableHashMapTable<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|t| read_field(t, field).into_iter().skip(offset).take(limit).collect())
+            .map(|t| {
+                read_field(t, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -319,7 +334,14 @@ impl<'a> TableTableRO for TableHashMapTableRO<'a> {
     }
 
     fn get_all(&self) -> Result<Vec<Table>, RepositoryError> {
-        Ok(self.store.tables.read().unwrap().values().cloned().collect())
+        Ok(self
+            .store
+            .tables
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     fn get_relationship(
@@ -347,7 +369,9 @@ impl<'a> TableTableRO for TableHashMapTableRO<'a> {
         for id in ids {
             out.insert(
                 *id,
-                map.get(id).map(|t| read_field(t, field)).unwrap_or_default(),
+                map.get(id)
+                    .map(|t| read_field(t, field))
+                    .unwrap_or_default(),
             );
         }
         Ok(out)
@@ -381,7 +405,13 @@ impl<'a> TableTableRO for TableHashMapTableRO<'a> {
             .read()
             .unwrap()
             .get(id)
-            .map(|t| read_field(t, field).into_iter().skip(offset).take(limit).collect())
+            .map(|t| {
+                read_field(t, field)
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect()
+            })
             .unwrap_or_default())
     }
 

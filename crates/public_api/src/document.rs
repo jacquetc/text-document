@@ -533,8 +533,8 @@ impl TextDocument {
                 .ok()
                 .flatten()?;
             let entity: common::entities::Block = block_dto.clone().into();
-            let block_end = running_pos
-                + common::database::rope_helpers::block_char_length(&entity, store);
+            let block_end =
+                running_pos + common::database::rope_helpers::block_char_length(&entity, store);
             if pos >= running_pos && pos <= block_end {
                 return crate::text_block::build_block_snapshot_with_position(
                     &inner,
@@ -1035,9 +1035,9 @@ fn capture_block_state(inner: &TextDocumentInner) -> Vec<UndoBlockState> {
         .map(|b| {
             let format = BlockFormat::from(&b);
             let entity: common::entities::Block = b.clone().into();
-            let plain_text = common::database::rope_helpers::block_content_via_store(&entity, store);
-            let text_length =
-                common::database::rope_helpers::block_char_length(&entity, store);
+            let plain_text =
+                common::database::rope_helpers::block_content_via_store(&entity, store);
+            let text_length = common::database::rope_helpers::block_char_length(&entity, store);
             UndoBlockState {
                 id: b.id,
                 position: b.document_position,

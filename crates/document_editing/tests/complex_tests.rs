@@ -1279,7 +1279,10 @@ fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
         for eid in &elem_ids {
             let elem = inline_element_controller::get(&db, eid)?.expect("Element should exist");
             assert!(
-                !matches!(elem.content, common::format_runs::InlineContent::Image { .. }),
+                !matches!(
+                    elem.content,
+                    common::format_runs::InlineContent::Image { .. }
+                ),
                 "No image elements should remain"
             );
         }
@@ -1288,7 +1291,11 @@ fn test_delete_all_complex_document_leaves_nothing() -> Result<()> {
     // Remaining block should be empty
     for bid in &remaining_bids {
         let b = block_controller::get(&db, bid)?.expect("Block should exist");
-        assert_eq!(block_text_dto(&db, &b), "", "Remaining block should have no text");
+        assert_eq!(
+            block_text_dto(&db, &b),
+            "",
+            "Remaining block should have no text"
+        );
     }
 
     Ok(())
