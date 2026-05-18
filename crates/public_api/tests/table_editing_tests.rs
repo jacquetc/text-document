@@ -4,7 +4,7 @@
 //! position computation (`find_block_at_position_sequential`) stay in sync
 //! when text is inserted, deleted, or replaced inside table cells.
 
-use text_document::{FlowElementSnapshot, TextDocument};
+use text_document::{FlowElement, FlowElementSnapshot, TextDocument};
 
 /// Create a document: "Before" + 2x2 table + "After"
 /// Create a document: "Before" + 2x2 empty table + "After" using insert_table
@@ -555,6 +555,136 @@ fn inserted_2x2_in_empty_document_starts_at_zero() {
         cell_text(&doc, 0, 0).as_deref(),
         Some("Y"),
         "typing in cell (0,0) of an empty-doc insertion should land in (0,0); positions: {:?}",
+        all_block_positions(&doc)
+    );
+}
+
+#[test]
+fn inserted_2x2_deep_in_long_block_document_position_matches_snapshot() {
+    // The user-reported regression: when the cursor sits deep inside
+    // a long host block, the table is placed *after* the host block
+    // in child_order, but the cells' `document_position` field was
+    // being set to `insert_pos + 1, insert_pos + 2, …` — which is
+    // inside the host block's range when `insert_pos` is well shy of
+    // the host's end. Subsequent operations that route by
+    // `document_position` (insert_text, find_block_at_position, etc.)
+    // then route into the wrong block. Visually the table appears in
+    // the right place (the snapshot walks child_order, ignoring
+    // document_position), but cursor lookups land elsewhere.
+    let doc = TextDocument::new();
+    let long_text = "abcdefghijklmnopqrstuvwxyz"; // 26 chars
+    doc.set_plain_text(long_text).unwrap();
+    let cursor = doc.cursor_at(5); // 5 chars in
+    cursor.insert_table(2, 2).unwrap();
+
+    // Compare snapshot positions (what the user sees) to
+    // document_position (what cursor lookups use). They must agree.
+    let snapshot_positions = all_block_positions(&doc);
+    eprintln!("snapshot positions after insert_table(2,2) at offset 5: {snapshot_positions:?}");
+    let raw_doc_positions = {
+        // Pull all blocks' document_position via the API and pair
+        // them with their text content. Order by id for determinism.
+        let mut out: Vec<(usize, String)> = Vec::new();
+        for el in doc.flow() {
+            match el {
+                FlowElement::Block(b) => out.push((b.position(), b.text())),
+                FlowElement::Table(t) => {
+                    for r in 0..t.rows() {
+                        for c in 0..t.columns() {
+                            if let Some(cell) = t.cell(r, c)
+                                && let Some(b) = cell.blocks().first()
+                            {
+                                out.push((b.position(), b.text()));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    };
+    eprintln!("document_position values:                                  {raw_doc_positions:?}");
+
+    // Both iterations walk the same flow in the same order, so compare
+    // positionally. (Empty cells share text "" so a `find`-by-text
+    // lookup collapses them all to the first match.)
+    assert_eq!(
+        raw_doc_positions.len(),
+        snapshot_positions.len(),
+        "block count must match: raw={raw_doc_positions:?}, snap={snapshot_positions:?}"
+    );
+    for (idx, ((raw_pos, raw_text), (snap_pos, _, snap_text))) in
+        raw_doc_positions.iter().zip(snapshot_positions.iter()).enumerate()
+    {
+        assert_eq!(
+            raw_text, snap_text,
+            "block #{idx} text mismatch: raw={raw_text:?}, snap={snap_text:?}"
+        );
+        assert_eq!(
+            *raw_pos, *snap_pos,
+            "block #{idx} ({raw_text:?}): document_position={raw_pos} but snapshot position={snap_pos}. \
+             The two must agree, otherwise cursor lookups (sorted by document_position) drift from \
+             the snapshot rendered for the user."
+        );
+    }
+}
+
+#[test]
+fn inserted_2x2_deep_in_long_block_lands_after_block() {
+    // The user-reported regression: when the cursor sits deep inside
+    // a long host block, the table is placed *after* the host block
+    // (per `child_order_insert_idx = found_idx + 1`), so the cells'
+    // `document_position` field must match the snapshot's running_pos
+    // walk — which places them at `host_end + 1`, NOT
+    // `cursor_pos + 1`. A previous revision used `insert_pos + 1`,
+    // so the deeper the cursor sat in the block (= the larger
+    // `host.length - offset`), the further the cells' document_position
+    // diverged from the snapshot — making subsequent typing route into
+    // the wrong cell or back into the host block.
+    let doc = TextDocument::new();
+    let long_text = "abcdefghijklmnopqrstuvwxyz"; // 26 chars, one block
+    doc.set_plain_text(long_text).unwrap();
+    // Cursor 5 chars in (well shy of the end at offset 26).
+    let cursor = doc.cursor_at(5);
+    cursor.insert_table(2, 2).unwrap();
+
+    let positions = all_block_positions(&doc);
+    let host_pos = positions
+        .iter()
+        .find(|(_, _, t)| t == long_text)
+        .map(|(p, _, _)| *p)
+        .expect("host block survives");
+    let host_len = positions
+        .iter()
+        .find(|(_, _, t)| t == long_text)
+        .map(|(_, l, _)| *l)
+        .unwrap();
+    let cell_positions: Vec<usize> = positions
+        .iter()
+        .filter_map(|(p, _, t)| if t.is_empty() { Some(*p) } else { None })
+        .collect();
+    assert_eq!(cell_positions.len(), 4, "2x2 → 4 cells");
+    assert_eq!(
+        cell_positions[0],
+        host_pos + host_len + 1,
+        "cells should start one boundary past the host block's end \
+         (host_pos={host_pos}, host_len={host_len}, cell_positions={cell_positions:?}) — \
+         this is the regression where the cursor's offset within the host caused cells \
+         to land at `insert_pos + 1` instead of `host_end + 1`"
+    );
+    for w in cell_positions.windows(2) {
+        assert_eq!(w[1], w[0] + 1, "cells contiguous: {cell_positions:?}");
+    }
+    // Typing in cell (0,0) must land in cell (0,0), regardless of how
+    // deep the cursor was in the host block.
+    let (p00, l00) = cell_block_position(&doc, 0, 0).expect("cell (0,0)");
+    let c = doc.cursor_at(p00 + l00);
+    c.insert_text("Q").unwrap();
+    assert_eq!(
+        cell_text(&doc, 0, 0).as_deref(),
+        Some("Q"),
+        "deep-in-block insertion: typing in cell (0,0) lands in (0,0); positions: {:?}",
         all_block_positions(&doc)
     );
 }

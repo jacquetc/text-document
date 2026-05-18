@@ -3,7 +3,7 @@ use crate::InsertTableResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
 use common::database::rope_helpers::{
-    rope_insert_block_at, rope_insert_table_anchor, top_level_frame_end_byte,
+    block_char_length, rope_insert_block_at, rope_insert_table_anchor, top_level_frame_end_byte,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
@@ -94,19 +94,33 @@ fn execute_insert_table(
 
     // Find the frame containing the insertion position. Also remember
     // the cursor-adjacent block id (None for empty docs) so the rope
-    // mirror knows where to place the U+FFFC sentinel.
-    let (parent_frame_id, child_order_insert_idx, rope_anchor): (
+    // mirror knows where to place the U+FFFC sentinel, and compute
+    // `cell_start_pos` — the document-position-space coordinate where
+    // the first cell will live, *matching what `snapshot_from_child_order`
+    // will compute* once the table anchor is inserted into the parent
+    // frame's child_order. That's the critical invariant: cell
+    // `document_position` values must equal the snapshot's running_pos,
+    // otherwise lookups like `insert_text` (which sort blocks by
+    // `document_position`) drift from the cursor positions the
+    // rendered snapshot reports.
+    let (parent_frame_id, child_order_insert_idx, rope_anchor, cell_start_pos): (
         EntityId,
         usize,
         Option<(EntityId, bool)>,
+        i64,
     ) = if all_blocks.is_empty() {
-        // Empty document — use the first frame
+        // Empty document — use the first frame. No host block, so the
+        // table goes first in child_order; cells start at the cursor
+        // position (which is 0 in a fresh empty doc).
         let first_frame_id = frame_ids
             .first()
             .ok_or_else(|| anyhow!("Document has no frames"))?;
-        (*first_frame_id, 0usize, None)
+        (*first_frame_id, 0usize, None, insert_pos)
     } else {
-        let (target_block, _, offset) = find_block_at_position(&all_blocks, insert_pos, &uow.store())?;
+        let (target_block, _, offset) =
+            find_block_at_position(&all_blocks, insert_pos, &uow.store())?;
+        let target_length = block_char_length(&target_block, &uow.store());
+
         // Find which frame owns this block
         let mut found_frame_id = frame_ids[0];
         let mut found_block_idx = 0usize;
@@ -122,12 +136,26 @@ fn execute_insert_table(
         }
         // When at the very start of the block (offset == 0), place the
         // table before it so the table can be the first flow element.
+        // Otherwise (cursor anywhere inside or at the end of the host
+        // block) the table goes after the whole host block — it is
+        // NOT split — so cell positions follow the host block's full
+        // extent, regardless of how far in the cursor sits.
         let after = offset > 0;
         let after_idx = if after { 1 } else { 0 };
+        let cell_start = if after {
+            // Cells live one boundary past the host block's end.
+            target_block.document_position + target_length + 1
+        } else {
+            // Cells take the host block's current spot; the host
+            // shifts to past the cells (handled by the shift loop
+            // below at `document_position >= insert_pos`).
+            target_block.document_position
+        };
         (
             found_frame_id,
             found_block_idx + after_idx,
             Some((target_block.id, after)),
+            cell_start,
         )
     };
 
@@ -224,34 +252,37 @@ fn execute_insert_table(
     }
 
     // 4. Assign document_position to all cell blocks in row-major
-    // order, matching how `snapshot_from_child_order` in
-    // text_frame.rs computes the position of each new child:
+    // order. `cell_start_pos` was computed up front to match exactly
+    // what `snapshot_from_child_order` (text_frame.rs) will report
+    // for the first cell once the table anchor is part of the parent
+    // frame's child_order. Each subsequent empty cell adds 1 (the
+    // per-cell boundary) so cells occupy a contiguous run of N
+    // positions starting at `cell_start_pos`.
     //
-    //   * "after" insertion (cursor offset > 0 within the found
-    //     block — table goes after that block in `child_order`):
-    //     the first cell sits at `insert_pos + 1`, i.e. one
-    //     boundary past the end of the preceding block.
-    //   * "before" insertion (cursor offset == 0 — table goes
-    //     before the found block) and the empty-document case:
-    //     the first cell sits at `insert_pos`, directly at the
-    //     spot the cursor occupies; the displaced block (if any)
-    //     shifts to `insert_pos + total_cells`.
+    // The two cases that contribute to `cell_start_pos` correctness:
     //
-    // Either way, each subsequent empty cell adds 1 (the per-cell
-    // boundary) so cells occupy a contiguous run of N positions.
+    //   * "after" insertion (cursor offset > 0 within the host block):
+    //     the table goes *after* the whole host block in child_order
+    //     — it is not split. So cells must start at
+    //     `host.document_position + host.length + 1`, not at
+    //     `insert_pos + 1`. The two are equal only when the cursor
+    //     is exactly at the end of the host block (offset == length);
+    //     elsewhere, `insert_pos + 1` lands inside the host's
+    //     document-position range, putting cell positions out of
+    //     sync with the snapshot the user sees.
     //
-    // (History: a prior revision assigned positions starting at
-    // `insert_pos` unconditionally, which was off by one for the
-    // "after" case and made typing in a cell land in the next cell —
-    // see `inserted_3x3_typing_in_each_cell_lands_in_that_cell`.
-    // The subsequent fix used `insert_pos + 1` unconditionally,
-    // which inverted the bug for the "before" and empty-doc cases:
-    // cell positions overlapped the displaced block and the table
-    // appeared to land in inconsistent locations — see
-    // `inserted_2x2_at_start_of_block_lands_before_it` and
-    // `inserted_2x2_in_empty_document_starts_at_zero`.)
-    let after_insertion = matches!(rope_anchor, Some((_, true)));
-    let cell_start_pos = insert_pos + if after_insertion { 1 } else { 0 };
+    //   * "before" insertion (cursor offset == 0) and empty doc:
+    //     cells take the cursor's position; the displaced host
+    //     block (if any) shifts to past the cells via the
+    //     `document_position >= insert_pos` loop below.
+    //
+    // Tests: `inserted_3x3_typing_in_each_cell_lands_in_that_cell`
+    // (after-at-end-of-block), `inserted_2x2_at_start_of_block_lands_before_it`
+    // (before), `inserted_2x2_in_empty_document_starts_at_zero` (empty),
+    // `inserted_2x2_deep_in_long_block_document_position_matches_snapshot`
+    // (after-deep-in-block — the user-reported "table inserted before
+    // the current block" regression, where document_position drifted
+    // from snapshot in proportion to `host.length - offset`).
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for (offset, cell_block) in cell_blocks.iter().enumerate() {
         let mut updated_block = cell_block.clone();
