@@ -381,7 +381,10 @@ fn inserted_3x3_all_nine_cells_addressable() {
                 "cell ({r},{c}) of a fresh 3x3 insert_table should be addressable, snapshot returned None"
             );
             let (p, l) = pos.unwrap();
-            assert_eq!(l, 0, "fresh cell ({r},{c}) should be empty (len 0), got len {l}");
+            assert_eq!(
+                l, 0,
+                "fresh cell ({r},{c}) should be empty (len 0), got len {l}"
+            );
             if let Some(prev_p) = prev {
                 assert_eq!(
                     p,
@@ -412,9 +415,8 @@ fn inserted_3x3_typing_in_each_cell_lands_in_that_cell() {
         (1, 2, 'i'),
     ];
     for (r, c, ch) in plan {
-        let (pos, len) = cell_block_position(&doc, r, c).unwrap_or_else(|| {
-            panic!("cell ({r},{c}) should be reachable before typing '{ch}'")
-        });
+        let (pos, len) = cell_block_position(&doc, r, c)
+            .unwrap_or_else(|| panic!("cell ({r},{c}) should be reachable before typing '{ch}'"));
         let cursor = doc.cursor_at(pos + len);
         cursor.insert_text(&ch.to_string()).unwrap();
         // After typing, the snapshot should show the character in that cell.
@@ -482,8 +484,8 @@ fn inserted_2x2_at_start_of_block_lands_before_it() {
     cursor.insert_table(2, 2).unwrap();
 
     let positions = all_block_positions(&doc);
-    let hello_pos = block_position_by_text(&doc, "Hello")
-        .expect("'Hello' block should survive insertion");
+    let hello_pos =
+        block_position_by_text(&doc, "Hello").expect("'Hello' block should survive insertion");
     let cell_positions: Vec<usize> = positions
         .iter()
         .filter_map(|(p, _, t)| if t.is_empty() { Some(*p) } else { None })
@@ -500,7 +502,11 @@ fn inserted_2x2_at_start_of_block_lands_before_it() {
         "first cell of insert_table at offset 0 should sit at the cursor's position (0)"
     );
     for w in cell_positions.windows(2) {
-        assert_eq!(w[1], w[0] + 1, "cells should be contiguous: got {cell_positions:?}");
+        assert_eq!(
+            w[1],
+            w[0] + 1,
+            "cells should be contiguous: got {cell_positions:?}"
+        );
     }
     // 'Hello' should appear after the table.
     assert!(
@@ -545,7 +551,11 @@ fn inserted_2x2_in_empty_document_starts_at_zero() {
         "first cell of insert_table in empty doc should sit at 0; positions: {positions:?}"
     );
     for w in cell_positions.windows(2) {
-        assert_eq!(w[1], w[0] + 1, "cells should be contiguous; positions: {positions:?}");
+        assert_eq!(
+            w[1],
+            w[0] + 1,
+            "cells should be contiguous; positions: {positions:?}"
+        );
     }
     // Typing in cell (0,0) should land in cell (0,0).
     let (p00, l00) = cell_block_position(&doc, 0, 0).expect("cell (0,0)");
@@ -556,6 +566,176 @@ fn inserted_2x2_in_empty_document_starts_at_zero() {
         Some("Y"),
         "typing in cell (0,0) of an empty-doc insertion should land in (0,0); positions: {:?}",
         all_block_positions(&doc)
+    );
+}
+
+/// For every block in the document, assert `document_position` ==
+/// snapshot position. The two MUST stay in lock-step or cursor
+/// lookups drift from what the user sees.
+fn assert_doc_pos_matches_snapshot(doc: &TextDocument, label: &str) {
+    let snapshot_positions = all_block_positions(doc);
+    let raw_doc_positions = {
+        let mut out: Vec<(usize, String)> = Vec::new();
+        fn walk(el: FlowElement, out: &mut Vec<(usize, String)>) {
+            match el {
+                FlowElement::Block(b) => out.push((b.position(), b.text())),
+                FlowElement::Table(t) => {
+                    for r in 0..t.rows() {
+                        for c in 0..t.columns() {
+                            if let Some(cell) = t.cell(r, c) {
+                                for b in cell.blocks() {
+                                    out.push((b.position(), b.text()));
+                                }
+                            }
+                        }
+                    }
+                }
+                FlowElement::Frame(f) => {
+                    for el in f.flow() {
+                        walk(el, out);
+                    }
+                }
+            }
+        }
+        for el in doc.flow() {
+            walk(el, &mut out);
+        }
+        out
+    };
+    assert_eq!(
+        raw_doc_positions.len(),
+        snapshot_positions.len(),
+        "[{label}] block count mismatch: raw={raw_doc_positions:?}, snap={snapshot_positions:?}"
+    );
+    for (idx, ((raw_pos, raw_text), (snap_pos, _, snap_text))) in raw_doc_positions
+        .iter()
+        .zip(snapshot_positions.iter())
+        .enumerate()
+    {
+        assert_eq!(
+            raw_text, snap_text,
+            "[{label}] block #{idx} text mismatch: raw={raw_text:?}, snap={snap_text:?}"
+        );
+        assert_eq!(
+            *raw_pos, *snap_pos,
+            "[{label}] block #{idx} ({raw_text:?}): document_position={raw_pos} ≠ snapshot position={snap_pos}. \
+             They must agree so cursor lookups (sorted by document_position) match the rendered snapshot. \
+             Full raw={raw_doc_positions:?}, snap={snapshot_positions:?}"
+        );
+    }
+}
+
+#[test]
+fn doc_pos_matches_snapshot_for_multi_block_then_insert_table_anywhere() {
+    // Mimics the real editor scenario: a document with several
+    // paragraphs of varying length. Click into each paragraph at
+    // various offsets (start, middle, end), insert a 3x3 table, and
+    // assert the snapshot positions and document_position values stay
+    // in lock-step for every block — including the cells just
+    // inserted and every block after them.
+    let make_doc = || {
+        let doc = TextDocument::new();
+        doc.set_markdown(
+            "First paragraph here.\n\
+             \n\
+             Second paragraph, a bit longer than the first to make things interesting.\n\
+             \n\
+             Third — short.\n\
+             \n\
+             Fourth paragraph that's also somewhat long, with words and stuff to stretch it out.",
+        )
+        .expect("parse markdown")
+        .wait()
+        .expect("import");
+        doc
+    };
+
+    // Probe a handful of cursor positions across the doc: start of
+    // each paragraph, middle of each, and end of each.
+    let probes: Vec<(usize, &str)> = {
+        let doc = make_doc();
+        let mut probes = Vec::new();
+        let positions = all_block_positions(&doc);
+        for (p, l, t) in positions {
+            if t.is_empty() {
+                continue;
+            }
+            probes.push((p, "start"));
+            if l >= 4 {
+                probes.push((p + l / 2, "middle"));
+            }
+            probes.push((p + l, "end"));
+        }
+        probes
+    };
+
+    for (pos, label_where) in probes {
+        let doc = make_doc();
+        let cursor = doc.cursor_at(pos);
+        cursor.insert_table(3, 3).unwrap();
+        assert_doc_pos_matches_snapshot(
+            &doc,
+            &format!("insert_table(3,3) at pos {pos} ({label_where} of block)"),
+        );
+    }
+}
+
+#[test]
+fn doc_pos_stays_consistent_after_typing_then_insert_table() {
+    // Mirror what a real user does: load a multi-block document, do
+    // a few edits, then insert a table. The invariant
+    // `document_position == snapshot position` must hold after each
+    // step.
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "First paragraph.\n\
+         \n\
+         Second paragraph is a bit longer.\n\
+         \n\
+         Third has even more content for variety.\n\
+         \n\
+         Fourth and final paragraph here.",
+    )
+    .expect("parse")
+    .wait()
+    .expect("import");
+    assert_doc_pos_matches_snapshot(&doc, "after markdown import");
+
+    // Type some characters into the second paragraph at a known
+    // position (somewhere in the middle).
+    let positions = all_block_positions(&doc);
+    let second = positions
+        .iter()
+        .find(|(_, _, t)| t.contains("Second"))
+        .map(|(p, l, _)| (*p, *l))
+        .expect("second paragraph");
+    let cursor = doc.cursor_at(second.0 + 5);
+    cursor.insert_text("XYZ").unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "after typing 'XYZ' in second paragraph");
+
+    // Type into the LAST paragraph too.
+    let positions2 = all_block_positions(&doc);
+    let fourth = positions2
+        .iter()
+        .find(|(_, _, t)| t.contains("Fourth"))
+        .map(|(p, l, _)| (*p, *l))
+        .expect("fourth paragraph");
+    let cursor2 = doc.cursor_at(fourth.0 + fourth.1);
+    cursor2.insert_text(" Edited.").unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "after typing in fourth paragraph");
+
+    // Now insert a 3x3 table mid-third paragraph.
+    let positions3 = all_block_positions(&doc);
+    let third = positions3
+        .iter()
+        .find(|(_, _, t)| t.contains("Third"))
+        .map(|(p, l, _)| (*p, *l))
+        .expect("third paragraph");
+    let cursor3 = doc.cursor_at(third.0 + 4);
+    cursor3.insert_table(3, 3).unwrap();
+    assert_doc_pos_matches_snapshot(
+        &doc,
+        "after insert_table(3,3) mid-third paragraph following edits",
     );
 }
 
@@ -614,8 +794,10 @@ fn inserted_2x2_deep_in_long_block_document_position_matches_snapshot() {
         snapshot_positions.len(),
         "block count must match: raw={raw_doc_positions:?}, snap={snapshot_positions:?}"
     );
-    for (idx, ((raw_pos, raw_text), (snap_pos, _, snap_text))) in
-        raw_doc_positions.iter().zip(snapshot_positions.iter()).enumerate()
+    for (idx, ((raw_pos, raw_text), (snap_pos, _, snap_text))) in raw_doc_positions
+        .iter()
+        .zip(snapshot_positions.iter())
+        .enumerate()
     {
         assert_eq!(
             raw_text, snap_text,

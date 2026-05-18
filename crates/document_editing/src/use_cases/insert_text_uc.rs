@@ -3,18 +3,18 @@ use crate::InsertTextDto;
 use crate::InsertTextResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::database::rope_helpers::{block_char_length,
-    block_content_via_store, find_block_at_char_position, rope_delete_in_block,
+use common::database::rope_helpers::{
+    block_char_length, block_content_via_store, find_block_at_char_position, rope_delete_in_block,
     rope_insert_in_block,
 };
 use common::direct_access::document::document_repository::DocumentRelationshipField;
+use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
 use common::entities::{Block, Document, Frame, Root, TableCell};
 use common::format_runs::{
     FormatRun, ImageAnchor, debug_assert_well_formed, logical_offset_to_byte,
-    shift_images_for_delete, shift_images_for_insert, shift_runs_for_delete,
-    shift_runs_for_insert,
+    shift_images_for_delete, shift_images_for_insert, shift_runs_for_delete, shift_runs_for_insert,
 };
 
 use common::types::{EntityId, ROOT_ENTITY_ID};
@@ -96,9 +96,7 @@ fn delete_range_in_block(
         .chars()
         .count() as i64;
 
-    let mut new_plain = String::with_capacity(
-        block_text.len() - (byte_end - byte_start) as usize,
-    );
+    let mut new_plain = String::with_capacity(block_text.len() - (byte_end - byte_start) as usize);
     new_plain.push_str(&block_text[..byte_start as usize]);
     new_plain.push_str(&block_text[byte_end as usize..]);
 
@@ -312,15 +310,14 @@ fn execute_insert_simple(
             let frame_id = *frame_ids
                 .first()
                 .ok_or_else(|| anyhow!("Document has no frames"))?;
-            let get_table_cell_frames =
-                |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
-                    let cell_ids =
-                        uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
-                    let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
-                    let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
-                    cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
-                    Ok(cells.into_iter().filter_map(|c| c.cell_frame).collect())
-                };
+            let get_table_cell_frames = |table_id: &EntityId| -> anyhow::Result<Vec<EntityId>> {
+                let cell_ids =
+                    uow.get_table_relationship(table_id, &TableRelationshipField::Cells)?;
+                let cells_opt = uow.get_table_cell_multi(&cell_ids)?;
+                let mut cells: Vec<TableCell> = cells_opt.into_iter().flatten().collect();
+                cells.sort_by(|a, b| a.row.cmp(&b.row).then(a.column.cmp(&b.column)));
+                Ok(cells.into_iter().filter_map(|c| c.cell_frame).collect())
+            };
             let ordered_block_ids = collect_block_ids_recursive(
                 &|id| uow.get_frame(id),
                 &|id, field| uow.get_frame_relationship(id, field),
@@ -332,8 +329,7 @@ fn execute_insert_simple(
             }
             let (block, _block_idx, block_pos) =
                 find_block_at_position_sequential(&**uow, &ordered_block_ids, position)?;
-            let offset =
-                (position - block_pos).clamp(0, block_char_length(&block, &store));
+            let offset = (position - block_pos).clamp(0, block_char_length(&block, &store));
             (block, block_pos, offset)
         }
     };
@@ -355,8 +351,7 @@ fn execute_insert_simple(
         .unwrap_or_default();
 
     let block_text = block_content_via_store(&block, &store);
-    let byte_offset =
-        logical_offset_to_byte(&block_text, &original_block_images, offset);
+    let byte_offset = logical_offset_to_byte(&block_text, &original_block_images, offset);
     let inserted_byte_len = dto.text.len() as u32;
     let inserted_char_len = dto.text.chars().count() as i64;
 
@@ -382,6 +377,47 @@ fn execute_insert_simple(
 
     // Mirror the insert into the global rope (no-op under default).
     rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
+
+    // Shift `document_position` for every block that sits *after* the
+    // inserted-into one in document order, by the number of chars we
+    // just inserted. Without this, `Block.document_position` drifts
+    // from the rope-derived truth on every simple insert — and every
+    // downstream consumer that uses `document_position` (e.g.
+    // `find_block_at_position`, the selection-replacement path of
+    // this same use case, `insert_table_uc`, `insert_fragment_uc`)
+    // returns stale results. This mirrors the loop already present
+    // in `execute_insert_with_selection` (see above) for the
+    // selection-replacement path.
+    //
+    // For the "subsequent" set we compare against
+    // `block.document_position` (the inserted-into block's stored
+    // field). Even if that field were itself stale, all blocks in the
+    // doc share the same drift, so the relative ordering — and
+    // therefore the "after this one" partition — is preserved.
+    {
+        let frame_ids =
+            uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
+        let mut all_blocks: Vec<Block> = Vec::new();
+        for fid in &frame_ids {
+            let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
+            if !block_ids.is_empty() {
+                let blocks_opt = uow.get_block_multi(&block_ids)?;
+                all_blocks.extend(blocks_opt.into_iter().flatten());
+            }
+        }
+        let mut blocks_to_update: Vec<Block> = Vec::new();
+        for b in all_blocks {
+            if b.id != block.id && b.document_position > block.document_position {
+                let mut ub = b;
+                ub.document_position += inserted_char_len;
+                ub.updated_at = chrono::Utc::now();
+                blocks_to_update.push(ub);
+            }
+        }
+        if !blocks_to_update.is_empty() {
+            uow.update_block_multi(&blocks_to_update)?;
+        }
+    }
 
     let mut updated_doc = document.clone();
     updated_doc.character_count += inserted_char_len;
@@ -632,10 +668,8 @@ impl UndoRedoCommand for InsertTextUseCase {
         // and in the same block, so widening the existing
         // (inserted_byte_offset, inserted_byte_len) span by the other's
         // length captures the combined effect.
-        if let (
-            Some(InsertTextUndo::Simple(self_undo)),
-            Some(InsertTextUndo::Simple(other_undo)),
-        ) = (&mut self.undo_data, &other_cmd.undo_data)
+        if let (Some(InsertTextUndo::Simple(self_undo)), Some(InsertTextUndo::Simple(other_undo))) =
+            (&mut self.undo_data, &other_cmd.undo_data)
         {
             self_undo.inserted_byte_len += other_undo.inserted_byte_len;
         }
