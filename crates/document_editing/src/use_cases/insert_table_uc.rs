@@ -121,15 +121,31 @@ fn execute_insert_table(
             find_block_at_position(&all_blocks, insert_pos, &uow.store())?;
         let target_length = block_char_length(&target_block, &uow.store());
 
-        // Find which frame owns this block
+        // Find which frame owns this block AND the block's position in
+        // that frame's `child_order` (not the blocks-only list!). The
+        // anchor frame for the new table is inserted into `child_order`,
+        // which interleaves positive block ids and negative sub-frame
+        // ids. Using the blocks-only index here drifts whenever the
+        // parent frame contains sub-frames before the target — concretely:
+        // an imported GFM table earlier in the same frame makes
+        // `blocks.index_of(target)` smaller than
+        // `child_order.index_of(target)` by the number of preceding
+        // sub-frames, so the new table gets inserted that many slots
+        // too early in flow order. Reproduced by
+        // `insert_table_after_imported_gfm_table_lands_at_doc_end` and
+        // `rich_text_editor_demo_end_to_end_insert_table_at_end` in
+        // `crates/public_api/tests/table_editing_tests.rs`.
+        let target_block_entry = target_block.id as i64;
         let mut found_frame_id = frame_ids[0];
-        let mut found_block_idx = 0usize;
+        let mut found_child_idx = 0usize;
         'outer: for fid in &frame_ids {
-            let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
-            for (bi, bid) in block_ids.iter().enumerate() {
-                if *bid == target_block.id {
+            let frame = uow
+                .get_frame(fid)?
+                .ok_or_else(|| anyhow!("Frame {fid} not found"))?;
+            for (ci, entry) in frame.child_order.iter().enumerate() {
+                if *entry == target_block_entry {
                     found_frame_id = *fid;
-                    found_block_idx = bi;
+                    found_child_idx = ci;
                     break 'outer;
                 }
             }
@@ -153,7 +169,7 @@ fn execute_insert_table(
         };
         (
             found_frame_id,
-            found_block_idx + after_idx,
+            found_child_idx + after_idx,
             Some((target_block.id, after)),
             cell_start,
         )

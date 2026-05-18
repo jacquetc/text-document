@@ -4,7 +4,7 @@
 //! position computation (`find_block_at_position_sequential`) stay in sync
 //! when text is inserted, deleted, or replaced inside table cells.
 
-use text_document::{FlowElement, FlowElementSnapshot, TextDocument};
+use text_document::{Alignment, BlockFormat, FlowElement, FlowElementSnapshot, MoveMode, TextDocument};
 
 /// Create a document: "Before" + 2x2 table + "After"
 /// Create a document: "Before" + 2x2 empty table + "After" using insert_table
@@ -1002,5 +1002,383 @@ fn undo_insert_in_cell_restores_positions() {
             "text mismatch after undo: {:?} vs {:?}",
             before, after
         );
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Markdown importer: per-element consistency of document_position
+// against the snapshot's running positions. If any of these fail,
+// it means the importer leaves Block.document_position out of sync
+// with where the snapshot walker places the block.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn import_blockquote_single_level() {
+    let doc = TextDocument::new();
+    doc.set_markdown("Para A\n\n> Quoted line one.\n>\n> Quoted line two.\n\nPara B")
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "blockquote single level");
+}
+
+#[test]
+fn import_blockquote_nested_three_levels() {
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "Para A\n\
+         \n\
+         > Level 1.\n\
+         >\n\
+         > > Level 2.\n\
+         >\n\
+         > > > Level 3.\n\
+         \n\
+         Para B",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "blockquote nested 3 levels");
+}
+
+#[test]
+fn import_fenced_code_block() {
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "Para A\n\
+         \n\
+         ```rust\n\
+         fn hi() {}\n\
+         ```\n\
+         \n\
+         Para B",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "fenced code block");
+}
+
+#[test]
+fn import_gfm_table_then_paragraph() {
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "Para A\n\
+         \n\
+         | A | B |\n\
+         |---|---|\n\
+         | c | d |\n\
+         \n\
+         Para B",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "GFM table");
+}
+
+#[test]
+fn import_nested_unordered_list() {
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "- Item 0\n\
+         - Item 1\n  - Nested 1.1\n  - Nested 1.2\n    - Deeper 1.2.1\n- Item 2",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "nested unordered list");
+}
+
+#[test]
+fn import_full_rich_text_editor_sample_structure() {
+    // Mirrors the rich_text_editor example's SAMPLE constant
+    // structurally — every element class the importer touches in
+    // that demo. If document_position drifts from snapshot positions
+    // here, every block past the drift point is unreachable from
+    // cursor lookups (which sort by document_position).
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "# Title\n\
+         \n\
+         Para A with **bold** and *italic* and `code`.\n\
+         \n\
+         ## Heading 2\n\
+         \n\
+         Para B short.\n\
+         \n\
+         ### Heading 3\n\
+         \n\
+         - List item 0\n\
+         - List item 1\n  - Nested 1.1\n  - Nested 1.2\n    - Deeper 1.2.1\n\
+         - List item 2\n\
+         \n\
+         1. Ordered 0\n\
+         2. Ordered 1\n   1. Nested 1.1\n      1. Deeper 1.1.1\n\
+         3. Ordered 2\n\
+         \n\
+         > Quoted level 1.\n\
+         >\n\
+         > > Quoted level 2.\n\
+         > >\n\
+         > > > Quoted level 3.\n\
+         \n\
+         ```rust\n\
+         fn hi() {}\n\
+         ```\n\
+         \n\
+         ```python\n\
+         def hi(): pass\n\
+         ```\n\
+         \n\
+         | A | B | C |\n\
+         |---|---|---|\n\
+         | 1 | 2 | 3 |\n\
+         | 4 | 5 | 6 |\n\
+         \n\
+         Final paragraph.",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "full rich_text_editor sample structure");
+}
+
+/// Mimics the rich_text_editor example's apply_default_margins:
+/// walks every block, sets per-kind top/bottom margins via
+/// cursor.set_block_format. Reproducible because we read
+/// block.position() and set_position(...) just like the example.
+fn apply_default_margins_test_clone(doc: &TextDocument) {
+    for block in doc.blocks() {
+        let heading_level = block.block_format().heading_level;
+        let (top, bottom) = match heading_level {
+            Some(1) => (24, 12),
+            Some(2) => (20, 10),
+            Some(3) => (16, 8),
+            Some(4) => (12, 6),
+            Some(_) => (10, 4),
+            None => (4, 4),
+        };
+        let cursor = doc.cursor_at(block.position());
+        cursor.set_position(block.position(), MoveMode::MoveAnchor);
+        let _ = cursor.set_block_format(&BlockFormat {
+            top_margin: Some(top),
+            bottom_margin: Some(bottom),
+            ..BlockFormat::default()
+        });
+    }
+}
+
+fn apply_alignment_demos_test_clone(doc: &TextDocument) {
+    for block in doc.blocks() {
+        let text = block.text();
+        let trimmed = text.trim_start();
+        let (alignment, text_indent) = if trimmed.starts_with("[Center]") {
+            (Some(Alignment::Center), None)
+        } else if trimmed.starts_with("[Right]") {
+            (Some(Alignment::Right), None)
+        } else if trimmed.starts_with("[Justify]") {
+            (Some(Alignment::Justify), None)
+        } else if trimmed.starts_with("[Indent]") {
+            (None, Some(32))
+        } else {
+            continue;
+        };
+        let prior = block.block_format();
+        let cursor = doc.cursor_at(block.position());
+        cursor.set_position(block.position(), MoveMode::MoveAnchor);
+        let _ = cursor.set_block_format(&BlockFormat {
+            alignment,
+            text_indent,
+            top_margin: prior.top_margin,
+            bottom_margin: prior.bottom_margin,
+            ..BlockFormat::default()
+        });
+    }
+}
+
+#[test]
+fn apply_default_margins_keeps_positions_consistent() {
+    // The rich_text_editor demo runs this immediately after
+    // set_markdown.wait(). If set_block_format leaks any drift,
+    // it shows up here.
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "# Title\n\
+         \n\
+         Para A.\n\
+         \n\
+         ## H2\n\
+         \n\
+         - List item 0\n  - Nested 1\n\
+         \n\
+         > Quoted line.\n\
+         \n\
+         ```rust\n\
+         fn hi() {}\n\
+         ```\n\
+         \n\
+         | A | B |\n\
+         |---|---|\n\
+         | c | d |\n\
+         \n\
+         Final.",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "before apply_default_margins");
+    apply_default_margins_test_clone(&doc);
+    assert_doc_pos_matches_snapshot(&doc, "after apply_default_margins");
+}
+
+#[test]
+fn insert_table_after_imported_gfm_table_lands_at_doc_end() {
+    // Reproduction of the user-reported "table inserted N blocks before
+    // the cursor" drift. The parent frame here contains:
+    //   child_order: [+ParaA_blk, -imported_table_anchor, +Final_blk]
+    // The OLD insert_table_uc computed the insertion index by walking
+    // the frame's `blocks` list (which holds only [+ParaA, +Final]),
+    // so Final landed at blocks_idx=1, while in child_order Final is
+    // at idx=2. The new anchor went into child_order at idx=2 (before
+    // Final) instead of idx=3 (after Final).
+    //
+    // Fix: walk `child_order` directly to locate the target block.
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "Para A.\n\
+         \n\
+         | A | B | C |\n\
+         |---|---|---|\n\
+         | 1 | 2 | 3 |\n\
+         | 4 | 5 | 6 |\n\
+         \n\
+         Final paragraph here.",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "after import (small)");
+
+    let pre = all_block_positions(&doc);
+    let pre_top_level = doc.flow().len();
+    let (last_pos, last_len, _) = *pre.last().unwrap();
+    let end_pos = last_pos + last_len;
+    let cursor = doc.cursor_at(end_pos);
+    cursor.set_position(end_pos, MoveMode::MoveAnchor);
+    cursor.insert_table(3, 3).expect("insert");
+
+    assert_doc_pos_matches_snapshot(&doc, "after insert_table at end (small)");
+
+    // The new table must be the LAST top-level flow element.
+    let flow = doc.flow();
+    assert_eq!(
+        flow.len(),
+        pre_top_level + 1,
+        "expected exactly +1 top-level element (the new table)"
+    );
+    assert!(
+        matches!(flow.last(), Some(FlowElement::Table(_))),
+        "new table must land at the very end of the document, not between earlier elements"
+    );
+}
+
+#[test]
+fn rich_text_editor_demo_end_to_end_insert_table_at_end() {
+    // Exact reproduction of the user's failing scenario:
+    //   1. Load the SAMPLE markdown (mirroring the demo).
+    //   2. apply_default_margins, apply_alignment_demos (the demo does both).
+    //   3. Place cursor at character_count() (end of doc, in the last block).
+    //   4. Insert a 3x3 table.
+    //   5. Assert document_position == snapshot position for every block
+    //      (including the new cells), AND assert the new table is the
+    //      LAST top-level flow element (not "4 blocks before the cursor").
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "# Title\n\
+         \n\
+         Para A with **bold** and *italic* and `code`.\n\
+         \n\
+         ## Heading 2\n\
+         \n\
+         Para B short.\n\
+         \n\
+         ### Heading 3\n\
+         \n\
+         - List item 0\n\
+         - List item 1\n  - Nested 1.1\n  - Nested 1.2\n    - Deeper 1.2.1\n\
+         - List item 2\n\
+         \n\
+         1. Ordered 0\n\
+         2. Ordered 1\n   1. Nested 1.1\n      1. Deeper 1.1.1\n\
+         3. Ordered 2\n\
+         \n\
+         > Quoted level 1.\n\
+         >\n\
+         > > Quoted level 2.\n\
+         > >\n\
+         > > > Quoted level 3.\n\
+         \n\
+         ```rust\n\
+         fn hi() {}\n\
+         ```\n\
+         \n\
+         | A | B | C |\n\
+         |---|---|---|\n\
+         | 1 | 2 | 3 |\n\
+         | 4 | 5 | 6 |\n\
+         \n\
+         Final paragraph here.",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+
+    assert_doc_pos_matches_snapshot(&doc, "after import");
+    apply_default_margins_test_clone(&doc);
+    assert_doc_pos_matches_snapshot(&doc, "after apply_default_margins");
+    apply_alignment_demos_test_clone(&doc);
+    assert_doc_pos_matches_snapshot(&doc, "after apply_alignment_demos");
+
+    // The user's failing scenario: click at the end of the visible
+    // text — that's the end of the LAST snapshot block, NOT
+    // character_count() (which sums block char lengths and excludes
+    // per-block boundary separators that the snapshot does count).
+    let pre_snap = all_block_positions(&doc);
+    let (last_pos, last_len, _) = *pre_snap.last().expect("doc non-empty");
+    let end_pos = last_pos + last_len;
+    let cursor = doc.cursor_at(end_pos);
+    cursor.set_position(end_pos, MoveMode::MoveAnchor);
+
+    // Capture top-level flow text BEFORE insertion so we can verify
+    // the new table really lands at the END (not 4 blocks before).
+    let pre_top_level_count = doc.flow().len();
+
+    cursor.insert_table(3, 3).expect("insert_table at end of doc");
+
+    assert_doc_pos_matches_snapshot(&doc, "after insert_table at end-of-doc");
+
+    // The new table should be the last (or second-to-last, depending on
+    // whether the host block stays at the very end) top-level flow
+    // element. Concretely: when the cursor is at end-of-doc inside the
+    // "Final paragraph here." block (offset > 0), insert_table picks
+    // after=true, so the table goes AFTER the final paragraph — meaning
+    // the table is now the last top-level flow element.
+    let flow = doc.flow();
+    assert!(
+        flow.len() == pre_top_level_count + 1,
+        "expected exactly +1 top-level element (the table), got {} → {}",
+        pre_top_level_count,
+        flow.len()
+    );
+    match flow.last().expect("non-empty flow") {
+        FlowElement::Table(_) => {} // expected
+        other => panic!(
+            "expected the LAST top-level flow element to be the new Table; got {:?}. \
+             User reported: 'table is inserted 4 blocks before the cursor' — this assertion \
+             captures that regression.",
+            std::mem::discriminant(other)
+        ),
     }
 }
