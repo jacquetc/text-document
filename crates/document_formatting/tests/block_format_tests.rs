@@ -38,6 +38,7 @@ fn test_set_block_format_all_fields() -> Result<()> {
             bottom_margin: Some(20),
             left_margin: Some(30),
             right_margin: Some(40),
+            text_indent: Some(15),
         },
     )?;
 
@@ -67,6 +68,7 @@ fn test_set_block_format_all_fields() -> Result<()> {
     assert_eq!(block.fmt_bottom_margin, Some(20));
     assert_eq!(block.fmt_left_margin, Some(30));
     assert_eq!(block.fmt_right_margin, Some(40));
+    assert_eq!(block.fmt_text_indent, Some(15));
     Ok(())
 }
 

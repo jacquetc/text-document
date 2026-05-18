@@ -269,6 +269,7 @@ impl BlockFormat {
             bottom_margin: self.bottom_margin.map(|v| v as i64),
             left_margin: self.left_margin.map(|v| v as i64),
             right_margin: self.right_margin.map(|v| v as i64),
+            text_indent: self.text_indent.map(|v| v as i64),
         }
     }
 }

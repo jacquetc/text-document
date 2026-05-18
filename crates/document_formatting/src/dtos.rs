@@ -73,6 +73,11 @@ pub struct SetBlockFormatDto {
     pub bottom_margin: Option<i64>,
     pub left_margin: Option<i64>,
     pub right_margin: Option<i64>,
+    /// First-line indent in pixels. Shifts only the first wrapped
+    /// line of the block right by this much; subsequent lines stay
+    /// flush with the block's left margin. Mirrors
+    /// `Block.fmt_text_indent`.
+    pub text_indent: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]

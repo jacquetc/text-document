@@ -144,6 +144,9 @@ fn execute_set_block_format(
             if let Some(v) = dto.right_margin {
                 updated.fmt_right_margin = Some(v);
             }
+            if let Some(v) = dto.text_indent {
+                updated.fmt_text_indent = Some(v);
+            }
             updated.updated_at = chrono::Utc::now();
             blocks_to_update.push(updated);
         }
