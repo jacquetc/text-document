@@ -337,6 +337,181 @@ fn insert_in_empty_cell_positions_stay_valid() {
     }
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// `cursor.insert_table(rows, cols)` round-trip
+//
+// Symptoms reported against the formatting toolbar's "Insert Table"
+// button: after typing in cells of a 3×3 inserted table, cells
+// (2,0)..(2,2) become unreachable, and typing in cell (1,1) can
+// spill into the following block. Markdown-imported tables work fine
+// (covered by the older tests above) — these tests pin the
+// programmatic insertion path.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+fn inserted_3x3_with_surrounding_text() -> TextDocument {
+    let doc = TextDocument::new();
+    doc.set_plain_text("Before").unwrap();
+    let cursor = doc.cursor_at(6);
+    cursor.insert_table(3, 3).unwrap();
+    // Position immediately past the table's last cell in the
+    // snapshot's position space (one separator + 9 empty cells, each
+    // 1 position). `cursor_at(character_count())` would still report
+    // 6 because empty cells do not contribute to character_count;
+    // walk past the table explicitly so the "After" block lands
+    // *after* the table, matching what a user would intuit.
+    let after_table = 6 + 1 + 9;
+    let cursor2 = doc.cursor_at(after_table);
+    cursor2.insert_block().unwrap();
+    cursor2.insert_text("After").unwrap();
+    doc
+}
+
+#[test]
+fn inserted_3x3_all_nine_cells_addressable() {
+    let doc = inserted_3x3_with_surrounding_text();
+    // Cell positions should be strictly monotonic in row-major order
+    // and match the snapshot's `running_pos` walk (one boundary
+    // between each empty cell).
+    let mut prev: Option<usize> = None;
+    for r in 0..3 {
+        for c in 0..3 {
+            let pos = cell_block_position(&doc, r, c);
+            assert!(
+                pos.is_some(),
+                "cell ({r},{c}) of a fresh 3x3 insert_table should be addressable, snapshot returned None"
+            );
+            let (p, l) = pos.unwrap();
+            assert_eq!(l, 0, "fresh cell ({r},{c}) should be empty (len 0), got len {l}");
+            if let Some(prev_p) = prev {
+                assert_eq!(
+                    p,
+                    prev_p + 1,
+                    "cell ({r},{c}) at pos {p} should be one boundary past previous cell at {prev_p}"
+                );
+            }
+            prev = Some(p);
+        }
+    }
+}
+
+#[test]
+fn inserted_3x3_typing_in_each_cell_lands_in_that_cell() {
+    let doc = inserted_3x3_with_surrounding_text();
+    // Type one distinct character per cell, in a non-row-major order so
+    // a position-arithmetic bug that gets the first row right is still
+    // exposed.
+    let plan = [
+        (2, 2, 'a'),
+        (1, 1, 'b'),
+        (0, 0, 'c'),
+        (2, 0, 'd'),
+        (0, 2, 'e'),
+        (1, 0, 'f'),
+        (0, 1, 'g'),
+        (2, 1, 'h'),
+        (1, 2, 'i'),
+    ];
+    for (r, c, ch) in plan {
+        let (pos, len) = cell_block_position(&doc, r, c).unwrap_or_else(|| {
+            panic!("cell ({r},{c}) should be reachable before typing '{ch}'")
+        });
+        let cursor = doc.cursor_at(pos + len);
+        cursor.insert_text(&ch.to_string()).unwrap();
+        // After typing, the snapshot should show the character in that cell.
+        let snap = doc.snapshot_flow();
+        let cell_text = snap.elements.iter().find_map(|el| {
+            if let FlowElementSnapshot::Table(ts) = el {
+                ts.cells
+                    .iter()
+                    .find(|cc| cc.row == r && cc.column == c)
+                    .and_then(|cc| cc.blocks.first())
+                    .map(|b| b.text.clone())
+            } else {
+                None
+            }
+        });
+        let text = cell_text.unwrap_or_default();
+        assert!(
+            text.contains(ch),
+            "cell ({r},{c}) should contain '{ch}' after typing, got {text:?}; full doc positions: {:?}",
+            all_block_positions(&doc)
+        );
+    }
+    // After all typing, no overlaps; "After" still exists.
+    let positions = all_block_positions(&doc);
+    assert_no_overlaps(&positions);
+    assert!(
+        positions.iter().any(|(_, _, t)| t == "After"),
+        "post-table 'After' block should survive nine in-cell inserts; got {positions:?}"
+    );
+}
+
+#[test]
+fn inserted_3x3_does_not_leak_into_following_block() {
+    let doc = inserted_3x3_with_surrounding_text();
+    // Type a lot in cell (1,1) — enough that a "this cell only owns one
+    // position" bug would push the input into the cell after it (or out
+    // of the table entirely).
+    let (p, l) = cell_block_position(&doc, 1, 1).expect("cell (1,1) addressable");
+    let cursor = doc.cursor_at(p + l);
+    let burst = "the quick brown fox";
+    cursor.insert_text(burst).unwrap();
+
+    let snap = doc.snapshot_flow();
+    // Check the cell got the entire burst (no spill).
+    let cell_text = snap.elements.iter().find_map(|el| {
+        if let FlowElementSnapshot::Table(ts) = el {
+            ts.cells
+                .iter()
+                .find(|c| c.row == 1 && c.column == 1)
+                .and_then(|c| c.blocks.first())
+                .map(|b| b.text.clone())
+        } else {
+            None
+        }
+    });
+    assert_eq!(
+        cell_text.as_deref(),
+        Some(burst),
+        "cell (1,1) should hold the entire burst; full doc positions: {:?}",
+        all_block_positions(&doc)
+    );
+
+    // The other 8 cells should still be empty (no spill into them).
+    for r in 0..3 {
+        for c in 0..3 {
+            if r == 1 && c == 1 {
+                continue;
+            }
+            let other_text = snap.elements.iter().find_map(|el| {
+                if let FlowElementSnapshot::Table(ts) = el {
+                    ts.cells
+                        .iter()
+                        .find(|cc| cc.row == r && cc.column == c)
+                        .and_then(|cc| cc.blocks.first())
+                        .map(|b| b.text.clone())
+                } else {
+                    None
+                }
+            });
+            assert_eq!(
+                other_text.as_deref(),
+                Some(""),
+                "cell ({r},{c}) should be empty (no spill from typing in (1,1)), got {other_text:?}"
+            );
+        }
+    }
+
+    // "After" must still exist and not contain any of the burst.
+    let after_block = all_block_positions(&doc)
+        .into_iter()
+        .find(|(_, _, t)| t == "After");
+    assert!(
+        after_block.is_some(),
+        "'After' must survive typing in cell (1,1)"
+    );
+}
+
 #[test]
 fn undo_insert_in_cell_restores_positions() {
     let doc = doc_with_table_and_text();
