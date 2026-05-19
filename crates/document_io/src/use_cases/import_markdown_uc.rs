@@ -26,6 +26,7 @@ pub trait ImportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "Get", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Update", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "UpdateWithRelationships", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Remove", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "Create", thread_safe = true)]
@@ -283,12 +284,14 @@ fn import_parsed_elements(
                 let current_frame_id = frame_stack.last().unwrap().frame_id;
                 let total_cells = num_rows * num_cols;
                 let mut cell_count: i64 = 0;
+                let mut created_cell_frame_ids: Vec<common::types::EntityId> = Vec::new();
 
                 for (r, row) in parsed_table.rows.iter().enumerate() {
                     for (c, cell) in row.iter().enumerate() {
                         // Create cell frame
                         let cell_frame = Frame::default();
                         let created_cell_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
+                        created_cell_frame_ids.push(created_cell_frame.id);
 
                         let (plain_text, format_runs) = format_runs_from_spans(&cell.spans, false);
 
@@ -349,6 +352,25 @@ fn import_parsed_elements(
                     ..Frame::default()
                 };
                 let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
+
+                // Backfill each cell frame's `parent_frame` to point at
+                // the anchor frame. Cell frames are created before the
+                // anchor (we don't know the anchor id yet), so this
+                // can't be set at creation time. Without this, walking
+                // up from a cell to find its containing table fails —
+                // breaking `insert_table_uc`'s "is the cursor inside an
+                // existing table?" check.
+                for cell_frame_id in &created_cell_frame_ids {
+                    if let Some(cf) = uow.get_frame(cell_frame_id)? {
+                        let mut updated = cf;
+                        updated.parent_frame = Some(created_anchor.id);
+                        // `update_frame` is scalar-only and preserves
+                        // the existing parent_frame to guard against
+                        // stale-entity writes; use the relationship-
+                        // aware variant so this write actually lands.
+                        uow.update_frame_with_relationships(&updated)?;
+                    }
+                }
 
                 // Add anchor to parent's child_order (negative = frame reference)
                 frame_stack

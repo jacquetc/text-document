@@ -97,6 +97,7 @@ impl CommandUnitOfWork for ImportMarkdownUnitOfWork {
 #[macros::uow_action(entity = "Frame", action = "Get", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Update", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "UpdateWithRelationships", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Remove", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "Create", thread_safe = true)]

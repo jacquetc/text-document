@@ -86,6 +86,7 @@ impl CommandUnitOfWork for InsertTableUnitOfWork {
 #[macros::uow_action(entity = "Frame", action = "Get")]
 #[macros::uow_action(entity = "Frame", action = "Create")]
 #[macros::uow_action(entity = "Frame", action = "Update")]
+#[macros::uow_action(entity = "Frame", action = "UpdateWithRelationships")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]

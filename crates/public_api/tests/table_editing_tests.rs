@@ -1234,6 +1234,70 @@ fn apply_default_margins_keeps_positions_consistent() {
 }
 
 #[test]
+fn insert_table_from_inside_cell_lands_after_containing_table() {
+    // User-reported: clicking inside a table cell and pressing the
+    // toolbar's "Insert Table" creates a strange invisible block and
+    // misplaces the new table. Desired: when the cursor is inside any
+    // cell of an existing table, the new table goes IMMEDIATELY AFTER
+    // that table, in the table's parent frame's flow.
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "Para A.\n\
+         \n\
+         | A | B | C |\n\
+         |---|---|---|\n\
+         | 1 | 2 | 3 |\n\
+         | 4 | 5 | 6 |\n\
+         \n\
+         Para B.",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    assert_doc_pos_matches_snapshot(&doc, "before insert (cell scenario)");
+    let pre_top_level = doc.flow().len();
+
+    // Place cursor inside the "5" cell (row 2, col 1 of the imported
+    // table). Walk the snapshot to find its position.
+    let target = all_block_positions(&doc)
+        .into_iter()
+        .find(|(_, _, t)| t == "5")
+        .expect("'5' cell exists");
+    let cursor = doc.cursor_at(target.0);
+    cursor.set_position(target.0, MoveMode::MoveAnchor);
+    cursor.insert_table(2, 2).expect("insert");
+
+    assert_doc_pos_matches_snapshot(&doc, "after insert from inside cell");
+
+    // The new table must NOT be nested inside the cell. It must appear
+    // as a sibling of the imported table, immediately after it, in the
+    // document's top-level flow.
+    let flow = doc.flow();
+    assert_eq!(
+        flow.len(),
+        pre_top_level + 1,
+        "expected exactly +1 top-level flow element (the new table). \
+         If +0 the new table was nested inside the cell instead of \
+         hoisted out; if >+1 the parent frame got split."
+    );
+
+    // Verify the order: [ParaA, imported_table, new_table, ParaB].
+    let kinds: Vec<&'static str> = flow
+        .iter()
+        .map(|el| match el {
+            FlowElement::Block(_) => "block",
+            FlowElement::Table(_) => "table",
+            FlowElement::Frame(_) => "frame",
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["block", "table", "table", "block"],
+        "expected new table between imported table and 'Para B', got {kinds:?}"
+    );
+}
+
+#[test]
 fn insert_table_after_imported_gfm_table_lands_at_doc_end() {
     // Reproduction of the user-reported "table inserted N blocks before
     // the cursor" drift. The parent frame here contains:
