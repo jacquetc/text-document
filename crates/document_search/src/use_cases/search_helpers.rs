@@ -8,9 +8,10 @@ use regex::RegexBuilder;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Build the full document text from main-flow blocks by reading
-/// content from the global rope via `block_offsets`. Falls back to
-/// `Block.plain_text` for blocks whose content isn't in the rope
-/// (e.g. table-cell blocks) — see `block_content_via_store`.
+/// content from the global rope via `block_offsets`. Blocks whose
+/// content isn't in the rope (e.g. table-cell blocks not yet covered
+/// by plan §1.6's `Frame.byte_range` model) contribute the empty
+/// string — see `block_content_via_store`.
 ///
 /// The returned string has main-flow blocks joined by single `\n`
 /// separators — matching the position semantics that

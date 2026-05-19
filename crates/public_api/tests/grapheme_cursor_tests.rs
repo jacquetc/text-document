@@ -249,3 +249,40 @@ fn backspace_across_block_boundary_merges_blocks() {
     assert_eq!(doc.to_plain_text().unwrap(), "ABCD");
     assert_eq!(doc.block_count(), 1);
 }
+
+#[test]
+fn cursor_at_snaps_to_grapheme_boundary() {
+    // `cursor_at(n)` for an n that falls inside a grapheme cluster
+    // snaps to a cluster boundary so callers can't land in the
+    // middle of an "é" cluster.
+    let doc = new_doc("e\u{0301}X");
+    let c = doc.cursor_at(1);
+    let pos = c.position();
+    assert!(
+        pos == 0 || pos == 2,
+        "cursor_at(1) in decomposed 'e + U+0301 + X' should snap to 0 or 2, got {}",
+        pos
+    );
+}
+
+#[test]
+fn mid_cluster_next_then_prev_returns_to_start() {
+    // After `cursor_at` snaps to grapheme boundaries, NextCharacter
+    // followed by PreviousCharacter is identity. (Without snapping,
+    // starting mid-cluster left next→prev off by one.)
+    let doc = new_doc("e\u{0301}X");
+    let c = doc.cursor_at(1);
+    let start = c.position();
+    assert!(
+        start == 0 || start == 2,
+        "expected snap to cluster boundary, got {}",
+        start
+    );
+    c.move_position(MoveOperation::NextCharacter, MoveMode::MoveAnchor, 1);
+    c.move_position(MoveOperation::PreviousCharacter, MoveMode::MoveAnchor, 1);
+    assert_eq!(
+        c.position(),
+        start,
+        "round-trip from a snapped boundary must return to start"
+    );
+}

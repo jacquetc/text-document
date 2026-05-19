@@ -183,9 +183,9 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
     Ok((db_context, event_hub, undo_redo_manager))
 }
 
-/// Alias for [`setup_with_text`] — after step 7c-4 the rope is the
-/// sole content source, so `setup_with_text` always seeds it. Kept
-/// for source-compatibility with existing tests.
+/// Alias for [`setup_with_text`]. The rope is the sole content
+/// source, so `setup_with_text` always seeds it. Kept for
+/// source-compatibility with existing tests.
 pub fn setup_with_imported_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
     setup_with_text(text)
 }
@@ -322,8 +322,7 @@ pub fn get_block_image_anchors(db_context: &DbContext, block_id: EntityId) -> Ve
     get_block_images(db_context.get_store(), block_id)
 }
 
-/// Read a block's content from the rope via a `BlockDto`. Post-7c-4
-/// equivalent of the old `block_dto.plain_text` field access.
+/// Read a block's content from the rope via a `BlockDto`.
 pub fn block_text_dto(db_context: &DbContext, dto: &BlockDto) -> String {
     let entity: common::entities::Block = dto.clone().into();
     common::database::rope_helpers::block_content_via_store(&entity, db_context.get_store())

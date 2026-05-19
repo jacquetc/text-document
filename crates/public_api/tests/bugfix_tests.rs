@@ -248,3 +248,53 @@ fn delete_previous_char_at_start_is_noop() {
     cursor.delete_previous_char().unwrap();
     assert_eq!(doc.to_plain_text().unwrap(), "Hello");
 }
+
+// ── Out-of-range delete on empty doc (no-panic guard) ───────────
+
+#[test]
+fn empty_document_out_of_range_delete_ops_are_safe() {
+    // delete_char + out-of-range cursor on an empty document used to
+    // panic via the backend returning -1 (`to_usize(-1)`). Fixed by
+    // the grapheme-cursor refactor in commit 6594416, which added
+    // defensive bounds checks in next_grapheme_boundary /
+    // prev_grapheme_boundary.
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let cursor = doc.cursor_at(1);
+    cursor.delete_char().unwrap();
+    cursor.delete_previous_char().unwrap();
+    assert_eq!(doc.to_plain_text().unwrap(), "");
+    assert_eq!(doc.block_count(), 1);
+}
+
+// ── Cross-block delete_previous_char preserves invariant ────────
+
+#[test]
+fn delete_previous_char_after_crossblock_edit_keeps_invariant() {
+    // A specific multi-block edit sequence used to leave
+    // `character_count` out of sync with the actual plain text:
+    // delete_previous_char decremented cc and moved the cursor but
+    // did not remove the character. Invariant guarded here:
+    // `cc + (bc - 1) == plain.chars().count()`.
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let cursor = doc.cursor_at(0);
+    cursor.insert_block().unwrap();
+    cursor.move_position(MoveOperation::PreviousCharacter, MoveMode::MoveAnchor, 1);
+    cursor.insert_text("a").unwrap();
+    cursor.move_position(MoveOperation::NextCharacter, MoveMode::MoveAnchor, 1);
+    cursor.insert_text("a").unwrap();
+    cursor.delete_previous_char().unwrap();
+
+    let plain = doc.to_plain_text().unwrap();
+    let cc = doc.character_count();
+    let bc = doc.block_count();
+    assert_eq!(
+        cc + bc - 1,
+        plain.chars().count(),
+        "cc + (bc - 1) must equal plain.chars().count() — got cc={}, bc={}, plain={:?}",
+        cc,
+        bc,
+        plain
+    );
+}

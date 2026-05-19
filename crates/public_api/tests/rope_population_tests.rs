@@ -344,8 +344,8 @@ fn remove_table_strips_sentinel_from_rope() {
 
 #[test]
 fn set_html_table_cells_in_main_rope() {
-    // After step 7c-2, html-imported tables put their cell content
-    // into the global rope alongside the table-anchor sentinel.
+    // HTML-imported tables put their cell content into the global
+    // rope alongside the table-anchor sentinel.
     let doc = TextDocument::new();
     doc.set_html("<p>before</p><table><tr><td>cell</td></tr></table><p>after</p>")
         .expect("set_html")

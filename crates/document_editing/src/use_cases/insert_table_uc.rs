@@ -357,11 +357,11 @@ fn execute_insert_table(
     updated_parent.updated_at = now;
     uow.update_frame(&updated_parent)?;
 
-    // Mirror the table-anchor into the global rope (no-op under
-    // default backend). Inserts a U+FFFC sentinel + boundary newline,
-    // registers a TableAnchor(table_id) marker in the offset index.
-    // Cell-internal content stays in Block.plain_text for now —
-    // plan §1.6's Frame.byte_range model is a follow-up commit.
+    // Inserts a U+FFFC sentinel + boundary newline into the global
+    // rope and registers a TableAnchor(table_id) marker in the
+    // offset index. Cell-internal content is not yet tracked in
+    // BlockOffsetIndex — plan §1.6's Frame.byte_range model is a
+    // follow-up commit.
     if let Some((target_block_id, after)) = rope_anchor {
         rope_insert_table_anchor(&uow.store(), created_table.id, target_block_id, after);
     }

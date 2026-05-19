@@ -2,10 +2,9 @@
 //!
 //! Each helper mutates `store.rope` and `store.block_offsets`
 //! together so callers can stay oblivious to the underlying layout.
-//! Read helpers (`block_content_via_store`) prefer rope bytes but
-//! fall back to `Block.plain_text` when the rope is stale (e.g.
-//! after an unmirrored use case). The fallback goes away in step
-//! 7c when `Block.plain_text` is removed.
+//! Read helpers (`block_content_via_store`) source content from the
+//! rope and return empty when a block is not yet registered in the
+//! offset index.
 
 use crate::database::Store;
 use crate::database::block_offset_index::OffsetMarker;
@@ -56,6 +55,25 @@ pub fn block_char_length(block: &Block, store: &Store) -> i64 {
     let char_start = rope.byte_to_char(bs as usize);
     let char_end = rope.byte_to_char(content_end_bytes as usize);
     (char_end - char_start) as i64
+}
+
+/// Return the absolute character position of a block's start in the
+/// document, derived from the rope via `BlockOffsetIndex`.
+///
+/// O(log n): one `range_of_block` lookup + one `byte_to_char` conversion.
+/// Falls back to `block.document_position` for blocks not registered in
+/// the index — currently table-cell blocks (plan §1.6 deferred) and
+/// blocks under non-top-level frames (`insert_frame_uc` only mirrors
+/// top-level frames). The stored field is set authoritatively by those
+/// non-flow paths and stays correct for them across main-flow edits.
+pub fn block_document_position(block: &Block, store: &Store) -> i64 {
+    let offsets = store.block_offsets.read().unwrap();
+    let Some((byte_start, _)) = offsets.range_of_block(block.id) else {
+        return block.document_position;
+    };
+    drop(offsets);
+    let rope = store.rope.read().unwrap();
+    rope.byte_to_char(byte_start as usize) as i64
 }
 
 /// Locate which block contains a given absolute char position in the
@@ -547,10 +565,10 @@ pub fn rope_merge_block_range(
 /// - `after = true`, target IS the last entry: inserts `\n\u{FFFC}`
 ///   at `target.byte_end` (rope now ends with the sentinel)
 ///
-/// NOTE: cell-internal content is not yet routed through the rope.
-/// Cells remain in `Block.plain_text` until a follow-up commit adds
-/// the `Frame.byte_range` model from plan §1.6. The rope reflects
-/// table *presence* (3-byte sentinel) only.
+/// NOTE: cell-internal content is not yet routed through the rope —
+/// the rope reflects table *presence* (3-byte sentinel) only.
+/// Routing cell content is deferred to plan §1.6's `Frame.byte_range`
+/// model.
 ///
 /// No-op if `target_block_id` is not in the index.
 pub fn rope_insert_table_anchor(

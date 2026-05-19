@@ -195,9 +195,8 @@ fn import_parsed_elements(
 
                 let created_block = uow.create_block(&block, current_frame_id, -1)?;
 
-                // Mirror into the global rope (no-op under default).
-                // Insert an inter-block `\n` before every block after
-                // the first.
+                // Insert an inter-block `\n` into the global rope
+                // before every block after the first.
                 if emitted_any_main_block {
                     rope_insert_block_boundary(&uow.store());
                 }

@@ -274,11 +274,14 @@ impl BlockOffsetIndex {
     /// bytes, and adjust `total_bytes` by `delta`. Used after a rope
     /// insert (positive delta) or delete (negative delta) to keep the
     /// index in sync without a full rebuild.
+    ///
+    /// `entries` is sorted by `byte_start`, so the affected suffix is
+    /// located via `partition_point` (O(log n)) and only that suffix
+    /// is walked.
     pub fn shift_after(&mut self, threshold: u32, delta: i32) {
-        for (_, bs) in self.entries.iter_mut() {
-            if *bs >= threshold {
-                *bs = apply_delta(*bs, delta);
-            }
+        let start = self.entries.partition_point(|(_, bs)| *bs < threshold);
+        for (_, bs) in self.entries[start..].iter_mut() {
+            *bs = apply_delta(*bs, delta);
         }
         self.total_bytes = apply_delta(self.total_bytes, delta);
     }

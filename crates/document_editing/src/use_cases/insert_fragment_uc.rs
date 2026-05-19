@@ -764,15 +764,15 @@ fn build_tail_state(
 
 /// Insert a mixed fragment (both blocks and tables) at the cursor position.
 ///
-/// FOLLOW-UP (deferred for step 7 cutover): the rope mirror for this
-/// path is not yet wired. Mixed fragments (paste with BOTH blocks and
-/// tables interleaved — e.g. copying a section that contains prose
-/// AND a table) are rare in practice; existing tests cover the entity
-/// tree but the rope diverges from `Block.plain_text` after this UC.
-/// Adding the mirror requires a new helper `rope_insert_block_after_anchor`
-/// (because the byte position right after a table-anchor sentinel is
-/// not directly addressable via the existing `rope_split_block` API,
-/// which targets `Block` markers only).
+/// FOLLOW-UP: the rope mirror for this path is not yet wired. Mixed
+/// fragments (paste with BOTH blocks and tables interleaved — e.g.
+/// copying a section that contains prose AND a table) are rare in
+/// practice; existing tests cover the entity tree but the rope is
+/// not updated by this UC. Adding the mirror requires a new helper
+/// `rope_insert_block_after_anchor` (because the byte position right
+/// after a table-anchor sentinel is not directly addressable via the
+/// existing `rope_split_block` API, which targets `Block` markers
+/// only).
 fn insert_mixed_fragment(
     uow: &mut Box<dyn InsertFragmentUnitOfWorkTrait>,
     dto: &InsertFragmentDto,

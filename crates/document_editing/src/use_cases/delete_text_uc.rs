@@ -622,10 +622,9 @@ fn execute_delete(
             shift_images_for_delete(images, byte_so, byte_eo) as i64
         };
 
-        // Mirror the same-block delete into the global rope (no-op under
-        // default). Cross-block delete is handled below — its rope sync
-        // is deferred to step 5.5 (the structural-ops migration) since
-        // it removes whole blocks plus their boundary newlines.
+        // Same-block delete: splice the deleted bytes out of the rope.
+        // The cross-block merge path below handles the boundary-newline
+        // collapse separately.
         common::database::rope_helpers::rope_delete_in_block(
             &store,
             start_block.id,
@@ -763,10 +762,10 @@ fn execute_delete(
             .unwrap()
             .insert(start_block.id, merged_images);
 
-        // Mirror the cross-block merge into the rope (no-op under
-        // default). Deletes the rope range from `start_block + byte_so`
-        // through `end_block + byte_eo`, removes the intermediate +
-        // end block index entries, and shifts subsequent offsets.
+        // Cross-block merge: delete the rope range from
+        // `start_block + byte_so` through `end_block + byte_eo`,
+        // remove the intermediate + end-block index entries, and
+        // shift subsequent offsets.
         common::database::rope_helpers::rope_merge_block_range(
             &store,
             start_block.id,

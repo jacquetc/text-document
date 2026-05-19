@@ -115,7 +115,6 @@ fn delete_range_in_block(
         shift_images_for_delete(images, byte_start, byte_end) as i64
     };
 
-    // Mirror the delete into the global rope (no-op under default).
     rope_delete_in_block(&store, block.id, byte_start, byte_end);
 
     let positions_removed = removed_text_chars + images_removed;
@@ -243,7 +242,6 @@ fn execute_insert_with_selection(
         }
     }
 
-    // Mirror the insert into the global rope (no-op under default).
     rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
     let mut blocks_to_update: Vec<Block> = Vec::new();
@@ -375,7 +373,6 @@ fn execute_insert_simple(
         }
     }
 
-    // Mirror the insert into the global rope (no-op under default).
     rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
     // Shift `document_position` for every block that sits *after* the
@@ -557,8 +554,7 @@ impl UndoRedoCommand for InsertTextUseCase {
                     .unwrap()
                     .insert(data.block_id, data.original_block_images.clone());
 
-                // Revert the rope mutation done by the forward path
-                // (no-op under default backend).
+                // Revert the rope mutation done by the forward path.
                 if data.inserted_byte_len > 0 {
                     rope_delete_in_block(
                         &store,

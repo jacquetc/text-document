@@ -134,7 +134,6 @@ fn delete_range_in_block(
         shift_images_for_delete(images, byte_start, byte_end) as i64
     };
 
-    // Mirror to rope (no-op under default).
     rope_delete_in_block(&store, block.id, byte_start, byte_end);
 
     let positions_removed = removed_text_chars + images_removed;
@@ -199,7 +198,6 @@ fn insert_formatted_at(
         }
     }
 
-    // Mirror to rope (no-op under default).
     rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
     Ok((byte_offset, inserted_byte_len))
