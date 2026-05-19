@@ -95,10 +95,9 @@ fn execute_insert_table(
                     .entries
                     .iter()
                     .filter_map(|(marker, byte_start)| match marker {
-                        common::database::block_offset_index::OffsetMarker::Block(id) => Some((
-                            *id,
-                            rope.byte_to_char(*byte_start as usize) as i64,
-                        )),
+                        common::database::block_offset_index::OffsetMarker::Block(id) => {
+                            Some((*id, rope.byte_to_char(*byte_start as usize) as i64))
+                        }
                         _ => None,
                     })
                     .collect()
@@ -233,10 +232,10 @@ fn execute_insert_table(
             let parent = uow
                 .get_frame(&parent_id)?
                 .ok_or_else(|| anyhow!("Parent frame {parent_id} not found"))?;
-            if parent.table.is_some() {
-                if let Some(grandparent_id) = parent.parent_frame {
-                    cell_anchor = Some((parent_id, grandparent_id));
-                }
+            if parent.table.is_some()
+                && let Some(grandparent_id) = parent.parent_frame
+            {
+                cell_anchor = Some((parent_id, grandparent_id));
             }
         }
 
@@ -268,8 +267,7 @@ fn execute_insert_table(
                 if f.parent_frame != Some(anchor_frame_id) {
                     continue;
                 }
-                let block_ids =
-                    uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
+                let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
                 if block_ids.is_empty() {
                     continue;
                 }

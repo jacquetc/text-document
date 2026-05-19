@@ -138,18 +138,13 @@ pub fn find_block_at_char_position(store: &Store, position: i64) -> Option<(Enti
     //    counts: if the rope index has fewer Block markers than the
     //    store has Block entities, some are unmirrored.
     let offsets = store.block_offsets.read().unwrap();
-    if offsets
-        .entries
-        .iter()
-        .any(|(m, _)| matches!(m, OffsetMarker::TableAnchor(_)))
-    {
+    if offsets.table_anchor_count() > 0 {
         return None;
     }
-    let indexed_block_count = offsets
-        .entries
-        .iter()
-        .filter(|(m, _)| matches!(m, OffsetMarker::Block(_)))
-        .count();
+    // No table anchors → every entry is a Block marker, so the indexed
+    // block count is simply `entries.len()`. O(1) instead of an O(N)
+    // filter-count on every keystroke.
+    let indexed_block_count = offsets.entries.len();
     let total_block_count = store.blocks.read().unwrap().len();
     if indexed_block_count != total_block_count {
         return None;

@@ -16,6 +16,7 @@
 
 use crate::types::EntityId;
 use im::HashMap as ImHashMap;
+use std::sync::Arc;
 
 /// Discriminates real blocks from table-anchor sentinels in the
 /// offset index. The wrapped `EntityId` is the corresponding entity's
@@ -49,7 +50,16 @@ impl OffsetMarker {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockOffsetIndex {
     /// `(marker, byte_start)` pairs sorted by `byte_start` ascending.
-    pub entries: Vec<(OffsetMarker, u32)>,
+    ///
+    /// Wrapped in `Arc` so the per-edit snapshot path (which clones
+    /// `BlockOffsetIndex` as part of `Store::snapshot`) does an O(1)
+    /// pointer bump instead of an O(N) memcpy of the underlying Vec.
+    /// Mutators in this `impl` block go through `Arc::make_mut`, which
+    /// deep-clones the Vec only on the first write after the Arc has
+    /// been shared (i.e., after a snapshot was taken). External
+    /// callers see `Arc<Vec<...>>` which derefs transparently to
+    /// `&[...]` for reads.
+    pub entries: Arc<Vec<(OffsetMarker, u32)>>,
 
     /// Total byte length of the rope this index describes. The last
     /// entry extends from its `byte_start` to this value.
@@ -108,7 +118,7 @@ impl BlockOffsetIndex {
     /// responsible for keeping the `byte_start` ordered relative to
     /// neighbours — this method does NOT re-sort.
     pub fn insert_at(&mut self, position: usize, marker: OffsetMarker, byte_start: u32) {
-        self.entries.insert(position, (marker, byte_start));
+        Arc::make_mut(&mut self.entries).insert(position, (marker, byte_start));
         // All markers at positions ≥ `position` shifted up by 1.
         for (m, p) in self.marker_index.iter_mut() {
             if *p >= position && *m != marker {
@@ -132,7 +142,7 @@ impl BlockOffsetIndex {
             "push must preserve ordering"
         );
         let position = self.entries.len();
-        self.entries.push((marker, byte_start));
+        Arc::make_mut(&mut self.entries).push((marker, byte_start));
         self.marker_index.insert(marker, position);
         if matches!(marker, OffsetMarker::TableAnchor(_)) {
             self.table_anchor_count += 1;
@@ -147,7 +157,7 @@ impl BlockOffsetIndex {
 
     /// Remove the entry at the given position. Panics if out of bounds.
     pub fn remove_at(&mut self, position: usize) -> (OffsetMarker, u32) {
-        let removed = self.entries.remove(position);
+        let removed = Arc::make_mut(&mut self.entries).remove(position);
         self.marker_index.remove(&removed.0);
         // All markers at positions > `position` shifted down by 1.
         for (_, p) in self.marker_index.iter_mut() {
@@ -169,7 +179,9 @@ impl BlockOffsetIndex {
         start: usize,
         end_inclusive: usize,
     ) -> Vec<(OffsetMarker, u32)> {
-        let removed: Vec<_> = self.entries.drain(start..=end_inclusive).collect();
+        let removed: Vec<_> = Arc::make_mut(&mut self.entries)
+            .drain(start..=end_inclusive)
+            .collect();
         let removed_anchors = removed
             .iter()
             .filter(|(m, _)| matches!(m, OffsetMarker::TableAnchor(_)))
@@ -192,7 +204,7 @@ impl BlockOffsetIndex {
     /// `*self = Self::default()` but expressed as a method so callers
     /// don't need to depend on `Default`.
     pub fn clear(&mut self) {
-        self.entries.clear();
+        Arc::make_mut(&mut self.entries).clear();
         self.marker_index = ImHashMap::new();
         self.total_bytes = 0;
         self.table_anchor_count = 0;
@@ -315,8 +327,10 @@ impl BlockOffsetIndex {
     /// is walked.
     pub fn shift_after(&mut self, threshold: u32, delta: i32) {
         let start = self.entries.partition_point(|(_, bs)| *bs < threshold);
-        for (_, bs) in self.entries[start..].iter_mut() {
-            *bs = apply_delta(*bs, delta);
+        if start < self.entries.len() {
+            for (_, bs) in Arc::make_mut(&mut self.entries)[start..].iter_mut() {
+                *bs = apply_delta(*bs, delta);
+            }
         }
         self.total_bytes = apply_delta(self.total_bytes, delta);
     }

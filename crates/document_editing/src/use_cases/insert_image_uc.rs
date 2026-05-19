@@ -154,19 +154,22 @@ fn execute_insert_image(
     }
 
     // Mirror to the global rope: insert U+FFFC OBJECT REPLACEMENT
-    // CHARACTER at the same byte offset per plan §1.6. No-op under
-    // default backend. The sentinel is 3 UTF-8 bytes; the block's
-    // `plain_text` is intentionally NOT updated (images contribute 0
-    // bytes to plain_text but 1 logical position).
+    // CHARACTER at the same byte offset per plan §1.6. The sentinel is
+    // 3 UTF-8 bytes but contributes 1 logical position.
     rope_insert_in_block(&uow.store(), block.id, byte_offset, "\u{FFFC}");
 
-    // Update block cached fields: image occupies 1 logical position but adds
-    // zero bytes to plain_text.
     let mut updated_block = block.clone();
     updated_block.updated_at = now;
     uow.update_block(&updated_block)?;
 
-    // Shift subsequent blocks' document_position by +1.
+    // Shift subsequent blocks' document_position by +1. NOT gated on
+    // `rope_positions_match_flow` (unlike insert_text_uc): this use
+    // case locates the edit via `find_block_at_position`, which reads
+    // the stored `document_position`, so the field must stay accurate
+    // here. Gating would require an O(N) catch-up that cancels the
+    // saving — net zero. Migrating the lookup to the rope-based
+    // `find_block_at_char_position` (Cause B) is the prerequisite for
+    // gating this loop.
     let mut blocks_to_update: Vec<Block> = Vec::new();
     for b in &blocks[(block_idx + 1)..] {
         let mut ub = b.clone();
