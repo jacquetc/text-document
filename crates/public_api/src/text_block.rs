@@ -91,14 +91,20 @@ impl TextBlock {
         self.block_id
     }
 
-    /// Character offset from `Block.document_position`. O(1).
+    /// Character offset of this block's start in the document. O(log n)
+    /// via the rope index for rope-clean documents; O(1) read of the
+    /// stored field for tabled documents.
     pub fn position(&self) -> usize {
         let inner = self.doc.lock();
-        block_commands::get_block(&inner.ctx, &(self.block_id as u64))
+        let Some(mut dto) = block_commands::get_block(&inner.ctx, &(self.block_id as u64))
             .ok()
             .flatten()
-            .map(|b| to_usize(b.document_position))
-            .unwrap_or(0)
+        else {
+            return 0;
+        };
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_position(&mut dto, store);
+        to_usize(dto.document_position)
     }
 
     /// Global 0-indexed block number. **O(n)**: requires scanning all blocks
@@ -115,6 +121,8 @@ impl TextBlock {
         let inner = self.doc.lock();
         let all_blocks = block_commands::get_all_block(&inner.ctx).ok()?;
         let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_positions(&mut sorted, store);
         sorted.sort_by_key(|b| b.document_position);
         let idx = sorted.iter().position(|b| b.id == self.block_id as u64)?;
         sorted.get(idx + 1).map(|b| TextBlock {
@@ -129,6 +137,8 @@ impl TextBlock {
         let inner = self.doc.lock();
         let all_blocks = block_commands::get_all_block(&inner.ctx).ok()?;
         let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_positions(&mut sorted, store);
         sorted.sort_by_key(|b| b.document_position);
         let idx = sorted.iter().position(|b| b.id == self.block_id as u64)?;
         if idx == 0 {
@@ -422,7 +432,9 @@ fn find_table_cell_context(inner: &TextDocumentInner, block_id: u64) -> Option<T
 
 /// Compute 0-indexed block number by scanning all blocks sorted by document_position.
 fn compute_block_number(inner: &TextDocumentInner, block_id: u64) -> usize {
-    let all_blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+    let mut all_blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+    let store = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_positions(&mut all_blocks, store);
     let mut sorted: Vec<_> = all_blocks.iter().collect();
     sorted.sort_by_key(|b| b.document_position);
     sorted.iter().position(|b| b.id == block_id).unwrap_or(0)
@@ -752,7 +764,9 @@ fn compute_word_starts(text: &str) -> Vec<u8> {
 
 /// Compute 0-based index of a block within its list.
 fn compute_list_item_index(inner: &TextDocumentInner, list_id: EntityId, block_id: u64) -> usize {
-    let all_blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+    let mut all_blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+    let store = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_positions(&mut all_blocks, store);
     let mut list_blocks: Vec<_> = all_blocks
         .iter()
         .filter(|b| b.list == Some(list_id))
@@ -878,9 +892,11 @@ pub(crate) fn build_block_snapshot_with_position_and_parent(
     computed_position: Option<usize>,
     parent_frame_hint: Option<EntityId>,
 ) -> Option<BlockSnapshot> {
-    let block_dto = block_commands::get_block(&inner.ctx, &block_id)
+    let mut block_dto = block_commands::get_block(&inner.ctx, &block_id)
         .ok()
         .flatten()?;
+    let store_for_pos = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_position(&mut block_dto, store_for_pos);
 
     let block_format = BlockFormat::from(&block_dto);
     let list_info = build_list_info(inner, &block_dto);
@@ -938,6 +954,8 @@ pub(crate) fn build_blocks_snapshot_for_frame(
                 .flatten()
         })
         .collect();
+    let store = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_positions(&mut block_dtos, store);
     block_dtos.sort_by_key(|b| b.document_position);
 
     block_dtos
@@ -973,6 +991,8 @@ pub(crate) fn build_blocks_snapshot_for_frame_with_positions(
                 .flatten()
         })
         .collect();
+    let store = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_positions(&mut block_dtos, store);
     block_dtos.sort_by_key(|b| b.document_position);
 
     let mut running_pos = start_pos;

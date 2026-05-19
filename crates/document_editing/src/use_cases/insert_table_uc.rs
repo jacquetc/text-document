@@ -76,6 +76,55 @@ fn execute_insert_table(
     // Snapshot for undo before mutation
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
+    // Catch up stored `Block.document_position` from the rope for all
+    // top-level blocks. `insert_text_uc` skips its position-refresh
+    // loop for rope-clean documents (readers derive from
+    // `BlockOffsetIndex` directly), so the stored field may be stale.
+    // Inserting a table transitions the doc to tabled state — after
+    // which cells contribute to flow positions but not to the rope,
+    // so the rope can no longer derive flow positions and the stored
+    // field becomes the authoritative source. Bring it up to date now
+    // before any cell-position computations below use it.
+    {
+        let store = uow.store();
+        let catchup: Vec<(common::types::EntityId, i64)> =
+            if common::database::rope_helpers::rope_positions_match_flow(&store) {
+                let offsets = store.block_offsets.read().unwrap();
+                let rope = store.rope.read().unwrap();
+                offsets
+                    .entries
+                    .iter()
+                    .filter_map(|(marker, byte_start)| match marker {
+                        common::database::block_offset_index::OffsetMarker::Block(id) => Some((
+                            *id,
+                            rope.byte_to_char(*byte_start as usize) as i64,
+                        )),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        if !catchup.is_empty() {
+            let ids: Vec<common::types::EntityId> = catchup.iter().map(|(id, _)| *id).collect();
+            let blocks_opt = uow.get_block_multi(&ids)?;
+            let mut updates: Vec<Block> = Vec::new();
+            for ((_, fresh_pos), maybe_b) in catchup.into_iter().zip(blocks_opt) {
+                if let Some(b) = maybe_b
+                    && b.document_position != fresh_pos
+                {
+                    let mut ub = b;
+                    ub.document_position = fresh_pos;
+                    ub.updated_at = chrono::Utc::now();
+                    updates.push(ub);
+                }
+            }
+            if !updates.is_empty() {
+                uow.update_block_multi(&updates)?;
+            }
+        }
+    }
+
     // Find the insertion position — determine the parent frame and where in child_order
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 

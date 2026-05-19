@@ -443,8 +443,9 @@ pub(crate) fn merge_highlight_spans(
 /// Get all block IDs sorted by document_position.
 fn ordered_block_ids(inner: &TextDocumentInner) -> Vec<(u64, String)> {
     let mut blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
-    blocks.sort_by_key(|b| b.document_position);
     let store = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_positions(&mut blocks, store);
+    blocks.sort_by_key(|b| b.document_position);
     blocks
         .into_iter()
         .map(|b| {
@@ -572,12 +573,14 @@ impl TextDocumentInner {
 
         let blocks = ordered_block_ids(self);
 
+        let store = self.ctx.db_context.get_store();
         // Find the block that contains `position`.
         let target_bid = blocks
             .iter()
             .rev()
             .find_map(|(id, _)| {
-                let dto = block_commands::get_block(&self.ctx, id).ok().flatten()?;
+                let mut dto = block_commands::get_block(&self.ctx, id).ok().flatten()?;
+                crate::inner::refresh_block_position(&mut dto, store);
                 let bp = dto.document_position as usize;
                 if position >= bp {
                     Some(*id as usize)

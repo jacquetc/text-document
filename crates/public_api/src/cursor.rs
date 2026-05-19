@@ -1843,13 +1843,14 @@ impl TextCursor {
         };
         let block_info = document_inspection_commands::get_block_at_position(&inner.ctx, &dto)?;
         let block_id = block_info.block_id as u64;
-        let block_dto = frontend::commands::block_commands::get_block(&inner.ctx, &block_id)?
+        let mut block_dto = frontend::commands::block_commands::get_block(&inner.ctx, &block_id)?
             .ok_or_else(|| anyhow::anyhow!("block not found at position"))?;
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_position(&mut block_dto, store);
 
         // Convert document-wide char position to a byte offset within
         // the block's content (read from the rope).
         let local_char = pos.saturating_sub(block_dto.document_position as usize);
-        let store = inner.ctx.db_context.get_store();
         let entity: common::entities::Block = block_dto.clone().into();
         let plain_owned = common::database::rope_helpers::block_content_via_store(&entity, store);
         let plain: &str = &plain_owned;

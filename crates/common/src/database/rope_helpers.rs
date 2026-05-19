@@ -76,6 +76,35 @@ pub fn block_document_position(block: &Block, store: &Store) -> i64 {
     rope.byte_to_char(byte_start as usize) as i64
 }
 
+/// Whether the rope's char-position space matches the user-visible
+/// flow positions that `Block.document_position` is computed against.
+///
+/// They match when every block is mirrored to the rope as a contiguous
+/// run. They DON'T match when:
+/// 1. The document contains tables — cell content sits at separate rope
+///    byte ranges (plan §1.6), so the rope is missing the cells'
+///    flow-position contribution.
+/// 2. The document contains sub-frames whose blocks aren't mirrored —
+///    `insert_frame_uc` only mirrors top-level frames.
+///
+/// When this returns `true`, readers can derive `document_position`
+/// directly from the rope (O(log n)) and the use-case-side
+/// position-refresh loops can be skipped. When it returns `false`,
+/// readers must consult the maintained `Block.document_position`
+/// stored field, and the loops are required to keep it correct.
+pub fn rope_positions_match_flow(store: &Store) -> bool {
+    let offsets = store.block_offsets.read().unwrap();
+    if offsets.table_anchor_count() > 0 {
+        return false;
+    }
+    // With no table anchors, every entry is a Block marker, so
+    // `entries.len()` equals the indexed block count.
+    let indexed_block_count = offsets.entries.len();
+    drop(offsets);
+    let total_block_count = store.blocks.read().unwrap().len();
+    indexed_block_count == total_block_count
+}
+
 /// Locate which block contains a given absolute char position in the
 /// document, returning `(block_id, char_offset_in_block, block_char_start)`
 /// in O(log n) using the rope + `BlockOffsetIndex` instead of an O(N)

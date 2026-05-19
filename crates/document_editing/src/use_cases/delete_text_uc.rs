@@ -636,15 +636,20 @@ fn execute_delete(
         updated_block.updated_at = chrono::Utc::now();
         uow.update_block(&updated_block)?;
 
-        let mut blocks_to_update: Vec<Block> = Vec::new();
-        for b in &blocks[(start_block_idx + 1)..] {
-            let mut ub = b.clone();
-            ub.document_position -= delete_len;
-            ub.updated_at = chrono::Utc::now();
-            blocks_to_update.push(ub);
-        }
-        if !blocks_to_update.is_empty() {
-            uow.update_block_multi(&blocks_to_update)?;
+        // Position-refresh loop: only run when rope can't be the
+        // source of truth. For rope-clean docs, readers derive from
+        // `BlockOffsetIndex`; this O(N) walk would be wasted work.
+        if !common::database::rope_helpers::rope_positions_match_flow(&store) {
+            let mut blocks_to_update: Vec<Block> = Vec::new();
+            for b in &blocks[(start_block_idx + 1)..] {
+                let mut ub = b.clone();
+                ub.document_position -= delete_len;
+                ub.updated_at = chrono::Utc::now();
+                blocks_to_update.push(ub);
+            }
+            if !blocks_to_update.is_empty() {
+                uow.update_block_multi(&blocks_to_update)?;
+            }
         }
 
         let mut updated_doc = document.clone();
@@ -821,15 +826,19 @@ fn execute_delete(
         let chars_from_end = end_offset;
         let chars_removed = chars_from_start + chars_from_middle + chars_from_end;
 
-        let mut blocks_to_update: Vec<Block> = Vec::new();
-        for b in &blocks[(end_block_idx + 1)..] {
-            let mut ub = b.clone();
-            ub.document_position -= delete_len;
-            ub.updated_at = chrono::Utc::now();
-            blocks_to_update.push(ub);
-        }
-        if !blocks_to_update.is_empty() {
-            uow.update_block_multi(&blocks_to_update)?;
+        // Position-refresh loop: see same gate in the same-block
+        // delete path above for rationale.
+        if !common::database::rope_helpers::rope_positions_match_flow(&store) {
+            let mut blocks_to_update: Vec<Block> = Vec::new();
+            for b in &blocks[(end_block_idx + 1)..] {
+                let mut ub = b.clone();
+                ub.document_position -= delete_len;
+                ub.updated_at = chrono::Utc::now();
+                blocks_to_update.push(ub);
+            }
+            if !blocks_to_update.is_empty() {
+                uow.update_block_multi(&blocks_to_update)?;
+            }
         }
 
         let mut updated_doc = document.clone();

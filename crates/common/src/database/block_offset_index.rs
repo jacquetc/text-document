@@ -66,6 +66,13 @@ pub struct BlockOffsetIndex {
     /// `shift_after` does not move positions, only byte_starts — so
     /// this map is unaffected by shifts.
     marker_index: ImHashMap<OffsetMarker, usize>,
+
+    /// Cached count of `OffsetMarker::TableAnchor` entries. Maintained
+    /// by the same mutator methods that maintain `marker_index`. Used
+    /// by `rope_helpers::rope_positions_match_flow` to gate the
+    /// per-edit position-refresh loop in O(1) instead of an O(N) walk
+    /// over `entries`.
+    table_anchor_count: usize,
 }
 
 impl BlockOffsetIndex {
@@ -89,6 +96,14 @@ impl BlockOffsetIndex {
         self.total_bytes = total;
     }
 
+    /// Number of `OffsetMarker::TableAnchor` entries currently indexed.
+    /// O(1) via a maintained counter. Used to gate flow-position
+    /// derivation: rope-derived positions match `Block.document_position`
+    /// only when this is zero.
+    pub fn table_anchor_count(&self) -> usize {
+        self.table_anchor_count
+    }
+
     /// Insert a marker at a given byte position. The caller is
     /// responsible for keeping the `byte_start` ordered relative to
     /// neighbours — this method does NOT re-sort.
@@ -101,6 +116,9 @@ impl BlockOffsetIndex {
             }
         }
         self.marker_index.insert(marker, position);
+        if matches!(marker, OffsetMarker::TableAnchor(_)) {
+            self.table_anchor_count += 1;
+        }
     }
 
     /// Append a marker at the end (its `byte_start` must be ≥ the last
@@ -116,6 +134,9 @@ impl BlockOffsetIndex {
         let position = self.entries.len();
         self.entries.push((marker, byte_start));
         self.marker_index.insert(marker, position);
+        if matches!(marker, OffsetMarker::TableAnchor(_)) {
+            self.table_anchor_count += 1;
+        }
     }
 
     /// Convenience: register a block by id. Equivalent to
@@ -134,6 +155,9 @@ impl BlockOffsetIndex {
                 *p -= 1;
             }
         }
+        if matches!(removed.0, OffsetMarker::TableAnchor(_)) {
+            self.table_anchor_count = self.table_anchor_count.saturating_sub(1);
+        }
         removed
     }
 
@@ -146,6 +170,11 @@ impl BlockOffsetIndex {
         end_inclusive: usize,
     ) -> Vec<(OffsetMarker, u32)> {
         let removed: Vec<_> = self.entries.drain(start..=end_inclusive).collect();
+        let removed_anchors = removed
+            .iter()
+            .filter(|(m, _)| matches!(m, OffsetMarker::TableAnchor(_)))
+            .count();
+        self.table_anchor_count = self.table_anchor_count.saturating_sub(removed_anchors);
         for (m, _) in &removed {
             self.marker_index.remove(m);
         }
@@ -166,17 +195,23 @@ impl BlockOffsetIndex {
         self.entries.clear();
         self.marker_index = ImHashMap::new();
         self.total_bytes = 0;
+        self.table_anchor_count = 0;
     }
 
-    /// Rebuild `marker_index` from `entries`. Use after bulk mutations
-    /// that bypassed the maintenance methods (e.g. raw `entries.push`
-    /// in test setup).
+    /// Rebuild `marker_index` and `table_anchor_count` from `entries`.
+    /// Use after bulk mutations that bypassed the maintenance methods
+    /// (e.g. raw `entries.push` in test setup).
     pub fn rebuild_marker_index(&mut self) {
         let mut idx = ImHashMap::new();
+        let mut anchors = 0usize;
         for (i, (m, _)) in self.entries.iter().enumerate() {
             idx.insert(*m, i);
+            if matches!(m, OffsetMarker::TableAnchor(_)) {
+                anchors += 1;
+            }
         }
         self.marker_index = idx;
+        self.table_anchor_count = anchors;
     }
 
     /// Byte range `(start, end)` of a marker. `end` is the next

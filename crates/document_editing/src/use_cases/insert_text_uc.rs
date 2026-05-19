@@ -375,23 +375,15 @@ fn execute_insert_simple(
 
     rope_insert_in_block(&store, block.id, byte_offset, &dto.text);
 
-    // Shift `document_position` for every block that sits *after* the
-    // inserted-into one in document order, by the number of chars we
-    // just inserted. Without this, `Block.document_position` drifts
-    // from the rope-derived truth on every simple insert — and every
-    // downstream consumer that uses `document_position` (e.g.
-    // `find_block_at_position`, the selection-replacement path of
-    // this same use case, `insert_table_uc`, `insert_fragment_uc`)
-    // returns stale results. This mirrors the loop already present
-    // in `execute_insert_with_selection` (see above) for the
-    // selection-replacement path.
-    //
-    // For the "subsequent" set we compare against
-    // `block.document_position` (the inserted-into block's stored
-    // field). Even if that field were itself stale, all blocks in the
-    // doc share the same drift, so the relative ordering — and
-    // therefore the "after this one" partition — is preserved.
-    {
+    // Shift `document_position` for every block sitting *after* the
+    // inserted-into one in document order — but only when the rope
+    // can't be used as the source of truth (tables present or
+    // sub-frames not mirrored). For rope-clean documents, readers
+    // derive positions directly from `BlockOffsetIndex`, so the O(N)
+    // walk here is unnecessary and dominated per-keystroke cost on
+    // /large/1000para benches. The catch-up logic in `insert_table_uc`
+    // brings stored values back into sync if a table is later added.
+    if !common::database::rope_helpers::rope_positions_match_flow(&store) {
         let frame_ids =
             uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
         let mut all_blocks: Vec<Block> = Vec::new();

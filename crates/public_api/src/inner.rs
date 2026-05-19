@@ -426,3 +426,39 @@ pub(crate) fn adjust_offset(offset: usize, edit_pos: usize, removed: usize, adde
         offset - removed + added
     }
 }
+
+/// Refresh `BlockDto::document_position` in-place using the rope-derived
+/// position from `BlockOffsetIndex`. No-op for documents containing
+/// tables or unmirrored sub-frames — for those, the stored field
+/// (maintained by use-case-side position-refresh loops, plus catch-up
+/// refreshes when tables are inserted) is the authoritative source.
+pub(crate) fn refresh_block_positions(
+    dtos: &mut [frontend::block::dtos::BlockDto],
+    store: &frontend::common::database::Store,
+) {
+    if !frontend::common::database::rope_helpers::rope_positions_match_flow(store) {
+        return;
+    }
+    let offsets = store.block_offsets.read().unwrap();
+    let rope = store.rope.read().unwrap();
+    for dto in dtos.iter_mut() {
+        if let Some((byte_start, _)) = offsets.range_of_block(dto.id) {
+            dto.document_position = rope.byte_to_char(byte_start as usize) as i64;
+        }
+    }
+}
+
+/// Like [`refresh_block_positions`] but for a single DTO.
+pub(crate) fn refresh_block_position(
+    dto: &mut frontend::block::dtos::BlockDto,
+    store: &frontend::common::database::Store,
+) {
+    if !frontend::common::database::rope_helpers::rope_positions_match_flow(store) {
+        return;
+    }
+    let offsets = store.block_offsets.read().unwrap();
+    if let Some((byte_start, _)) = offsets.range_of_block(dto.id) {
+        let rope = store.rope.read().unwrap();
+        dto.document_position = rope.byte_to_char(byte_start as usize) as i64;
+    }
+}

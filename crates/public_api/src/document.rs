@@ -578,6 +578,8 @@ impl TextDocument {
         let inner = self.inner.lock();
         let all_blocks = frontend::commands::block_commands::get_all_block(&inner.ctx).ok()?;
         let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_positions(&mut sorted, store);
         sorted.sort_by_key(|b| b.document_position);
 
         sorted
@@ -598,6 +600,8 @@ impl TextDocument {
         let all_blocks =
             frontend::commands::block_commands::get_all_block(&inner.ctx).unwrap_or_default();
         let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_positions(&mut sorted, store);
         sorted.sort_by_key(|b| b.document_position);
         sorted
             .iter()
@@ -623,12 +627,12 @@ impl TextDocument {
         let all_blocks =
             frontend::commands::block_commands::get_all_block(&inner.ctx).unwrap_or_default();
         let mut sorted: Vec<_> = all_blocks.into_iter().collect();
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_positions(&mut sorted, store);
         sorted.sort_by_key(|b| b.document_position);
 
         let range_start = position;
         let range_end = position + length;
-
-        let store = inner.ctx.db_context.get_store();
         sorted
             .iter()
             .filter(|b| {
@@ -1027,9 +1031,10 @@ struct UndoBlockState {
 
 /// Capture the state of all blocks, sorted by document_position.
 fn capture_block_state(inner: &TextDocumentInner) -> Vec<UndoBlockState> {
-    let all_blocks =
+    let mut all_blocks =
         frontend::commands::block_commands::get_all_block(&inner.ctx).unwrap_or_default();
     let store = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_positions(&mut all_blocks, store);
     let mut states: Vec<UndoBlockState> = all_blocks
         .into_iter()
         .map(|b| {
