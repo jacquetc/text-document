@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v2.3.0
+    rev: v6.0.0
     hooks:
     - id: check-yaml
       stages: [commit]
@@ -15,7 +15,7 @@ repos:
     - id: detect-private-key
       stages: [commit]
   - repo: https://github.com/crate-ci/committed
-    rev: v1.0.3
+    rev: v1.1.11
     hooks:
     - id: committed
       stages: [commit-msg]
