@@ -1,6 +1,7 @@
 files.extend-exclude = [
   "CHANGELOG.md",
   "tests",
+  "crates/cli/src/benchmark_seed.txt",
 ]
 [default.extend-words]
 # Acronyms
