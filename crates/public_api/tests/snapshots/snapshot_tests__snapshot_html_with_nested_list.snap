@@ -2,4 +2,4 @@
 source: crates/public_api/tests/snapshot_tests.rs
 expression: c.selection().to_html()
 ---
-<html><head><meta charset="utf-8"></head><body></body></html>
+<html><head><meta charset="utf-8"></head><body><ul><li>outer one</li><li>inner a</li><li>inner b</li><li>outer two</li></ul></body></html>

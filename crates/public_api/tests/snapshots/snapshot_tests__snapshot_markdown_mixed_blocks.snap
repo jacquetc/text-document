@@ -2,4 +2,11 @@
 source: crates/public_api/tests/snapshot_tests.rs
 expression: c.selection().to_markdown()
 ---
+# Heading
 
+Intro **with** *formatting*\.
+
+- One
+- Two
+
+Outro\.

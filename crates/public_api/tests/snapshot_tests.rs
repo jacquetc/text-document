@@ -78,6 +78,8 @@ fn snapshot_html_with_nested_list() {
         "<li>outer two</li>",
         "</ul>",
     ))
+    .unwrap()
+    .wait()
     .unwrap();
     let c = doc.cursor_at(0);
     c.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
@@ -95,6 +97,8 @@ fn snapshot_markdown_mixed_blocks() {
         "<ul><li>One</li><li>Two</li></ul>",
         "<p>Outro.</p>",
     ))
+    .unwrap()
+    .wait()
     .unwrap();
     let c = doc.cursor_at(0);
     c.move_position(MoveOperation::End, MoveMode::KeepAnchor, 1);
@@ -110,7 +114,10 @@ fn snapshot_markdown_mixed_blocks() {
 #[test]
 fn snapshot_flow_structure_simple() {
     let doc = TextDocument::new();
-    doc.set_html("<p>first</p><p>second</p>").unwrap();
+    doc.set_html("<p>first</p><p>second</p>")
+        .unwrap()
+        .wait()
+        .unwrap();
     let snap = doc.snapshot_flow();
     assert_debug_snapshot!(&snap.elements);
 }
