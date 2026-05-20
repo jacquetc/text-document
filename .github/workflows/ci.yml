@@ -35,13 +35,15 @@ env:
 jobs:
   ci:
     name: CI
-    needs: [test, check, rustfmt, clippy, docs, coverage]
+    needs: [test-linux, test-windows, test-mac, check, rustfmt, clippy, docs, coverage]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed
         run: |
-          if [[ "${{ needs.test.result }}" != "success" ]] || \
+          if [[ "${{ needs.test-linux.result }}" != "success" ]] || \
+             [[ "${{ needs.test-windows.result }}" != "success" ]] || \
+             [[ "${{ needs.test-mac.result }}" != "success" ]] || \
              [[ "${{ needs.check.result }}" != "success" ]] || \
              [[ "${{ needs.rustfmt.result }}" != "success" ]] || \
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
@@ -52,22 +54,9 @@ jobs:
           fi
           echo "All jobs passed"
 
-  test:
-    name: Test (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            os: ubuntu-latest
-            rust: stable
-          - name: windows
-            os: windows-latest
-            rust: stable
-          - name: mac
-            os: macos-latest
-            rust: stable
-    runs-on: ${{ matrix.os }}
+  test-linux:
+    name: Test (linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -76,12 +65,62 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: stable
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ matrix.name }}
+          shared-key: linux
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+  test-windows:
+    name: Test (windows)
+    needs: test-linux
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+  test-mac:
+    name: Test (mac)
+    needs: test-linux
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mac
 
       - name: Build
         run: cargo build --workspace --all-targets
