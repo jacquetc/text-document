@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Root};
+use common::entities::{Block, Document, Frame, List, Root};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -80,6 +80,10 @@ impl CommandUnitOfWork for InsertListUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 #[macros::uow_action(entity = "Root", action = "Get")]
@@ -98,7 +102,6 @@ impl CommandUnitOfWork for InsertListUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "List", action = "Create")]
 impl InsertListUnitOfWorkTrait for InsertListUnitOfWork {}
 

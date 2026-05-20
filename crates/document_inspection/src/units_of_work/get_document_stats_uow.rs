@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, Root};
+use common::entities::{Block, Document, Frame, Root};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]
@@ -41,6 +41,10 @@ impl QueryUnitOfWork for GetDocumentStatsUnitOfWork {
         self.transaction.take().unwrap().end_read_transaction()?;
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 #[macros::uow_action(entity = "Root", action = "GetRO")]
@@ -51,7 +55,6 @@ impl QueryUnitOfWork for GetDocumentStatsUnitOfWork {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 impl GetDocumentStatsUnitOfWorkTrait for GetDocumentStatsUnitOfWork {}
 
 pub struct GetDocumentStatsUnitOfWorkFactory {

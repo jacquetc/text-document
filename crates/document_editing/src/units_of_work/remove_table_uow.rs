@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, Root, Table, TableCell};
+use common::entities::{Block, Document, Frame, Root, Table, TableCell};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -79,6 +79,10 @@ impl CommandUnitOfWork for RemoveTableUnitOfWork {
         self.transaction = Some(transaction);
 
         Ok(())
+    }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
     }
 }
 

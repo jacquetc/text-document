@@ -79,6 +79,13 @@ pub struct Frame {
     pub fmt_position: Option<FramePosition>,
     pub fmt_is_blockquote: Option<bool>,
     pub table: Option<EntityId>,
+    /// Rope byte range occupied by this frame's contents. Plan §1.6
+    /// invariant: all blocks in `Frame.blocks` have byte ranges
+    /// contained within this range, and no two frames' ranges
+    /// overlap. Empty/unset = `(0, 0)`. Internal field — not
+    /// surfaced through DTOs.
+    #[serde(default)]
+    pub byte_range: (u32, u32),
 }
 
 impl HasId for Frame {
@@ -101,11 +108,8 @@ pub struct Block {
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(with = "chrono::serde::ts_milliseconds")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub elements: Vec<EntityId>,
     pub list: Option<EntityId>,
-    pub text_length: i64,
     pub document_position: i64,
-    pub plain_text: String,
     pub fmt_alignment: Option<Alignment>,
     pub fmt_top_margin: Option<i64>,
     pub fmt_bottom_margin: Option<i64>,
@@ -145,49 +149,6 @@ pub enum MarkerType {
     Checked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct InlineElement {
-    pub id: EntityId,
-    #[serde(with = "chrono::serde::ts_milliseconds")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    #[serde(with = "chrono::serde::ts_milliseconds")]
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub content: InlineContent,
-    pub fmt_font_family: Option<String>,
-    pub fmt_font_point_size: Option<i64>,
-    pub fmt_font_weight: Option<i64>,
-    pub fmt_font_bold: Option<bool>,
-    pub fmt_font_italic: Option<bool>,
-    pub fmt_font_underline: Option<bool>,
-    pub fmt_font_overline: Option<bool>,
-    pub fmt_font_strikeout: Option<bool>,
-    pub fmt_letter_spacing: Option<i64>,
-    pub fmt_word_spacing: Option<i64>,
-    pub fmt_anchor_href: Option<String>,
-    pub fmt_anchor_names: Vec<String>,
-    pub fmt_is_anchor: Option<bool>,
-    pub fmt_tooltip: Option<String>,
-    pub fmt_underline_style: Option<UnderlineStyle>,
-    pub fmt_vertical_alignment: Option<CharVerticalAlignment>,
-}
-
-impl HasId for InlineElement {
-    fn id(&self) -> EntityId {
-        self.id
-    }
-}
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-pub enum InlineContent {
-    #[default]
-    Empty,
-    Text(String),
-    Image {
-        name: String,
-        width: i64,
-        height: i64,
-        quality: i64,
-    },
-}
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub enum UnderlineStyle {
     #[default]

@@ -216,27 +216,27 @@ impl TextFormat {
     }
 }
 
-// ── InlineElement entity → TextFormat ───────────────────────────
+// ── CharacterFormat (Phase 1 format_runs) → TextFormat ─────────
 
-impl From<&frontend::inline_element::dtos::InlineElementDto> for TextFormat {
-    fn from(el: &frontend::inline_element::dtos::InlineElementDto) -> Self {
+impl From<&frontend::common::format_runs::CharacterFormat> for TextFormat {
+    fn from(fmt: &frontend::common::format_runs::CharacterFormat) -> Self {
         Self {
-            font_family: el.fmt_font_family.clone(),
-            font_point_size: el.fmt_font_point_size.map(|v| v as u32),
-            font_weight: el.fmt_font_weight.map(|v| v as u32),
-            font_bold: el.fmt_font_bold,
-            font_italic: el.fmt_font_italic,
-            font_underline: el.fmt_font_underline,
-            font_overline: el.fmt_font_overline,
-            font_strikeout: el.fmt_font_strikeout,
-            letter_spacing: el.fmt_letter_spacing.map(|v| v as i32),
-            word_spacing: el.fmt_word_spacing.map(|v| v as i32),
-            underline_style: el.fmt_underline_style.clone(),
-            vertical_alignment: el.fmt_vertical_alignment.clone(),
-            anchor_href: el.fmt_anchor_href.clone(),
-            anchor_names: el.fmt_anchor_names.clone(),
-            is_anchor: el.fmt_is_anchor,
-            tooltip: el.fmt_tooltip.clone(),
+            font_family: fmt.font_family.clone(),
+            font_point_size: fmt.font_point_size.map(|v| v as u32),
+            font_weight: fmt.font_weight.map(|v| v as u32),
+            font_bold: fmt.font_bold,
+            font_italic: fmt.font_italic,
+            font_underline: fmt.font_underline,
+            font_overline: fmt.font_overline,
+            font_strikeout: fmt.font_strikeout,
+            letter_spacing: fmt.letter_spacing.map(|v| v as i32),
+            word_spacing: fmt.word_spacing.map(|v| v as i32),
+            underline_style: fmt.underline_style.clone(),
+            vertical_alignment: fmt.vertical_alignment.clone(),
+            anchor_href: fmt.anchor_href.clone(),
+            anchor_names: fmt.anchor_names.clone(),
+            is_anchor: fmt.is_anchor,
+            tooltip: fmt.tooltip.clone(),
             foreground_color: None,
             background_color: None,
             underline_color: None,
@@ -269,6 +269,7 @@ impl BlockFormat {
             bottom_margin: self.bottom_margin.map(|v| v as i64),
             left_margin: self.left_margin.map(|v| v as i64),
             right_margin: self.right_margin.map(|v| v as i64),
+            text_indent: self.text_indent.map(|v| v as i64),
         }
     }
 }

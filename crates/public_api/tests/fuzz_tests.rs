@@ -270,6 +270,31 @@ proptest! {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Property: stats.character_count matches to_plain_text().chars().count()
+// minus block separators — a non-tautological cross-check of the
+// cached document character_count against actual content.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+proptest! {
+    #[test]
+    fn stats_char_count_matches_plain_text(text in arb_multiline_text()) {
+        let doc = new_doc(&text);
+        let stats = doc.stats();
+        let plain = doc.to_plain_text().unwrap();
+
+        // to_plain_text joins blocks with '\n'; character_count does not
+        // include those separators. With N blocks there are N-1 separators.
+        let plain_chars = plain.chars().count();
+        let sep_count = stats.block_count.saturating_sub(1);
+        let content_chars = plain_chars - sep_count;
+
+        prop_assert_eq!(stats.character_count, content_chars,
+            "stats.character_count ({}) != plain_text char count minus {} separators ({})",
+            stats.character_count, sep_count, content_chars);
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Property: random insert/delete edits maintain character_count consistency
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -527,6 +552,11 @@ proptest! {
         inserts in prop::collection::vec("[a-z]{1,5}", 2..6),
     ) {
         let doc = new_doc(&initial);
+        // set_plain_text does not push an undo step, so the only
+        // undoable action is the edit block we're about to create.
+        prop_assert!(!doc.can_undo(),
+            "baseline undo stack should be empty after set_plain_text");
+
         let cursor = doc.cursor_at(doc.character_count());
 
         cursor.begin_edit_block();
@@ -535,9 +565,15 @@ proptest! {
         }
         cursor.end_edit_block();
 
+        prop_assert!(doc.can_undo(), "edit block should be undoable");
+
         // Single undo should revert all inserts
         doc.undo().unwrap();
         let restored = doc.to_plain_text().unwrap();
         prop_assert_eq!(&restored, &initial);
+        // ...and the stack must be empty — i.e. the N inserts really
+        // collapsed into exactly one undo step.
+        prop_assert!(!doc.can_undo(),
+            "edit block must collapse to a single undo step");
     }
 }

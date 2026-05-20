@@ -2,12 +2,14 @@ use crate::ExtractFragmentDto;
 use crate::ExtractFragmentResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
+use common::database::rope_helpers::{block_char_length, block_content_via_store};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Frame, InlineContent, InlineElement, List, Root, Table, TableCell};
+use common::entities::{Block, Frame, List, Root, Table, TableCell};
+use common::format_runs::{InlineContent, InlineSegment};
+use common::format_runs_query::inline_segments_for_block;
 use common::parser_tools::fragment_schema::{
     FragmentBlock, FragmentData, FragmentElement, FragmentList, FragmentTable, FragmentTableCell,
 };
@@ -25,7 +27,6 @@ pub trait ExtractFragmentUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
@@ -44,6 +45,8 @@ impl ExtractFragmentUseCase {
     pub fn execute(&mut self, dto: &ExtractFragmentDto) -> Result<ExtractFragmentResultDto> {
         let uow = self.uow_factory.create();
         uow.begin_transaction()?;
+
+        let store = uow.store();
 
         let start = dto.position.min(dto.anchor);
         let end = dto.position.max(dto.anchor);
@@ -111,7 +114,7 @@ impl ExtractFragmentUseCase {
             let mut first_cell: Option<Option<EntityId>> = None;
             let mut cross = false;
             for block in &blocks {
-                if block.document_position + block.text_length < start
+                if block.document_position + block_char_length(block, &store) < start
                     || block.document_position >= end
                 {
                     continue;
@@ -139,7 +142,7 @@ impl ExtractFragmentUseCase {
 
             for block in &blocks {
                 let block_start = block.document_position;
-                let block_end = block_start + block.text_length;
+                let block_end = block_start + block_char_length(block, &store);
 
                 if block_end < start || block_start >= end {
                     continue;
@@ -226,13 +229,11 @@ impl ExtractFragmentUseCase {
                     let local_end = if end < block_end {
                         (end - block_start) as usize
                     } else {
-                        block.text_length as usize
+                        block_char_length(block, &store) as usize
                     };
 
-                    let element_ids =
-                        uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-                    let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                    let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+                    let block_text = block_content_via_store(block, &uow.store());
+                    let elements = inline_segments_for_block(&uow.store(), block.id, &block_text);
 
                     let list = if let Some(list_id) = block.list {
                         uow.get_list(&list_id)?
@@ -251,8 +252,8 @@ impl ExtractFragmentUseCase {
                     // it, so covering its entire text is sufficient.
                     let is_last_block = block.id == blocks.last().map(|b| b.id).unwrap_or_default();
                     let is_full_block = local_start == 0
-                        && local_end == block.text_length as usize
-                        && (end > block_start + block.text_length || is_last_block);
+                        && local_end == block_char_length(block, &store) as usize
+                        && (end > block_start + block_char_length(block, &store) || is_last_block);
 
                     plain_texts.push(extracted_text.clone());
                     fragment_blocks.push(block_to_fragment_block(
@@ -289,7 +290,7 @@ impl ExtractFragmentUseCase {
 
         for block in &blocks {
             let block_start = block.document_position;
-            let block_end = block_start + block.text_length;
+            let block_end = block_start + block_char_length(block, &store);
 
             if block_end < start || block_start >= end {
                 continue;
@@ -303,13 +304,11 @@ impl ExtractFragmentUseCase {
             let local_end = if end < block_end {
                 (end - block_start) as usize
             } else {
-                block.text_length as usize
+                block_char_length(block, &store) as usize
             };
 
-            let element_ids =
-                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+            let block_text = block_content_via_store(block, &uow.store());
+            let elements = inline_segments_for_block(&uow.store(), block.id, &block_text);
 
             let list = if let Some(list_id) = block.list {
                 uow.get_list(&list_id)?
@@ -326,8 +325,8 @@ impl ExtractFragmentUseCase {
             // it, so covering its entire text is sufficient.
             let is_last_block = block.id == blocks.last().map(|b| b.id).unwrap_or_default();
             let is_full_block = local_start == 0
-                && local_end == block.text_length as usize
-                && (end > block_start + block.text_length || is_last_block);
+                && local_end == block_char_length(block, &store) as usize
+                && (end > block_start + block_char_length(block, &store) || is_last_block);
 
             plain_texts.push(extracted_text.clone());
             fragment_blocks.push(block_to_fragment_block(
@@ -367,14 +366,13 @@ impl ExtractFragmentUseCase {
         uow: &dyn ExtractFragmentUnitOfWorkTrait,
         block: &Block,
     ) -> Result<(Vec<FragmentElement>, String)> {
-        let element_ids =
-            uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let store = uow.store();
+        let block_text = block_content_via_store(block, &store);
+        let elements = inline_segments_for_block(&store, block.id, &block_text);
         Ok(extract_elements_in_range(
             &elements,
             0,
-            block.text_length as usize,
+            block_char_length(block, &store) as usize,
         ))
     }
 }
@@ -477,7 +475,7 @@ fn block_to_fragment_block(
 /// Extract elements within a character range [local_start, local_end) of a block.
 /// Returns the extracted FragmentElements and the concatenated plain text.
 fn extract_elements_in_range(
-    elements: &[InlineElement],
+    elements: &[InlineSegment],
     local_start: usize,
     local_end: usize,
 ) -> (Vec<FragmentElement>, String) {
@@ -518,7 +516,7 @@ fn extract_elements_in_range(
                 let chars: Vec<char> = s.chars().collect();
                 let slice: String = chars[take_start..take_end].iter().collect();
                 if !slice.is_empty() {
-                    let mut fe = FragmentElement::from_entity(elem);
+                    let mut fe = FragmentElement::from_segment(elem);
                     fe.content = InlineContent::Text(slice.clone());
                     result_elements.push(fe);
                     result_text.push_str(&slice);
@@ -527,7 +525,7 @@ fn extract_elements_in_range(
             InlineContent::Image { .. } => {
                 // Image is 1 char, include if in range
                 if take_start == 0 && take_end == 1 {
-                    result_elements.push(FragmentElement::from_entity(elem));
+                    result_elements.push(FragmentElement::from_segment(elem));
                     result_text.push('\u{FFFC}');
                 }
             }

@@ -9,8 +9,8 @@ use frontend::common::parser_tools::fragment_schema::{
 /// A piece of rich text that can be inserted into a [`TextDocument`](crate::TextDocument).
 ///
 /// `DocumentFragment` is the clipboard/interchange type. It carries
-/// blocks, inline elements, and formatting in a format-agnostic
-/// internal representation.
+/// blocks, per-character format runs, image anchors, and structural
+/// metadata in a format-agnostic internal representation.
 #[derive(Debug, Clone)]
 pub struct DocumentFragment {
     data: String,

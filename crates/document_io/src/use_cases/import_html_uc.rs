@@ -3,12 +3,17 @@ use crate::ImportHtmlDto;
 use crate::ImportHtmlResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{
-    Block, Document, Frame, FramePosition, InlineContent, InlineElement, List, Resource, Root,
-    Table, TableCell,
+use common::database::rope_helpers::{
+    rope_append_block, rope_append_table_anchor, rope_insert_block_boundary, rope_reset,
 };
+use common::entities::{
+    Block, Document, Frame, FramePosition, List, Resource, Root, Table, TableCell,
+};
+
 use common::long_operation::LongOperation;
-use common::parser_tools::content_parser::{ParsedElement, ParsedSpan, parse_html_elements};
+use common::parser_tools::content_parser::{
+    ParsedElement, format_runs_from_spans, parse_html_elements,
+};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::sync::Arc;
@@ -29,7 +34,6 @@ pub trait ImportHtmlUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationship", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "SetRelationship", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Resource", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "Create", thread_safe = true)]
@@ -50,28 +54,6 @@ impl ImportHtmlUseCase {
             uow_factory,
             dto: dto.clone(),
         }
-    }
-}
-
-fn create_inline_element_from_span(span: &ParsedSpan, is_code_block: bool) -> InlineElement {
-    InlineElement {
-        content: InlineContent::Text(span.text.clone()),
-        fmt_font_bold: if span.bold { Some(true) } else { None },
-        fmt_font_italic: if span.italic { Some(true) } else { None },
-        fmt_font_underline: if span.underline { Some(true) } else { None },
-        fmt_font_strikeout: if span.strikeout { Some(true) } else { None },
-        fmt_font_family: if span.code || is_code_block {
-            Some("monospace".to_string())
-        } else {
-            None
-        },
-        fmt_anchor_href: span.link_href.clone(),
-        fmt_is_anchor: if span.link_href.is_some() {
-            Some(true)
-        } else {
-            None
-        },
-        ..InlineElement::default()
     }
 }
 
@@ -137,7 +119,11 @@ impl LongOperation for ImportHtmlUseCase {
         let new_frame = Frame::default();
         let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
-        // Step 4: Create blocks with inline elements
+        // Importers replace the entire document — reset the rope+
+        // block_offsets. No-op under default backend.
+        rope_reset(&uow.store());
+
+        // Step 4: Create blocks with format runs and image anchors
         // Track blockquote frame stack
         let total_elements = parsed_elements.len();
         let mut total_chars: i64 = 0;
@@ -155,6 +141,10 @@ impl LongOperation for ImportHtmlUseCase {
         }];
         let mut current_bq_depth: u32 = 0;
         let mut list_grouper = ListGrouper::new();
+        // Same intent as in import_markdown_uc: rope inter-block
+        // boundaries go between main-flow blocks, not before the
+        // first and not for table-cell blocks (deferred to step 5.5).
+        let mut emitted_any_main_block = false;
 
         for (i, parsed_element) in parsed_elements.iter().enumerate() {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -201,14 +191,12 @@ impl LongOperation for ImportHtmlUseCase {
                         list_grouper.reset();
                     }
 
-                    let plain_text: String =
-                        parsed_block.spans.iter().map(|s| s.text.as_str()).collect();
+                    let (plain_text, format_runs) =
+                        format_runs_from_spans(&parsed_block.spans, parsed_block.is_code_block);
                     let line_len = plain_text.chars().count() as i64;
 
                     let current_frame_id = frame_stack.last().unwrap().frame_id;
                     let block = Block {
-                        plain_text,
-                        text_length: line_len,
                         document_position,
                         fmt_heading_level: parsed_block.heading_level,
                         fmt_line_height: parsed_block.line_height,
@@ -226,10 +214,24 @@ impl LongOperation for ImportHtmlUseCase {
 
                     let created_block = uow.create_block(&block, current_frame_id, -1)?;
 
-                    for span in &parsed_block.spans {
-                        let element =
-                            create_inline_element_from_span(span, parsed_block.is_code_block);
-                        uow.create_inline_element(&element, created_block.id, -1)?;
+                    // Mirror into the global rope. Inter-block `\n`
+                    // before every block after the first.
+                    if emitted_any_main_block {
+                        rope_insert_block_boundary(&uow.store());
+                    }
+                    rope_append_block(&uow.store(), created_block.id, &plain_text);
+                    emitted_any_main_block = true;
+
+                    // Write format_runs directly; block_images stays empty for
+                    // HTML import (parser does not surface inline images today).
+                    {
+                        let store = uow.store();
+                        let mut runs_map = store.format_runs.write().unwrap();
+                        if !format_runs.is_empty() {
+                            runs_map.insert(created_block.id, format_runs);
+                        } else {
+                            runs_map.remove(&created_block.id);
+                        }
                     }
 
                     // Handle list items
@@ -293,6 +295,11 @@ impl LongOperation for ImportHtmlUseCase {
                     };
                     let created_table = uow.create_table(&table, doc_id, -1)?;
 
+                    // 1b. Mirror the table-anchor sentinel into the
+                    // global rope. Appended at the end (the importer
+                    // processes elements linearly).
+                    rope_append_table_anchor(&uow.store(), created_table.id);
+
                     // 2. Create cell frames with content + TableCell entities
                     let current_frame_id = frame_stack.last().unwrap().frame_id;
                     let total_cells = num_rows * num_cols;
@@ -303,32 +310,31 @@ impl LongOperation for ImportHtmlUseCase {
                             let cell_frame = Frame::default();
                             let created_cell_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
 
-                            let plain_text: String =
-                                cell.spans.iter().map(|s| s.text.as_str()).collect();
-                            let text_length = plain_text.chars().count() as i64;
+                            let (plain_text, format_runs) =
+                                format_runs_from_spans(&cell.spans, false);
 
                             let block = Block {
-                                plain_text,
-                                text_length,
                                 document_position,
                                 ..Block::default()
                             };
                             let created_block =
                                 uow.create_block(&block, created_cell_frame.id, -1)?;
 
-                            if cell.spans.is_empty() || cell.spans.iter().all(|s| s.text.is_empty())
                             {
-                                let elem = InlineElement {
-                                    content: InlineContent::Empty,
-                                    ..InlineElement::default()
-                                };
-                                uow.create_inline_element(&elem, created_block.id, -1)?;
-                            } else {
-                                for span in &cell.spans {
-                                    let element = create_inline_element_from_span(span, false);
-                                    uow.create_inline_element(&element, created_block.id, -1)?;
+                                let store = uow.store();
+                                let mut runs_map = store.format_runs.write().unwrap();
+                                if !format_runs.is_empty() {
+                                    runs_map.insert(created_block.id, format_runs);
+                                } else {
+                                    runs_map.remove(&created_block.id);
                                 }
                             }
+
+                            // Mirror the cell block into the global
+                            // rope: insert a `\n` boundary, then the
+                            // cell's content.
+                            rope_insert_block_boundary(&uow.store());
+                            rope_append_block(&uow.store(), created_block.id, &plain_text);
 
                             let mut updated_cell_frame = created_cell_frame.clone();
                             updated_cell_frame.child_order = vec![created_block.id as i64];
@@ -344,6 +350,7 @@ impl LongOperation for ImportHtmlUseCase {
                             };
                             uow.create_table_cell(&table_cell, created_table.id, -1)?;
 
+                            let text_length = plain_text.chars().count() as i64;
                             total_chars += text_length;
                             total_block_count += 1;
                             cell_count += 1;
@@ -367,6 +374,12 @@ impl LongOperation for ImportHtmlUseCase {
                         .unwrap()
                         .child_order
                         .push(-(created_anchor.id as i64));
+
+                    // Tables put content in the rope (the anchor
+                    // sentinel + cell blocks) — any subsequent
+                    // main-flow block must be preceded by a `\n`
+                    // boundary, same as after a Block.
+                    emitted_any_main_block = true;
 
                     if i < total_elements - 1 {
                         document_position += 1;
@@ -414,6 +427,8 @@ impl LongOperation for ImportHtmlUseCase {
             return Err(anyhow!("Operation was cancelled"));
         }
 
+        // Plan §1.6 Frame.byte_range maintenance happens in
+        // Transaction::commit.
         uow.commit()?;
 
         progress_callback(common::long_operation::OperationProgress::new(

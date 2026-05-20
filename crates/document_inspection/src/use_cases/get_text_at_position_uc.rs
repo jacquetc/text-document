@@ -3,12 +3,15 @@ use crate::GetTextAtPositionDto;
 use crate::TextAtPositionDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
+use common::database::rope_helpers::block_char_length;
+use common::database::rope_helpers::block_content_via_store;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root, TableCell};
+use common::entities::{Block, Document, Frame, Root, TableCell};
+use common::format_runs::{InlineContent, synth_element_id};
+use common::format_runs_query::inline_segments_for_block;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
 pub trait GetTextAtPositionUnitOfWorkFactoryTrait: Send + Sync {
@@ -25,7 +28,6 @@ pub trait GetTextAtPositionUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "TableCell", action = "GetMultiRO")]
 pub trait GetTextAtPositionUnitOfWorkTrait: QueryUnitOfWork {}
@@ -77,11 +79,12 @@ impl GetTextAtPositionUseCase {
         // Get all blocks and assign computed positions
         let blocks_opt = uow.get_block_multi(&ordered_block_ids)?;
         let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
+        let store = uow.store();
         // Assign on-the-fly positions so they match the true document layout
         let mut running: i64 = 0;
         for block in &mut blocks {
             block.document_position = running;
-            running += block.text_length + 1;
+            running += block_char_length(block, &store) + 1;
         }
 
         // Find the block containing the requested position.
@@ -89,7 +92,8 @@ impl GetTextAtPositionUseCase {
         let first_block_idx = blocks
             .iter()
             .position(|b| {
-                position >= b.document_position && position <= b.document_position + b.text_length
+                position >= b.document_position
+                    && position <= b.document_position + block_char_length(b, &store)
             })
             .ok_or_else(|| anyhow!("Position {} is out of document range", position))?;
 
@@ -122,21 +126,20 @@ impl GetTextAtPositionUseCase {
                 break;
             }
 
-            // Get this block's elements to find the first element ID and extract text
-            let element_ids =
-                uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<&InlineElement> =
-                elements_opt.iter().filter_map(|e| e.as_ref()).collect();
+            // Synthesize this block's segments from format_runs to find the first
+            // element ID and extract text.
+            let block_text = block_content_via_store(block, &uow.store());
+            let owned_segments = inline_segments_for_block(&uow.store(), block.id, &block_text);
 
             let mut current_char_offset: usize = 0;
+            let mut current_byte_offset: u32 = 0;
 
-            for elem in &elements {
+            for seg in &owned_segments {
                 if remaining == 0 {
                     break;
                 }
 
-                let elem_text = match &elem.content {
+                let elem_text = match &seg.content {
                     InlineContent::Text(s) => s.clone(),
                     InlineContent::Image { .. } => "\u{FFFC}".to_string(),
                     InlineContent::Empty => String::new(),
@@ -158,9 +161,17 @@ impl GetTextAtPositionUseCase {
                     remaining -= take;
 
                     if !found_first_element {
-                        first_element_id = elem.id;
+                        // Compute synthetic element ID from block_id and byte_start
+                        first_element_id = synth_element_id(block.id, current_byte_offset);
                         found_first_element = true;
                     }
+                }
+
+                // Advance byte offset (Text contributes its UTF-8 length, Image contributes 0)
+                match &seg.content {
+                    InlineContent::Text(s) => current_byte_offset += s.len() as u32,
+                    InlineContent::Image { .. } => {}
+                    InlineContent::Empty => {}
                 }
 
                 current_char_offset += elem_char_len;

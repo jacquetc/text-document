@@ -81,7 +81,9 @@ impl TextList {
     pub fn item(&self, index: usize) -> Option<TextBlock> {
         let inner = self.doc.lock();
         let list_entity_id = self.list_id as EntityId;
-        let all_blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+        let mut all_blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_positions(&mut all_blocks, store);
         let mut list_blocks: Vec<_> = all_blocks
             .iter()
             .filter(|b| b.list == Some(list_entity_id))

@@ -1,0 +1,9 @@
+---
+source: crates/public_api/tests/snapshot_tests.rs
+expression: doc.to_plain_text().unwrap()
+---
+start 
+Section
+Paragraph with bold.
+one
+two

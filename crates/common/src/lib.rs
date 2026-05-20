@@ -5,6 +5,8 @@ pub mod direct_access;
 pub mod entities;
 pub mod error;
 pub mod event;
+pub mod format_runs;
+pub mod format_runs_query;
 pub mod long_operation;
 pub mod parser_tools;
 pub mod snapshot;

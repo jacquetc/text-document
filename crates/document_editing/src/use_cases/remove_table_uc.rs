@@ -78,15 +78,19 @@ fn execute_remove_table(
     // Collect cell frame IDs
     let cell_frame_ids: Vec<EntityId> = cells.iter().filter_map(|c| c.cell_frame).collect();
 
-    // Count how many cell blocks exist (for position shifting)
+    // Count how many cell blocks exist (for position shifting), and
+    // remember each cell-block id so we can detach them from the
+    // global rope before the entity cascade below.
     let mut total_cell_blocks: i64 = 0;
     let mut min_cell_position: Option<i64> = None;
+    let mut cell_block_ids: Vec<EntityId> = Vec::new();
     for fid in &cell_frame_ids {
         let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
         if !block_ids.is_empty() {
             let blocks_opt = uow.get_block_multi(&block_ids)?;
             for block in blocks_opt.into_iter().flatten() {
                 total_cell_blocks += 1;
+                cell_block_ids.push(block.id);
                 match min_cell_position {
                     None => min_cell_position = Some(block.document_position),
                     Some(min) if block.document_position < min => {
@@ -96,6 +100,14 @@ fn execute_remove_table(
                 }
             }
         }
+    }
+
+    // Mirror cell-block removal into the global rope. Cells live at
+    // the end of the rope (plan §1.6 simplified); remove them BEFORE
+    // the entity cascade since rope_remove_block looks each up by id.
+    // No-op under default backend.
+    for cell_block_id in &cell_block_ids {
+        common::database::rope_helpers::rope_remove_block(&uow.store(), *cell_block_id);
     }
 
     // Find the anchor frame (frame with table == Some(table_id))
@@ -133,6 +145,11 @@ fn execute_remove_table(
         }
         uow.remove_frame(&anchor_id)?;
     }
+
+    // Mirror to rope: remove the TableAnchor sentinel BEFORE removing
+    // the table entity (the helper looks the anchor up by table_id).
+    // No-op under default backend.
+    common::database::rope_helpers::rope_remove_table_anchor(&uow.store(), table_id);
 
     // Remove the table (cascade removes TableCells)
     uow.remove_table(&table_id)?;

@@ -3,6 +3,8 @@ use anyhow::Result;
 
 use test_harness::setup_with_text;
 
+use document_editing::document_editing_controller;
+use document_editing::{InsertFrameDto, InsertTableDto, InsertTextDto};
 use document_inspection::document_inspection_controller;
 use document_inspection::{GetBlockAtPositionDto, GetTextAtPositionDto};
 
@@ -219,6 +221,242 @@ fn test_get_text_at_position_truncated_at_end() -> Result<()> {
     )?;
 
     assert_eq!(result.text, "lo"); // only 2 chars remaining
+
+    Ok(())
+}
+
+// ─── Edge cases: length + past-end ──────────────────────────────
+
+#[test]
+fn test_get_text_at_position_negative_length() -> Result<()> {
+    let (db_context, event_hub, _) = setup_with_text("Hello")?;
+
+    // Negative length triggers the explicit early-return branch.
+    let result = document_inspection_controller::get_text_at_position(
+        &db_context,
+        &event_hub,
+        &GetTextAtPositionDto {
+            position: 0,
+            length: -1,
+        },
+    )?;
+
+    assert_eq!(result.text, "");
+    assert_eq!(result.block_id, 0);
+    assert_eq!(result.element_id, 0);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_text_at_position_one_past_end_errors() -> Result<()> {
+    let (db_context, event_hub, _) = setup_with_text("Hi")?;
+
+    // Max valid position is 2 (end of "Hi"). Position 3 is past the
+    // valid range — should propagate an out-of-range error.
+    let result = document_inspection_controller::get_text_at_position(
+        &db_context,
+        &event_hub,
+        &GetTextAtPositionDto {
+            position: 3,
+            length: 1,
+        },
+    );
+
+    assert!(result.is_err(), "position 3 on a 2-char doc should fail");
+
+    Ok(())
+}
+
+// ─── Table & sub-frame traversal (exercises collect_block_ids) ───
+
+#[test]
+fn test_get_block_at_position_in_table_cells() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hi")?;
+
+    // Insert 2x2 table after "Hi".
+    document_editing_controller::insert_table(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTableDto {
+            position: 2,
+            anchor: 2,
+            rows: 2,
+            columns: 2,
+        },
+    )?;
+
+    // Document layout after insert (running positions):
+    //   "Hi" block            : start=0, len=2
+    //   cell(0,0) block       : start=3, len=0
+    //   cell(0,1) block       : start=4, len=0
+    //   cell(1,0) block       : start=5, len=0
+    //   cell(1,1) block       : start=6, len=0
+
+    // Separator after "Hi" folds into cell(0,0).
+    let at_sep = document_inspection_controller::get_block_at_position(
+        &db_context,
+        &event_hub,
+        &GetBlockAtPositionDto { position: 2 },
+    )?;
+    assert_eq!(at_sep.block_number, 1);
+    assert_eq!(at_sep.block_start, 3);
+    assert_eq!(at_sep.block_length, 0);
+
+    // Exact cell(0,1) position.
+    let at_cell_01 = document_inspection_controller::get_block_at_position(
+        &db_context,
+        &event_hub,
+        &GetBlockAtPositionDto { position: 4 },
+    )?;
+    assert_eq!(at_cell_01.block_number, 2);
+    assert_eq!(at_cell_01.block_start, 4);
+
+    // Exact cell(1,1) position — confirms row-major traversal.
+    let at_cell_11 = document_inspection_controller::get_block_at_position(
+        &db_context,
+        &event_hub,
+        &GetBlockAtPositionDto { position: 6 },
+    )?;
+    assert_eq!(at_cell_11.block_number, 4);
+    assert_eq!(at_cell_11.block_start, 6);
+
+    // Cells are visited in a different order than block IDs were assigned,
+    // so the four block_ids must still be distinct.
+    let mut cell_ids = vec![
+        at_sep.block_id,
+        document_inspection_controller::get_block_at_position(
+            &db_context,
+            &event_hub,
+            &GetBlockAtPositionDto { position: 5 },
+        )?
+        .block_id,
+        at_cell_01.block_id,
+        at_cell_11.block_id,
+    ];
+    cell_ids.sort();
+    cell_ids.dedup();
+    assert_eq!(cell_ids.len(), 4, "cell blocks must be distinct");
+
+    Ok(())
+}
+
+#[test]
+fn test_get_text_at_position_spans_into_table_cell() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Hi")?;
+
+    document_editing_controller::insert_table(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTableDto {
+            position: 2,
+            anchor: 2,
+            rows: 2,
+            columns: 2,
+        },
+    )?;
+
+    // Type "ab" into cell(0,0) at its starting position (3).
+    document_editing_controller::insert_text(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertTextDto {
+            position: 3,
+            anchor: 3,
+            text: "ab".to_string(),
+        },
+    )?;
+
+    // Now cell(0,0) has text_length=2 → later blocks shift by 2.
+    // Running positions:
+    //   "Hi"        : 0..2
+    //   cell(0,0) ab: 3..5
+    //   cell(0,1)   : 6..6
+    //   cell(1,0)   : 7..7
+    //   cell(1,1)   : 8..8
+
+    // Read "i" + separator + "ab" crossing into the table's first cell —
+    // exercises the cell traversal in collect_block_ids.
+    let result = document_inspection_controller::get_text_at_position(
+        &db_context,
+        &event_hub,
+        &GetTextAtPositionDto {
+            position: 1,
+            length: 4,
+        },
+    )?;
+    assert_eq!(result.text, "i\nab");
+
+    // Also verify typed text is readable purely within the cell.
+    let in_cell = document_inspection_controller::get_text_at_position(
+        &db_context,
+        &event_hub,
+        &GetTextAtPositionDto {
+            position: 3,
+            length: 2,
+        },
+    )?;
+    assert_eq!(in_cell.text, "ab");
+
+    Ok(())
+}
+
+#[test]
+fn test_get_block_at_position_in_sub_frame() -> Result<()> {
+    let (db_context, event_hub, mut undo_redo_manager) = setup_with_text("Start")?;
+
+    // Insert a sub-frame at position 5 (end of "Start"). This creates
+    // a nested frame containing one empty block.
+    document_editing_controller::insert_frame(
+        &db_context,
+        &event_hub,
+        &mut undo_redo_manager,
+        None,
+        &InsertFrameDto {
+            position: 5,
+            anchor: 5,
+        },
+    )?;
+
+    // Running positions after the sub-frame's empty block is appended
+    // at index 1 of the root frame's child_order:
+    //   "Start" block          : start=0, len=5
+    //   sub-frame empty block  : start=6, len=0
+
+    // Position 5 is the separator → folds into the sub-frame's block.
+    let at_sep = document_inspection_controller::get_block_at_position(
+        &db_context,
+        &event_hub,
+        &GetBlockAtPositionDto { position: 5 },
+    )?;
+    assert_eq!(at_sep.block_number, 1);
+    assert_eq!(at_sep.block_start, 6);
+    assert_eq!(at_sep.block_length, 0);
+
+    // Position 6 is the exact start of the empty sub-frame block.
+    let at_sub = document_inspection_controller::get_block_at_position(
+        &db_context,
+        &event_hub,
+        &GetBlockAtPositionDto { position: 6 },
+    )?;
+    assert_eq!(at_sub.block_number, 1);
+    assert_eq!(at_sub.block_start, 6);
+    assert_eq!(at_sub.block_id, at_sep.block_id);
+
+    // The root "Start" block and the sub-frame's block are distinct.
+    let at_root = document_inspection_controller::get_block_at_position(
+        &db_context,
+        &event_hub,
+        &GetBlockAtPositionDto { position: 0 },
+    )?;
+    assert_eq!(at_root.block_number, 0);
+    assert_ne!(at_root.block_id, at_sub.block_id);
 
     Ok(())
 }

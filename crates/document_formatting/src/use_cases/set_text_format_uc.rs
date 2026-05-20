@@ -1,12 +1,15 @@
 use crate::SetTextFormatDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::direct_access::block::block_repository::BlockRelationshipField;
+use common::database::rope_helpers::{block_char_length, block_char_to_byte_in_block};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
-use common::snapshot::EntityTreeSnapshot;
+use common::entities::{Block, Document, Frame, Root};
+use common::format_runs::{
+    CharacterFormat, FormatRun, capture_image_formats_in_range, capture_runs_in_range,
+    debug_assert_well_formed, splice_range,
+};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
 use std::any::Any;
@@ -19,18 +22,23 @@ pub trait SetTextFormatUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Root", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Get")]
 #[macros::uow_action(entity = "Document", action = "GetRelationship")]
-#[macros::uow_action(entity = "Document", action = "Snapshot")]
-#[macros::uow_action(entity = "Document", action = "Restore")]
 #[macros::uow_action(entity = "Frame", action = "Get")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "Get")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Update")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 pub trait SetTextFormatUnitOfWorkTrait: CommandUnitOfWork {}
+
+/// Per-block captured state for hand-rolled undo. Built during the
+/// mutation pass; consumed by `undo()` to restore the prior state
+/// without paying the cost of a full RopeStoreSnapshot.
+#[derive(Clone, Debug)]
+struct BlockFormatInverse {
+    block_id: EntityId,
+    byte_range: (u32, u32),
+    prior_runs: Vec<FormatRun>,
+    prior_image_formats: Vec<(u32, CharacterFormat)>,
+}
 
 fn underline_style_to_entity(s: &crate::dtos::UnderlineStyle) -> common::entities::UnderlineStyle {
     match s {
@@ -81,61 +89,94 @@ fn vertical_alignment_to_entity(
     }
 }
 
-/// Get the character length of an inline element.
-fn element_char_len(elem: &InlineElement) -> i64 {
-    match &elem.content {
-        InlineContent::Text(s) => s.chars().count() as i64,
-        InlineContent::Image { .. } => 1,
-        InlineContent::Empty => 0,
-    }
-}
-
-/// Apply text format fields from the DTO to an inline element.
-/// `None` fields are left unchanged (preserve existing formatting).
-fn apply_text_format(elem: &mut InlineElement, dto: &SetTextFormatDto) {
+/// Apply a SetTextFormatDto onto a CharacterFormat, overwriting only the
+/// fields the dto sets to `Some(_)`. Returns the merged format.
+fn merge_dto(base: &CharacterFormat, dto: &SetTextFormatDto) -> CharacterFormat {
+    let mut out = base.clone();
     if let Some(ref v) = dto.font_family {
-        elem.fmt_font_family = Some(v.clone());
+        out.font_family = Some(v.clone());
     }
     if let Some(v) = dto.font_point_size {
-        elem.fmt_font_point_size = Some(v);
+        out.font_point_size = Some(v);
     }
     if let Some(v) = dto.font_weight {
-        elem.fmt_font_weight = Some(v);
+        out.font_weight = Some(v);
     }
     if let Some(v) = dto.font_bold {
-        elem.fmt_font_bold = Some(v);
+        out.font_bold = Some(v);
     }
     if let Some(v) = dto.font_italic {
-        elem.fmt_font_italic = Some(v);
+        out.font_italic = Some(v);
     }
     if let Some(v) = dto.font_underline {
-        elem.fmt_font_underline = Some(v);
+        out.font_underline = Some(v);
     }
     if let Some(v) = dto.font_overline {
-        elem.fmt_font_overline = Some(v);
+        out.font_overline = Some(v);
     }
     if let Some(v) = dto.font_strikeout {
-        elem.fmt_font_strikeout = Some(v);
+        out.font_strikeout = Some(v);
     }
     if let Some(v) = dto.letter_spacing {
-        elem.fmt_letter_spacing = Some(v);
+        out.letter_spacing = Some(v);
     }
     if let Some(v) = dto.word_spacing {
-        elem.fmt_word_spacing = Some(v);
+        out.word_spacing = Some(v);
     }
     if let Some(ref v) = dto.underline_style {
-        elem.fmt_underline_style = Some(underline_style_to_entity(v));
+        out.underline_style = Some(underline_style_to_entity(v));
     }
     if let Some(ref v) = dto.vertical_alignment {
-        elem.fmt_vertical_alignment = Some(vertical_alignment_to_entity(v));
+        out.vertical_alignment = Some(vertical_alignment_to_entity(v));
     }
-    elem.updated_at = chrono::Utc::now();
+    out
+}
+
+/// Build the replacement run list covering `[byte_start..byte_end)` of a
+/// block, merging the dto's fields onto every existing run (and gaps
+/// between runs default to `CharacterFormat::default()` before merging).
+fn build_replacement_runs(
+    existing_runs: &[FormatRun],
+    byte_start: u32,
+    byte_end: u32,
+    dto: &SetTextFormatDto,
+) -> Vec<FormatRun> {
+    let mut out: Vec<FormatRun> = Vec::new();
+    let mut cursor = byte_start;
+    for run in existing_runs {
+        if run.byte_end <= byte_start || run.byte_start >= byte_end {
+            continue;
+        }
+        let overlap_start = std::cmp::max(run.byte_start, byte_start);
+        let overlap_end = std::cmp::min(run.byte_end, byte_end);
+        if overlap_start > cursor {
+            out.push(FormatRun {
+                byte_start: cursor,
+                byte_end: overlap_start,
+                format: merge_dto(&CharacterFormat::default(), dto),
+            });
+        }
+        out.push(FormatRun {
+            byte_start: overlap_start,
+            byte_end: overlap_end,
+            format: merge_dto(&run.format, dto),
+        });
+        cursor = overlap_end;
+    }
+    if cursor < byte_end {
+        out.push(FormatRun {
+            byte_start: cursor,
+            byte_end,
+            format: merge_dto(&CharacterFormat::default(), dto),
+        });
+    }
+    out
 }
 
 fn execute_set_text_format(
     uow: &mut Box<dyn SetTextFormatUnitOfWorkTrait>,
     dto: &SetTextFormatDto,
-) -> Result<EntityTreeSnapshot> {
+) -> Result<Vec<BlockFormatInverse>> {
     // Get Root -> Document
     let root = uow
         .get_root(&ROOT_ENTITY_ID)?
@@ -149,141 +190,136 @@ fn execute_set_text_format(
         .get_document(&doc_id)?
         .ok_or_else(|| anyhow!("Document not found"))?;
 
-    // Snapshot for undo before mutation
-    let snapshot = uow.snapshot_document(&[doc_id])?;
-
-    // Get frames
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
-    // Get block IDs from all frames
     let mut all_block_ids = Vec::new();
     for fid in &frame_ids {
         let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
         all_block_ids.extend(block_ids);
     }
 
-    // Get all blocks
     let blocks_opt = uow.get_block_multi(&all_block_ids)?;
     let mut blocks: Vec<Block> = blocks_opt.into_iter().flatten().collect();
     blocks.sort_by_key(|b| b.document_position);
 
-    // Determine the range
     let range_start = std::cmp::min(dto.position, dto.anchor);
     let range_end = std::cmp::max(dto.position, dto.anchor);
 
+    let mut inverse: Vec<BlockFormatInverse> = Vec::new();
+
     if range_start == range_end {
-        return Ok(snapshot);
+        return Ok(inverse);
     }
 
-    // Process each block that overlaps the range
+    let store = uow.store();
     for block in &blocks {
         let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
+        let block_end = block_start + block_char_length(block, &store);
 
-        // Skip blocks outside the range
         if block_end <= range_start || block_start >= range_end {
             continue;
         }
 
-        // Get elements for this block
-        let element_ids =
-            uow.get_block_relationship(&block.id, &BlockRelationshipField::Elements)?;
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        // Char-relative range within this block.
+        let local_char_start = std::cmp::max(0, range_start - block_start) as usize;
+        let local_char_end =
+            std::cmp::min(block_char_length(block, &store), range_end - block_start) as usize;
 
-        let mut elem_doc_pos = block_start;
+        // Rope-native char->byte translation. block_char_to_byte_in_block
+        // clamps char offsets to the block's logical length, so no
+        // separate plain_text_len/min clamp is needed here.
+        let (byte_start, content_byte_len) =
+            block_char_to_byte_in_block(&store, block.id, local_char_start);
+        let (byte_end, _) = block_char_to_byte_in_block(&store, block.id, local_char_end);
 
-        for elem in &elements {
-            let elem_len = element_char_len(elem);
-            let elem_start = elem_doc_pos;
-            let elem_end = elem_start + elem_len;
+        if byte_start >= byte_end {
+            continue;
+        }
 
-            // Skip elements outside the range
-            if elem_end <= range_start || elem_start >= range_end {
-                elem_doc_pos += elem_len;
-                continue;
-            }
+        // Capture prior state before mutation.
+        let prior_runs = {
+            let runs_map = store.format_runs.read().unwrap();
+            runs_map
+                .get(&block.id)
+                .map(|runs| capture_runs_in_range(runs, byte_start, byte_end))
+                .unwrap_or_default()
+        };
+        let prior_image_formats = {
+            let images_map = store.block_images.read().unwrap();
+            images_map
+                .get(&block.id)
+                .map(|images| capture_image_formats_in_range(images, byte_start, byte_end))
+                .unwrap_or_default()
+        };
 
-            // Element is fully within range
-            if elem_start >= range_start && elem_end <= range_end {
-                let mut updated = elem.clone();
-                apply_text_format(&mut updated, dto);
-                uow.update_inline_element(&updated)?;
-            }
-            // Element needs splitting
-            else if let InlineContent::Text(ref text) = elem.content {
-                let local_start = std::cmp::max(0, range_start - elem_start) as usize;
-                let local_end = std::cmp::min(elem_len, range_end - elem_start) as usize;
-                let chars: Vec<char> = text.chars().collect();
+        // Update format runs over the byte range.
+        {
+            let mut runs_map = store.format_runs.write().unwrap();
+            let runs = runs_map.entry(block.id).or_default();
+            let replacement = build_replacement_runs(runs, byte_start, byte_end, dto);
+            splice_range(runs, byte_start..byte_end, replacement);
+            debug_assert_well_formed(runs, content_byte_len);
+        }
 
-                if local_start > 0 && local_end < chars.len() {
-                    // Split into three parts: before, middle (formatted), after
-                    let before_text: String = chars[..local_start].iter().collect();
-                    let middle_text: String = chars[local_start..local_end].iter().collect();
-                    let after_text: String = chars[local_end..].iter().collect();
-
-                    // Update the original element to keep only the "before" text
-                    let mut updated_orig = elem.clone();
-                    updated_orig.content = InlineContent::Text(before_text);
-                    updated_orig.updated_at = chrono::Utc::now();
-                    uow.update_inline_element(&updated_orig)?;
-
-                    // Create the middle element with formatting
-                    let mut middle_elem = elem.clone();
-                    middle_elem.id = 0; // Will be assigned by create
-                    middle_elem.content = InlineContent::Text(middle_text);
-                    apply_text_format(&mut middle_elem, dto);
-                    uow.create_inline_element(&middle_elem, block.id, -1)?;
-
-                    // Create the after element (same formatting as original)
-                    let mut after_elem = elem.clone();
-                    after_elem.id = 0;
-                    after_elem.content = InlineContent::Text(after_text);
-                    after_elem.updated_at = chrono::Utc::now();
-                    uow.create_inline_element(&after_elem, block.id, -1)?;
-                } else if local_start > 0 {
-                    // Split into two: before (unformatted), rest (formatted)
-                    let before_text: String = chars[..local_start].iter().collect();
-                    let rest_text: String = chars[local_start..].iter().collect();
-
-                    let mut updated_orig = elem.clone();
-                    updated_orig.content = InlineContent::Text(before_text);
-                    updated_orig.updated_at = chrono::Utc::now();
-                    uow.update_inline_element(&updated_orig)?;
-
-                    let mut new_elem = elem.clone();
-                    new_elem.id = 0;
-                    new_elem.content = InlineContent::Text(rest_text);
-                    apply_text_format(&mut new_elem, dto);
-                    uow.create_inline_element(&new_elem, block.id, -1)?;
-                } else {
-                    // local_start == 0, split into: formatted part, rest
-                    let formatted_text: String = chars[..local_end].iter().collect();
-                    let rest_text: String = chars[local_end..].iter().collect();
-
-                    let mut updated_orig = elem.clone();
-                    updated_orig.content = InlineContent::Text(formatted_text);
-                    apply_text_format(&mut updated_orig, dto);
-                    uow.update_inline_element(&updated_orig)?;
-
-                    let mut new_elem = elem.clone();
-                    new_elem.id = 0;
-                    new_elem.content = InlineContent::Text(rest_text);
-                    new_elem.updated_at = chrono::Utc::now();
-                    uow.create_inline_element(&new_elem, block.id, -1)?;
+        // Update image anchor formats. An image at `byte_offset` is in the
+        // selection if its byte_offset is inside [byte_start..byte_end].
+        {
+            let mut images_map = store.block_images.write().unwrap();
+            if let Some(images) = images_map.get_mut(&block.id) {
+                for img in images.iter_mut() {
+                    if img.byte_offset >= byte_start && img.byte_offset < byte_end {
+                        img.format = merge_dto(&img.format, dto);
+                    }
                 }
             }
-
-            elem_doc_pos += elem_len;
         }
+
+        inverse.push(BlockFormatInverse {
+            block_id: block.id,
+            byte_range: (byte_start, byte_end),
+            prior_runs,
+            prior_image_formats,
+        });
     }
 
-    Ok(snapshot)
+    Ok(inverse)
+}
+
+/// Restore the prior format-run and image-format state captured during
+/// the forward mutation. Splices the captured runs back into each
+/// affected block's byte range and restores per-image formats.
+fn apply_inverse(
+    uow: &mut Box<dyn SetTextFormatUnitOfWorkTrait>,
+    inverse: &[BlockFormatInverse],
+) -> Result<()> {
+    let store = uow.store();
+    for entry in inverse {
+        {
+            let mut runs_map = store.format_runs.write().unwrap();
+            let runs = runs_map.entry(entry.block_id).or_default();
+            splice_range(
+                runs,
+                entry.byte_range.0..entry.byte_range.1,
+                entry.prior_runs.clone(),
+            );
+        }
+        {
+            let mut images_map = store.block_images.write().unwrap();
+            if let Some(images) = images_map.get_mut(&entry.block_id) {
+                for (byte_offset, format) in &entry.prior_image_formats {
+                    if let Some(img) = images.iter_mut().find(|i| i.byte_offset == *byte_offset) {
+                        img.format = format.clone();
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub struct SetTextFormatUseCase {
     uow_factory: Box<dyn SetTextFormatUnitOfWorkFactoryTrait>,
-    undo_snapshot: Option<EntityTreeSnapshot>,
+    inverse: Option<Vec<BlockFormatInverse>>,
     last_dto: Option<SetTextFormatDto>,
 }
 
@@ -291,7 +327,7 @@ impl SetTextFormatUseCase {
     pub fn new(uow_factory: Box<dyn SetTextFormatUnitOfWorkFactoryTrait>) -> Self {
         SetTextFormatUseCase {
             uow_factory,
-            undo_snapshot: None,
+            inverse: None,
             last_dto: None,
         }
     }
@@ -300,8 +336,8 @@ impl SetTextFormatUseCase {
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
 
-        let snapshot = execute_set_text_format(&mut uow, dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let inverse = execute_set_text_format(&mut uow, dto)?;
+        self.inverse = Some(inverse);
         self.last_dto = Some(dto.clone());
 
         uow.commit()?;
@@ -311,15 +347,15 @@ impl SetTextFormatUseCase {
 
 impl UndoRedoCommand for SetTextFormatUseCase {
     fn undo(&mut self) -> Result<()> {
-        let snapshot = self
-            .undo_snapshot
+        let inverse = self
+            .inverse
             .as_ref()
-            .ok_or_else(|| anyhow!("No snapshot available for undo"))?
+            .ok_or_else(|| anyhow!("No inverse data available for undo"))?
             .clone();
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        uow.restore_document(&snapshot)?;
+        apply_inverse(&mut uow, &inverse)?;
         uow.commit()?;
         Ok(())
     }
@@ -333,8 +369,8 @@ impl UndoRedoCommand for SetTextFormatUseCase {
 
         let mut uow = self.uow_factory.create();
         uow.begin_transaction()?;
-        let snapshot = execute_set_text_format(&mut uow, &dto)?;
-        self.undo_snapshot = Some(snapshot);
+        let inverse = execute_set_text_format(&mut uow, &dto)?;
+        self.inverse = Some(inverse);
         uow.commit()?;
         Ok(())
     }

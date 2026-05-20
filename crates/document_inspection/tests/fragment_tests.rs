@@ -3,8 +3,8 @@ use anyhow::Result;
 use common::parser_tools::fragment_schema::FragmentData;
 
 use test_harness::{
-    BlockRelationshipField, block_controller, export_text, get_block_ids,
-    inline_element_controller, setup_with_text,
+    block_controller, export_text, get_block_ids, get_element_ids, inline_element_controller,
+    setup_with_text,
 };
 
 use document_editing::InsertFragmentDto;
@@ -215,7 +215,9 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
     let block_ids = get_block_ids(&db_context)?;
     let last_block = block_controller::get(&db_context, block_ids.last().unwrap())?
         .expect("last block should exist");
-    let insert_pos = last_block.document_position + last_block.text_length;
+    let last_entity: common::entities::Block = last_block.clone().into();
+    let insert_pos = last_block.document_position
+        + common::database::rope_helpers::block_char_length(&last_entity, db_context.get_store());
 
     document_editing_controller::insert_fragment(
         &db_context,
@@ -229,31 +231,30 @@ fn test_insert_fragment_preserves_formatting() -> Result<()> {
         },
     )?;
 
-    // Verify bold formatting is preserved in the newly inserted elements
+    // Verify bold formatting is preserved across the paste: count
+    // occurrences of "bold text" that sit inside a bold-formatted
+    // segment. Adjacent equal-format spans coalesce into one run /
+    // one segment, so we count substring occurrences rather than
+    // segment count.
     let block_ids = get_block_ids(&db_context)?;
-    let mut bold_count = 0;
+    let mut bold_substring_count = 0;
     for block_id in &block_ids {
-        let elem_ids = block_controller::get_relationship(
-            &db_context,
-            block_id,
-            &BlockRelationshipField::Elements,
-        )?;
+        let elem_ids = get_element_ids(&db_context, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db_context, elem_id)?;
             if let Some(elem) = elem
-                && let common::entities::InlineContent::Text(ref t) = elem.content
-                && t.contains("bold")
+                && let common::format_runs::InlineContent::Text(ref t) = elem.content
                 && elem.fmt_font_bold == Some(true)
             {
-                bold_count += 1;
+                bold_substring_count += t.matches("bold text").count();
             }
         }
     }
-    // Exactly 2 bold elements: original from markdown import + inserted copy
     assert_eq!(
-        bold_count, 2,
-        "Should have exactly 2 bold elements (original + copy), got {}",
-        bold_count
+        bold_substring_count, 2,
+        "Should have 2 bold-formatted 'bold text' occurrences \
+         (original from markdown + pasted copy), got {}",
+        bold_substring_count
     );
 
     Ok(())
@@ -325,12 +326,17 @@ fn test_extract_insert_with_list() -> Result<()> {
     // Find blocks with lists
     let block_ids = get_block_ids(&db_context)?;
     let mut list_block_positions: Vec<(i64, i64)> = Vec::new();
+    let store = db_context.get_store();
     for block_id in &block_ids {
         let block = block_controller::get(&db_context, block_id)?;
         if let Some(block) = block
             && block.list.is_some()
         {
-            list_block_positions.push((block.document_position, block.text_length));
+            let entity: common::entities::Block = block.clone().into();
+            list_block_positions.push((
+                block.document_position,
+                common::database::rope_helpers::block_char_length(&entity, store),
+            ));
         }
     }
     // "- item1\n- item2" produces exactly 2 list blocks
@@ -366,7 +372,9 @@ fn test_extract_insert_with_list() -> Result<()> {
     let all_block_ids = get_block_ids(&db_context)?;
     let last_block =
         block_controller::get(&db_context, all_block_ids.last().unwrap())?.expect("last block");
-    let insert_pos = last_block.document_position + last_block.text_length;
+    let last_entity: common::entities::Block = last_block.clone().into();
+    let insert_pos = last_block.document_position
+        + common::database::rope_helpers::block_char_length(&last_entity, db_context.get_store());
 
     document_editing_controller::insert_fragment(
         &db_context,
@@ -465,7 +473,7 @@ fn test_extract_insert_fragment_with_image() -> Result<()> {
     let has_image = fragment.blocks.iter().any(|b| {
         b.elements
             .iter()
-            .any(|e| matches!(e.content, common::entities::InlineContent::Image { .. }))
+            .any(|e| matches!(e.content, common::format_runs::InlineContent::Image { .. }))
     });
     assert!(has_image, "Fragment should contain an image element");
 
@@ -593,8 +601,7 @@ fn test_extract_fragment_multiple_formats() -> Result<()> {
     let mut found_bold = false;
     let mut found_italic = false;
     for block_id in &block_ids {
-        let elem_ids =
-            block_controller::get_relationship(&db2, block_id, &BlockRelationshipField::Elements)?;
+        let elem_ids = get_element_ids(&db2, block_id)?;
         for elem_id in &elem_ids {
             let elem = inline_element_controller::get(&db2, elem_id)?.unwrap();
             if elem.fmt_font_bold == Some(true) {

@@ -2,10 +2,12 @@ use crate::InsertFrameDto;
 use crate::InsertFrameResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_char_length;
+use common::database::rope_helpers::rope_append_empty_block;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineContent, InlineElement, Root};
+use common::entities::{Block, Document, Frame, Root};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -28,7 +30,6 @@ pub trait InsertFrameUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 pub trait InsertFrameUnitOfWorkTrait: CommandUnitOfWork {}
 
 pub struct InsertFrameUseCase {
@@ -45,6 +46,7 @@ fn find_frame_at_position(
     frame_ids: &[EntityId],
     position: i64,
 ) -> Result<Option<(Frame, usize)>> {
+    let store = uow.store();
     for frame_id in frame_ids {
         let frame = match uow.get_frame(frame_id)? {
             Some(f) => f,
@@ -60,12 +62,12 @@ fn find_frame_at_position(
 
         if let (Some(first), Some(last)) = (blocks.first(), blocks.last()) {
             let frame_start = first.document_position;
-            let frame_end = last.document_position + last.text_length;
+            let frame_end = last.document_position + block_char_length(last, &store);
             if position >= frame_start && position <= frame_end {
                 // Find block index closest to position
                 let mut block_idx = 0;
                 for (i, block) in blocks.iter().enumerate() {
-                    if position <= block.document_position + block.text_length {
+                    if position <= block.document_position + block_char_length(block, &store) {
                         block_idx = i;
                         break;
                     }
@@ -136,6 +138,7 @@ fn execute_insert_frame(
         fmt_position: None,
         fmt_is_blockquote: None,
         table: None,
+        byte_range: (0, 0),
     };
 
     let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
@@ -147,25 +150,12 @@ fn execute_insert_frame(
         id: 0,
         created_at: now,
         updated_at: now,
-        elements: vec![],
         list: None,
-        text_length: 0,
         document_position: dto.position,
-        plain_text: String::new(),
         ..Default::default()
     };
 
     let created_block = uow.create_block(&new_block, created_frame.id, -1)?;
-
-    // Create an empty inline element in the new block
-    let empty_elem = InlineElement {
-        id: 0,
-        created_at: now,
-        updated_at: now,
-        content: InlineContent::Empty,
-        ..Default::default()
-    };
-    uow.create_inline_element(&empty_elem, created_block.id, -1)?;
 
     // Update the new frame's child_order with its block
     let mut updated_new_frame = created_frame.clone();
@@ -194,6 +184,21 @@ fn execute_insert_frame(
     updated_doc.block_count += 1;
     updated_doc.updated_at = now;
     uow.update_document(&updated_doc)?;
+
+    // Plan §1.6: mirror to rope. Top-level (parent=None) frames
+    // append at rope end with a `\n` boundary; the new empty block is
+    // registered in block_offsets so subsequent edits can find it.
+    // Frame.byte_range is recomputed centrally in Transaction::commit.
+    //
+    // Nested (parent=Some) frames are NOT mirrored here — their
+    // position depends on parent.child_order interleaving with sibling
+    // blocks/tables/frames. Sub-frame insertion within a populated
+    // parent is currently a follow-up; this matches the pre-existing
+    // behavior where insert_frame_uc only populated the entity tree.
+    // No-op under default backend.
+    if parent_frame_id.is_none() {
+        rope_append_empty_block(&uow.store(), created_block.id);
+    }
 
     Ok((
         InsertFrameResultDto {

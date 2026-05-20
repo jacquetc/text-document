@@ -80,6 +80,10 @@ impl CommandUnitOfWork for RemoveTableColumnUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 // Macros must match exactly those in remove_table_column_uc.rs

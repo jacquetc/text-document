@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, Root};
+use common::entities::{Block, Document, Frame, Root};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -80,23 +80,21 @@ impl CommandUnitOfWork for SetTextFormatUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 #[macros::uow_action(entity = "Root", action = "Get")]
 #[macros::uow_action(entity = "Root", action = "GetRelationship")]
 #[macros::uow_action(entity = "Document", action = "Get")]
 #[macros::uow_action(entity = "Document", action = "GetRelationship")]
-#[macros::uow_action(entity = "Document", action = "Snapshot")]
-#[macros::uow_action(entity = "Document", action = "Restore")]
 #[macros::uow_action(entity = "Frame", action = "Get")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "Get")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Update")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 impl SetTextFormatUnitOfWorkTrait for SetTextFormatUnitOfWork {}
 
 pub struct SetTextFormatUnitOfWorkFactory {

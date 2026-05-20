@@ -3,15 +3,14 @@
 extern crate text_document_formatting as document_formatting;
 
 use anyhow::Result;
-use common::entities::InlineContent;
+use common::format_runs::InlineContent;
 
 use document_formatting::document_formatting_controller;
 use document_formatting::{CharVerticalAlignment, SetTextFormatDto, UnderlineStyle};
 
 use test_harness::{
-    BlockRelationshipField, FrameRelationshipField, UpdateBlockDto, UpdateInlineElementDto,
-    block_controller, create_list, frame_controller, get_block_ids, get_sorted_cells,
-    inline_element_controller, insert_image, insert_table, setup_with_text,
+    FrameRelationshipField, UpdateBlockDto, block_controller, create_list, frame_controller,
+    get_block_ids, get_sorted_cells, insert_image, insert_table, setup_with_text,
 };
 
 #[test]
@@ -35,12 +34,10 @@ fn test_set_text_format_block_with_image() -> Result<()> {
         },
     )?;
 
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_id, &BlockRelationshipField::Elements)?;
+    let elements = test_harness::synth_block_elements(&db, block_id)?;
     let mut found_bold_text = false;
     let mut image_is_bold = false;
-    for eid in &elem_ids {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    for elem in &elements {
         match &elem.content {
             InlineContent::Text(t) if t == "AB" => {
                 assert_eq!(elem.fmt_font_bold, Some(true));
@@ -79,10 +76,8 @@ fn test_set_text_format_including_image() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    for eid in &elem_ids {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    let elements = test_harness::synth_block_elements(&db, block_ids[0])?;
+    for elem in &elements {
         assert_eq!(
             elem.fmt_font_italic,
             Some(true),
@@ -111,17 +106,15 @@ fn test_set_text_format_unicode_split() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
+    let elements = test_harness::synth_block_elements(&db, block_ids[0])?;
     assert!(
-        elem_ids.len() >= 3,
+        elements.len() >= 3,
         "Unicode text should be split into at least 3 parts, got {}",
-        elem_ids.len()
+        elements.len()
     );
 
     let mut found_underlined = false;
-    for eid in &elem_ids {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    for elem in &elements {
         if elem.fmt_font_underline == Some(true)
             && let InlineContent::Text(ref t) = elem.content
         {
@@ -165,10 +158,8 @@ fn test_set_text_format_in_list_blocks() -> Result<()> {
 
     let block_ids = get_block_ids(&db)?;
 
-    let elem_ids_0 =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    for eid in &elem_ids_0 {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    let elements_0 = test_harness::synth_block_elements(&db, block_ids[0])?;
+    for elem in &elements_0 {
         if let InlineContent::Text(ref t) = elem.content
             && !t.is_empty()
         {
@@ -177,11 +168,9 @@ fn test_set_text_format_in_list_blocks() -> Result<()> {
         }
     }
 
-    let elem_ids_1 =
-        block_controller::get_relationship(&db, &block_ids[1], &BlockRelationshipField::Elements)?;
+    let elements_1 = test_harness::synth_block_elements(&db, block_ids[1])?;
     let mut found_bold_item = false;
-    for eid in &elem_ids_1 {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    for elem in &elements_1 {
         if let InlineContent::Text(ref t) = elem.content
             && elem.fmt_font_bold == Some(true)
         {
@@ -208,16 +197,15 @@ fn test_set_text_format_in_table_cell() -> Result<()> {
     let cell_block = block_controller::get(&db, &cell_block_ids[0])?.unwrap();
     let cell_block_pos = cell_block.document_position;
 
-    let elem_ids =
-        block_controller::get_relationship(&db, &cell_block.id, &BlockRelationshipField::Elements)?;
-    let elem = inline_element_controller::get(&db, &elem_ids[0])?.unwrap();
-    let mut update_elem: UpdateInlineElementDto = elem.into();
-    update_elem.content = InlineContent::Text("Cell text".into());
-    inline_element_controller::update(&db, &hub, &mut urm, None, &update_elem)?;
-
-    let mut update_block: UpdateBlockDto = cell_block.into();
-    update_block.plain_text = "Cell text".into();
-    update_block.text_length = 9;
+    // Write the cell content into the rope directly (the cell is
+    // already registered in block_offsets by `insert_table_uc`),
+    // then update the block's `text_length` cache.
+    common::database::rope_helpers::rope_replace_block_content(
+        db.get_store(),
+        cell_block.id,
+        "Cell text",
+    );
+    let update_block: UpdateBlockDto = cell_block.into();
     block_controller::update(&db, &hub, &mut urm, None, &update_block)?;
 
     document_formatting_controller::set_text_format(
@@ -236,14 +224,9 @@ fn test_set_text_format_in_table_cell() -> Result<()> {
 
     let cell_block_ids_after =
         frame_controller::get_relationship(&db, &cell_frame_id, &FrameRelationshipField::Blocks)?;
-    let elem_ids_after = block_controller::get_relationship(
-        &db,
-        &cell_block_ids_after[0],
-        &BlockRelationshipField::Elements,
-    )?;
+    let elements_after = test_harness::synth_block_elements(&db, cell_block_ids_after[0])?;
     let mut found_bold_cell = false;
-    for eid in &elem_ids_after {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    for elem in &elements_after {
         if elem.fmt_font_bold == Some(true)
             && elem.fmt_font_italic == Some(true)
             && let InlineContent::Text(ref t) = elem.content
@@ -277,30 +260,25 @@ fn test_set_text_format_undo_redo_with_split() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids_after =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
+    let elements_after = test_harness::synth_block_elements(&db, block_ids[0])?;
     assert!(
-        elem_ids_after.len() >= 3,
+        elements_after.len() >= 3,
         "Should have at least 3 elements after split"
     );
 
     urm.undo(None)?;
-    let elem_ids_undo =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    assert_eq!(elem_ids_undo.len(), 1, "After undo should have 1 element");
-    let elem = inline_element_controller::get(&db, &elem_ids_undo[0])?.unwrap();
-    assert_eq!(elem.fmt_font_bold, None);
+    let elements_undo = test_harness::synth_block_elements(&db, block_ids[0])?;
+    assert_eq!(elements_undo.len(), 1, "After undo should have 1 element");
+    assert_eq!(elements_undo[0].fmt_font_bold, None);
 
     urm.redo(None)?;
-    let elem_ids_redo =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
+    let elements_redo = test_harness::synth_block_elements(&db, block_ids[0])?;
     assert!(
-        elem_ids_redo.len() >= 3,
+        elements_redo.len() >= 3,
         "After redo should have 3+ elements again"
     );
     let mut found_bold = false;
-    for eid in &elem_ids_redo {
-        let e = inline_element_controller::get(&db, eid)?.unwrap();
+    for e in &elements_redo {
         if e.fmt_font_bold == Some(true) {
             found_bold = true;
         }
@@ -327,11 +305,9 @@ fn test_set_text_format_empty_range_no_op() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    assert_eq!(elem_ids.len(), 1);
-    let elem = inline_element_controller::get(&db, &elem_ids[0])?.unwrap();
-    assert_eq!(elem.fmt_font_bold, None);
+    let elements = test_harness::synth_block_elements(&db, block_ids[0])?;
+    assert_eq!(elements.len(), 1);
+    assert_eq!(elements[0].fmt_font_bold, None);
     Ok(())
 }
 
@@ -363,9 +339,8 @@ fn test_set_text_format_all_fields() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    let elem = inline_element_controller::get(&db, &elem_ids[0])?.unwrap();
+    let elements = test_harness::synth_block_elements(&db, block_ids[0])?;
+    let elem = &elements[0];
 
     assert_eq!(elem.fmt_font_family, Some("Monospace".into()));
     assert_eq!(elem.fmt_font_point_size, Some(24));

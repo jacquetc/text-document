@@ -1,19 +1,17 @@
 use anyhow::{Result, anyhow};
+use common::database::Store;
+use common::database::rope_helpers::block_char_length;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
-use common::entities::{Block, Frame, InlineContent, InlineElement};
+use common::entities::{Block, Frame};
+use common::format_runs::{InlineContent, InlineSegment};
 use common::types::EntityId;
 
-/// Trait for UoW operations needed to create a cell frame.
-/// All table-related UoW traits satisfy this via proc macros.
+/// Trait for UoW operations needed to create a cell frame. All
+/// table-related UoW traits satisfy this via the
+/// `impl_cell_frame_creator!` macro.
 pub trait CellFrameCreator {
     fn cfc_create_frame(&mut self, frame: &Frame, owner_id: EntityId, index: i32) -> Result<Frame>;
     fn cfc_create_block(&mut self, block: &Block, owner_id: EntityId, index: i32) -> Result<Block>;
-    fn cfc_create_inline_element(
-        &mut self,
-        elem: &InlineElement,
-        owner_id: EntityId,
-        index: i32,
-    ) -> Result<InlineElement>;
     fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame>;
 }
 
@@ -37,14 +35,6 @@ macro_rules! impl_cell_frame_creator {
             ) -> Result<Block> {
                 (**self).create_block(block, owner_id, index)
             }
-            fn cfc_create_inline_element(
-                &mut self,
-                elem: &InlineElement,
-                owner_id: EntityId,
-                index: i32,
-            ) -> Result<InlineElement> {
-                (**self).create_inline_element(elem, owner_id, index)
-            }
             fn cfc_update_frame(&mut self, frame: &Frame) -> Result<Frame> {
                 (**self).update_frame(frame)
             }
@@ -54,8 +44,11 @@ macro_rules! impl_cell_frame_creator {
 
 pub(crate) use impl_cell_frame_creator;
 
-/// Create a single cell Frame with one empty Block containing one empty InlineElement.
-/// Returns the created frame's ID and the created block.
+/// Create a single cell Frame containing one empty Block. The block is
+/// reverse-synced through `rebuild_block_inline_elements` so the legacy
+/// inline_elements bridge sees the conventional single-Empty element
+/// for the cell; the new format_runs / block_images representation is
+/// the source of truth (both empty for a brand-new cell).
 pub fn create_cell_frame(
     uow: &mut dyn CellFrameCreator,
     doc_id: EntityId,
@@ -69,12 +62,6 @@ pub fn create_cell_frame(
         ..Block::default()
     };
     let created_block = uow.cfc_create_block(&block, created_frame.id, -1)?;
-
-    let empty_elem = InlineElement {
-        content: InlineContent::Empty,
-        ..InlineElement::default()
-    };
-    uow.cfc_create_inline_element(&empty_elem, created_block.id, -1)?;
 
     let mut updated_frame = created_frame.clone();
     updated_frame.child_order = vec![created_block.id as i64];
@@ -176,10 +163,14 @@ pub fn is_word_boundary_punct(c: char) -> bool {
 ///
 /// Returns `(block, index_in_list, offset_within_block)`.
 /// If `position` is beyond all blocks, falls back to the end of the last block.
-pub fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block, usize, i64)> {
+pub fn find_block_at_position(
+    blocks: &[Block],
+    position: i64,
+    store: &Store,
+) -> Result<(Block, usize, i64)> {
     for (i, block) in blocks.iter().enumerate() {
         let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
+        let block_end = block_start + block_char_length(block, store);
         // The position is within this block (inclusive of block_end for appending at end)
         if position >= block_start && position <= block_end {
             let offset = position - block_start;
@@ -188,42 +179,42 @@ pub fn find_block_at_position(blocks: &[Block], position: i64) -> Result<(Block,
     }
     // If position is beyond all blocks, use the last block
     if let Some(block) = blocks.last() {
-        let offset = block.text_length;
+        let offset = block_char_length(block, store);
         return Ok((block.clone(), blocks.len() - 1, offset));
     }
     Err(anyhow!("No blocks found in document"))
 }
 
-/// Find the inline element at a given offset within a block, and compute
-/// the offset within that element.
+/// Find the inline segment at a given character offset within a block,
+/// and compute the offset within that segment.
 ///
-/// Returns `(element, index_in_list, offset_within_element)`.
-pub fn find_element_at_offset(
-    elements: &[InlineElement],
+/// Returns `(segment, index_in_list, offset_within_segment)`.
+pub fn find_segment_at_offset(
+    segments: &[InlineSegment],
     offset: i64,
-) -> Result<(InlineElement, usize, i64)> {
+) -> Result<(InlineSegment, usize, i64)> {
     let mut running = 0i64;
-    for (i, elem) in elements.iter().enumerate() {
-        let elem_len = match &elem.content {
+    for (i, seg) in segments.iter().enumerate() {
+        let seg_len = match &seg.content {
             InlineContent::Text(s) => s.chars().count() as i64,
             InlineContent::Image { .. } => 1,
             InlineContent::Empty => 0,
         };
-        if offset <= running + elem_len {
-            return Ok((elem.clone(), i, offset - running));
+        if offset <= running + seg_len {
+            return Ok((seg.clone(), i, offset - running));
         }
-        running += elem_len;
+        running += seg_len;
     }
-    // Fall back to last element at its end
-    if let Some(elem) = elements.last() {
-        let elem_len = match &elem.content {
+    // Fall back to last segment at its end
+    if let Some(seg) = segments.last() {
+        let seg_len = match &seg.content {
             InlineContent::Text(s) => s.chars().count() as i64,
             InlineContent::Image { .. } => 1,
             InlineContent::Empty => 0,
         };
-        return Ok((elem.clone(), elements.len() - 1, elem_len));
+        return Ok((seg.clone(), segments.len() - 1, seg_len));
     }
-    Err(anyhow!("No inline elements found in block"))
+    Err(anyhow!("No inline segments found in block"))
 }
 
 /// Collect all block IDs in document order by traversing child_order recursively.

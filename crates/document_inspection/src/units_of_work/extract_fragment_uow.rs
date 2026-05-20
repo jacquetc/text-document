@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Root, Table, TableCell};
+use common::entities::{Block, Document, Frame, List, Root, Table, TableCell};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]
@@ -39,6 +39,10 @@ impl QueryUnitOfWork for ExtractFragmentUnitOfWork {
         self.transaction.take().unwrap().end_read_transaction()?;
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 #[macros::uow_action(entity = "Root", action = "GetRO")]
@@ -48,7 +52,6 @@ impl QueryUnitOfWork for ExtractFragmentUnitOfWork {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]

@@ -2,10 +2,11 @@
 use crate::ExportHtmlDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::{
-    Alignment, Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table,
-    TableCell, TextDirection,
+    Alignment, Block, Document, Frame, List, ListStyle, Root, Table, TableCell, TextDirection,
 };
+use common::format_runs::InlineContent;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
 
@@ -22,7 +23,6 @@ pub trait ExportHtmlUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
@@ -225,12 +225,12 @@ impl ExportHtmlUseCase {
 
             // --- Code block ---
             if block.fmt_is_code_block == Some(true) {
-                let element_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::Elements,
-                )?;
-                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+                let block_text = block_content_via_store(block, &uow.store());
+                let elements = common::format_runs_query::inline_segments_for_block(
+                    &uow.store(),
+                    block.id,
+                    &block_text,
+                );
 
                 // Concatenate raw text without inline formatting
                 let mut raw_text = String::new();
@@ -453,13 +453,12 @@ impl ExportHtmlUseCase {
         uow: &dyn ExportHtmlUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
-
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        let block_text = block_content_via_store(block, &uow.store());
+        let elements = common::format_runs_query::inline_segments_for_block(
+            &uow.store(),
+            block.id,
+            &block_text,
+        );
 
         let mut html = String::new();
 

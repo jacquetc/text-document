@@ -2,6 +2,7 @@ use crate::CreateListDto;
 use crate::CreateListResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::block_char_length;
 use common::direct_access::block::block_repository::BlockRelationshipField;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
@@ -104,9 +105,10 @@ fn execute_create_list(
     let created_list = uow.create_list(&list, doc_id, -1)?;
 
     // Find all blocks in range [sel_start, sel_end] and assign the list relationship
+    let store = uow.store();
     for block in &blocks {
         let block_start = block.document_position;
-        let block_end = block_start + block.text_length;
+        let block_end = block_start + block_char_length(block, &store);
         // A block is in range if it overlaps with [sel_start, sel_end]
         if block_end >= sel_start && block_start <= sel_end {
             uow.set_block_relationship(

@@ -2,6 +2,7 @@
 use crate::ExportPlainTextDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
+use common::database::rope_helpers::{block_content_via_store, rope_flat_text_if_simple};
 use common::entities::{Block, Document, Frame, Root};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 
@@ -50,7 +51,19 @@ impl ExportPlainTextUseCase {
             &common::direct_access::document::DocumentRelationshipField::Frames,
         )?;
 
-        // Step 3: Collect all block plain_text from all frames
+        let store = uow.store();
+
+        // Fast path: flat single-frame document with no tables has its
+        // entire plain-text representation already laid out in rope
+        // byte order. One allocation replaces the per-block walk.
+        if let Some(plain_text) = rope_flat_text_if_simple(&store, frame_ids.len()) {
+            uow.end_transaction()?;
+            return Ok(ExportPlainTextDto { plain_text });
+        }
+
+        // Slow path: tables or multi-frame documents require the
+        // per-frame, per-block traversal because cell content lives in
+        // separate byte ranges later in the rope (plan §1.6).
         let mut all_plain_texts: Vec<String> = Vec::new();
 
         for frame_id in &frame_ids {
@@ -70,7 +83,7 @@ impl ExportPlainTextUseCase {
             blocks.sort_by_key(|b| b.document_position);
 
             for block in &blocks {
-                all_plain_texts.push(block.plain_text.clone());
+                all_plain_texts.push(block_content_via_store(block, &store));
             }
         }
 

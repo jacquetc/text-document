@@ -38,7 +38,7 @@ pub fn can_redo(ctx: &AppContext, stack_id: Option<u64>) -> bool {
 pub fn begin_composite(ctx: &AppContext, stack_id: Option<u64>) {
     let mut undo_redo_manager = ctx.undo_redo_manager.lock().unwrap();
     undo_redo_manager.set_event_hub(&ctx.event_hub);
-    undo_redo_manager.begin_composite(stack_id);
+    let _ = undo_redo_manager.begin_composite(stack_id);
 }
 
 /// Ends the current composite command group and adds it to the specified stack.

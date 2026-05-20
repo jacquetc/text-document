@@ -8,9 +8,9 @@ use document_editing::{
 };
 
 use test_harness::{
-    FrameRelationshipField, block_controller, export_text, frame_controller, get_all_block_ids,
-    get_document_stats, get_sorted_cells, get_table_ids, setup_with_text, table_cell_controller,
-    table_controller,
+    FrameRelationshipField, block_controller, block_text_dto, export_text, frame_controller,
+    get_all_block_ids, get_document_stats, get_sorted_cells, get_table_ids, setup_with_text,
+    table_cell_controller, table_controller,
 };
 
 // ─── InsertTable tests ──────────────────────────────────────────
@@ -109,10 +109,16 @@ fn test_insert_table_mid_document() -> Result<()> {
     all_blocks.sort_by_key(|b| b.document_position);
 
     // "Hello" block at position 0, then 4 table cell blocks, then "World" block shifted
-    let hello_block = all_blocks.iter().find(|b| b.plain_text == "Hello").unwrap();
+    let hello_block = all_blocks
+        .iter()
+        .find(|b| block_text_dto(&db, b) == "Hello")
+        .unwrap();
     assert_eq!(hello_block.document_position, 0);
 
-    let world_block = all_blocks.iter().find(|b| b.plain_text == "World").unwrap();
+    let world_block = all_blocks
+        .iter()
+        .find(|b| block_text_dto(&db, b) == "World")
+        .unwrap();
     // Original position was 6, shifted by 4 (2x2 table cells)
     assert_eq!(world_block.document_position, 10);
 
@@ -983,7 +989,7 @@ fn test_split_unmerged_cell_fails() -> Result<()> {
     let cell_id = cells[0].id as i64;
 
     // Try to split a 1x1 cell into 1x1 — should fail
-    let result = document_editing_controller::split_table_cell(
+    let err = document_editing_controller::split_table_cell(
         &db,
         &hub,
         &mut urm,
@@ -993,9 +999,12 @@ fn test_split_unmerged_cell_fails() -> Result<()> {
             split_rows: 1,
             split_columns: 1,
         },
+    )
+    .expect_err("splitting an unmerged (1x1) cell must error");
+    assert!(
+        err.to_string().contains("Nothing to split"),
+        "unexpected error: {err}"
     );
-
-    assert!(result.is_err());
 
     Ok(())
 }

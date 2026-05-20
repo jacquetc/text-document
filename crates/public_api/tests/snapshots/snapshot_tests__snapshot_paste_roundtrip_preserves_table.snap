@@ -1,0 +1,9 @@
+---
+source: crates/public_api/tests/snapshot_tests.rs
+expression: shape
+---
+[
+    "Block(Before)",
+    "Table(2x2, cells=4)",
+    "Block(After)",
+]

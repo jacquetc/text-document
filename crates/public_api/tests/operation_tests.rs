@@ -52,8 +52,14 @@ fn markdown_import_progress() {
     let op = doc
         .set_markdown("# Title\n\nParagraph 1\n\nParagraph 2")
         .unwrap();
-    // Progress may or may not be available depending on timing
-    let _progress = op.progress();
+    // Progress is Some(..) only if the op is still running; in either case
+    // the reported percentage must be in [0.0, 100.0].
+    if let Some((percent, _message)) = op.progress() {
+        assert!(
+            (0.0..=100.0).contains(&percent),
+            "progress percentage out of range: {percent}"
+        );
+    }
     op.wait().unwrap();
 }
 

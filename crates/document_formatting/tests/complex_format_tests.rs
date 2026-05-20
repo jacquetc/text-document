@@ -4,7 +4,7 @@
 extern crate text_document_formatting as document_formatting;
 
 use anyhow::Result;
-use common::entities::InlineContent;
+use common::format_runs::InlineContent;
 
 use document_formatting::document_formatting_controller;
 use document_formatting::{
@@ -13,10 +13,9 @@ use document_formatting::{
 };
 
 use test_harness::{
-    BlockRelationshipField, block_controller, create_list, export_text, frame_controller,
-    get_all_block_ids, get_block_ids, get_frame_id, get_sorted_cells, inline_element_controller,
-    insert_frame, insert_image, insert_table, list_controller, setup_with_text,
-    table_cell_controller, table_controller,
+    block_controller, create_list, export_text, frame_controller, get_all_block_ids, get_block_ids,
+    get_frame_id, get_sorted_cells, insert_frame, insert_image, insert_table, list_controller,
+    setup_with_text, table_cell_controller, table_controller,
 };
 
 #[test]
@@ -88,10 +87,8 @@ fn test_mixed_list_block_and_text_formatting() -> Result<()> {
     assert_eq!(list.suffix, ".");
 
     for (i, bid) in block_ids.iter().enumerate().take(4).skip(1) {
-        let elem_ids =
-            block_controller::get_relationship(&db, bid, &BlockRelationshipField::Elements)?;
-        for eid in &elem_ids {
-            let elem = inline_element_controller::get(&db, eid)?.unwrap();
+        let elements = test_harness::synth_block_elements(&db, *bid)?;
+        for elem in &elements {
             if let InlineContent::Text(ref t) = elem.content
                 && !t.is_empty()
             {
@@ -284,14 +281,8 @@ fn test_mixed_full_document_formatting_undo_chain() -> Result<()> {
     );
     urm.undo(None)?;
     urm.undo(None)?;
-    let title_elems =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
-    assert_eq!(
-        inline_element_controller::get(&db, &title_elems[0])?
-            .unwrap()
-            .fmt_font_bold,
-        None
-    );
+    let title_elems = test_harness::synth_block_elements(&db, block_ids[0])?;
+    assert_eq!(title_elems[0].fmt_font_bold, None);
     urm.undo(None)?;
     assert_eq!(
         block_controller::get(&db, &block_ids[0])?
@@ -431,12 +422,10 @@ fn test_mixed_text_format_with_image_and_list() -> Result<()> {
     )?;
 
     let block_ids = get_block_ids(&db)?;
-    let elem_ids =
-        block_controller::get_relationship(&db, &block_ids[0], &BlockRelationshipField::Elements)?;
+    let elements = test_harness::synth_block_elements(&db, block_ids[0])?;
     let mut text_bold_count = 0;
     let mut image_bold = false;
-    for eid in &elem_ids {
-        let elem = inline_element_controller::get(&db, eid)?.unwrap();
+    for elem in &elements {
         if elem.fmt_font_bold == Some(true) {
             match &elem.content {
                 InlineContent::Text(_) => text_bold_count += 1,
@@ -469,10 +458,14 @@ fn test_format_blocks_across_multiple_frames() -> Result<()> {
 
     let mut min_pos = i64::MAX;
     let mut max_end = 0;
+    let store = db.get_store();
     for bid in &all_block_ids {
         let b = block_controller::get(&db, bid)?.unwrap();
         min_pos = min_pos.min(b.document_position);
-        max_end = max_end.max(b.document_position + b.text_length);
+        let entity: common::entities::Block = b.clone().into();
+        max_end = max_end.max(
+            b.document_position + common::database::rope_helpers::block_char_length(&entity, store),
+        );
     }
 
     document_formatting_controller::set_block_format(

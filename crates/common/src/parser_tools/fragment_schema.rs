@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::entities::*;
+use crate::format_runs::{InlineContent, InlineSegment};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FragmentData {
@@ -108,50 +109,25 @@ pub struct FragmentList {
 }
 
 impl FragmentElement {
-    pub fn from_entity(e: &InlineElement) -> Self {
+    pub fn from_segment(seg: &InlineSegment) -> Self {
         FragmentElement {
-            content: e.content.clone(),
-            fmt_font_family: e.fmt_font_family.clone(),
-            fmt_font_point_size: e.fmt_font_point_size,
-            fmt_font_weight: e.fmt_font_weight,
-            fmt_font_bold: e.fmt_font_bold,
-            fmt_font_italic: e.fmt_font_italic,
-            fmt_font_underline: e.fmt_font_underline,
-            fmt_font_overline: e.fmt_font_overline,
-            fmt_font_strikeout: e.fmt_font_strikeout,
-            fmt_letter_spacing: e.fmt_letter_spacing,
-            fmt_word_spacing: e.fmt_word_spacing,
-            fmt_anchor_href: e.fmt_anchor_href.clone(),
-            fmt_anchor_names: e.fmt_anchor_names.clone(),
-            fmt_is_anchor: e.fmt_is_anchor,
-            fmt_tooltip: e.fmt_tooltip.clone(),
-            fmt_underline_style: e.fmt_underline_style.clone(),
-            fmt_vertical_alignment: e.fmt_vertical_alignment.clone(),
-        }
-    }
-
-    pub fn to_entity(&self) -> InlineElement {
-        InlineElement {
-            id: 0,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            content: self.content.clone(),
-            fmt_font_family: self.fmt_font_family.clone(),
-            fmt_font_point_size: self.fmt_font_point_size,
-            fmt_font_weight: self.fmt_font_weight,
-            fmt_font_bold: self.fmt_font_bold,
-            fmt_font_italic: self.fmt_font_italic,
-            fmt_font_underline: self.fmt_font_underline,
-            fmt_font_overline: self.fmt_font_overline,
-            fmt_font_strikeout: self.fmt_font_strikeout,
-            fmt_letter_spacing: self.fmt_letter_spacing,
-            fmt_word_spacing: self.fmt_word_spacing,
-            fmt_anchor_href: self.fmt_anchor_href.clone(),
-            fmt_anchor_names: self.fmt_anchor_names.clone(),
-            fmt_is_anchor: self.fmt_is_anchor,
-            fmt_tooltip: self.fmt_tooltip.clone(),
-            fmt_underline_style: self.fmt_underline_style.clone(),
-            fmt_vertical_alignment: self.fmt_vertical_alignment.clone(),
+            content: seg.content.clone(),
+            fmt_font_family: seg.fmt_font_family.clone(),
+            fmt_font_point_size: seg.fmt_font_point_size,
+            fmt_font_weight: seg.fmt_font_weight,
+            fmt_font_bold: seg.fmt_font_bold,
+            fmt_font_italic: seg.fmt_font_italic,
+            fmt_font_underline: seg.fmt_font_underline,
+            fmt_font_overline: seg.fmt_font_overline,
+            fmt_font_strikeout: seg.fmt_font_strikeout,
+            fmt_letter_spacing: seg.fmt_letter_spacing,
+            fmt_word_spacing: seg.fmt_word_spacing,
+            fmt_anchor_href: seg.fmt_anchor_href.clone(),
+            fmt_anchor_names: seg.fmt_anchor_names.clone(),
+            fmt_is_anchor: seg.fmt_is_anchor,
+            fmt_tooltip: seg.fmt_tooltip.clone(),
+            fmt_underline_style: seg.fmt_underline_style.clone(),
+            fmt_vertical_alignment: seg.fmt_vertical_alignment.clone(),
         }
     }
 }
@@ -176,30 +152,6 @@ impl FragmentBlock {
             && self.background_color.is_none()
             && self.is_code_block.is_none()
             && self.code_language.is_none()
-    }
-
-    pub fn from_entity(block: &Block, elements: &[InlineElement], list: Option<&List>) -> Self {
-        FragmentBlock {
-            plain_text: block.plain_text.clone(),
-            elements: elements.iter().map(FragmentElement::from_entity).collect(),
-            heading_level: block.fmt_heading_level,
-            list: list.map(FragmentList::from_entity),
-            alignment: block.fmt_alignment.clone(),
-            indent: block.fmt_indent,
-            text_indent: block.fmt_text_indent,
-            marker: block.fmt_marker.clone(),
-            top_margin: block.fmt_top_margin,
-            bottom_margin: block.fmt_bottom_margin,
-            left_margin: block.fmt_left_margin,
-            right_margin: block.fmt_right_margin,
-            tab_positions: block.fmt_tab_positions.clone(),
-            line_height: block.fmt_line_height,
-            non_breakable_lines: block.fmt_non_breakable_lines,
-            direction: block.fmt_direction.clone(),
-            background_color: block.fmt_background_color.clone(),
-            is_code_block: block.fmt_is_code_block,
-            code_language: block.fmt_code_language.clone(),
-        }
     }
 }
 

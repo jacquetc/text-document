@@ -6,11 +6,12 @@ use crate::SplitTableCellDto;
 use crate::SplitTableCellResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{rope_insert_block_at, top_level_frame_end_byte};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::table_repository::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineElement, Root, Table, TableCell};
+use common::entities::{Block, Document, Frame, Root, Table, TableCell};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -33,7 +34,6 @@ pub trait SplitTableCellUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "Table", action = "Get")]
 #[macros::uow_action(entity = "Table", action = "GetRelationship")]
 #[macros::uow_action(entity = "TableCell", action = "Get")]
@@ -161,9 +161,13 @@ fn execute_split_table_cell(
     uow.update_table_cell(&updated_cell)?;
     all_cell_ids_result.push(cell.id as i64);
 
-    // Create new cells for remaining sub-cell positions
+    // Create new cells for remaining sub-cell positions, collecting
+    // their blocks so we can mirror them into the rope after the
+    // entity graph is in place.
+    let mut new_cell_blocks: Vec<Block> = Vec::with_capacity(sub_cells.len().saturating_sub(1));
     for &(r, c, rs, cs) in &sub_cells[1..] {
-        let (cell_frame_id, _created_block) = create_cell_frame(&mut *uow, doc_id, now)?;
+        let (cell_frame_id, created_block) = create_cell_frame(&mut *uow, doc_id, now)?;
+        new_cell_blocks.push(created_block);
 
         let new_cell = TableCell {
             id: 0,
@@ -181,6 +185,26 @@ fn execute_split_table_cell(
         };
         let created_cell = uow.create_table_cell(&new_cell, table_id, -1)?;
         all_cell_ids_result.push(created_cell.id as i64);
+    }
+
+    // Mirror the new cell blocks into the global rope. Place them at
+    // the end of the table's parent top-level frame (matching the
+    // convention from `insert_table_uc`). Each cell is empty so the
+    // text is `""`; `rope_insert_block_at` prepends a `\n` boundary.
+    {
+        let store = uow.store();
+        let parent_frame_id_opt = {
+            let frames = store.frames.read().unwrap();
+            let anchor = frames.values().find(|f| f.table == Some(table_id)).cloned();
+            anchor.and_then(|f| f.parent_frame)
+        };
+        if let Some(parent_frame_id) = parent_frame_id_opt {
+            let start_byte = top_level_frame_end_byte(&store, parent_frame_id);
+            for (next_byte, cell_block) in (start_byte..).zip(new_cell_blocks.iter()) {
+                // Newly-created cells are empty (`""`).
+                rope_insert_block_at(&store, next_byte, cell_block.id, "");
+            }
+        }
     }
 
     // Recalculate document_position for all cell blocks

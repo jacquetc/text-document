@@ -3,12 +3,13 @@ use crate::ImportMarkdownDto;
 use crate::ImportMarkdownResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
-use common::entities::{
-    Block, Document, Frame, FramePosition, InlineContent, InlineElement, List, Root, Table,
-    TableCell,
+use common::database::rope_helpers::{
+    rope_append_block, rope_append_table_anchor, rope_insert_block_boundary, rope_reset,
 };
+use common::entities::{Block, Document, Frame, FramePosition, List, Root, Table, TableCell};
+
 use common::long_operation::LongOperation;
-use common::parser_tools::content_parser::{ParsedElement, ParsedSpan, parse_markdown};
+use common::parser_tools::content_parser::{ParsedElement, format_runs_from_spans, parse_markdown};
 use common::parser_tools::list_grouper::ListGrouper;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::sync::Arc;
@@ -25,11 +26,11 @@ pub trait ImportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "Get", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Update", thread_safe = true)]
+#[macros::uow_action(entity = "Frame", action = "UpdateWithRelationships", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "Remove", thread_safe = true)]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "SetRelationship", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "Create", thread_safe = true)]
 #[macros::uow_action(entity = "TableCell", action = "Create", thread_safe = true)]
@@ -49,28 +50,6 @@ impl ImportMarkdownUseCase {
             uow_factory,
             dto: dto.clone(),
         }
-    }
-}
-
-fn create_inline_element_from_span(span: &ParsedSpan, is_code_block: bool) -> InlineElement {
-    InlineElement {
-        content: InlineContent::Text(span.text.clone()),
-        fmt_font_bold: if span.bold { Some(true) } else { None },
-        fmt_font_italic: if span.italic { Some(true) } else { None },
-        fmt_font_underline: if span.underline { Some(true) } else { None },
-        fmt_font_strikeout: if span.strikeout { Some(true) } else { None },
-        fmt_font_family: if span.code || is_code_block {
-            Some("monospace".to_string())
-        } else {
-            None
-        },
-        fmt_anchor_href: span.link_href.clone(),
-        fmt_is_anchor: if span.link_href.is_some() {
-            Some(true)
-        } else {
-            None
-        },
-        ..InlineElement::default()
     }
 }
 
@@ -122,7 +101,12 @@ fn import_parsed_elements(
     let new_frame = Frame::default();
     let created_frame = uow.create_frame(&new_frame, doc_id, -1)?;
 
-    // Step 4: Create blocks with inline elements
+    // Reset the rope+block_offsets before populating new content
+    // (importers replace the entire document). No-op under default
+    // backend.
+    rope_reset(&uow.store());
+
+    // Step 4: Create blocks with format runs and image anchors
     let total_elements = parsed_elements.len();
     let mut total_chars: i64 = 0;
     let mut total_block_count: i64 = 0;
@@ -140,6 +124,12 @@ fn import_parsed_elements(
     }];
     let mut current_bq_depth: u32 = 0;
     let mut list_grouper = ListGrouper::new();
+    // Tracks whether at least one main-flow block has been appended
+    // to the rope. Used to decide when to emit an inter-block `\n`
+    // boundary (between blocks, not before the first). Table-cell
+    // blocks are NOT counted — they live in separate rope ranges
+    // per plan §1.6 and are deferred to step 5.5.
+    let mut emitted_any_main_block = false;
 
     for (i, parsed_element) in parsed_elements.iter().enumerate() {
         if cancel_flag.load(Ordering::Relaxed) {
@@ -185,16 +175,13 @@ fn import_parsed_elements(
                     list_grouper.reset();
                 }
 
-                // Build plain text from spans
-                let plain_text: String =
-                    parsed_block.spans.iter().map(|s| s.text.as_str()).collect();
+                let (plain_text, format_runs) =
+                    format_runs_from_spans(&parsed_block.spans, parsed_block.is_code_block);
                 let line_len = plain_text.chars().count() as i64;
 
                 // Create Block in the current (possibly blockquote) frame
                 let current_frame_id = frame_stack.last().unwrap().frame_id;
                 let block = Block {
-                    plain_text,
-                    text_length: line_len,
                     document_position,
                     fmt_heading_level: parsed_block.heading_level,
                     fmt_is_code_block: if parsed_block.is_code_block {
@@ -208,10 +195,22 @@ fn import_parsed_elements(
 
                 let created_block = uow.create_block(&block, current_frame_id, -1)?;
 
-                // Create inline elements from spans
-                for span in &parsed_block.spans {
-                    let element = create_inline_element_from_span(span, parsed_block.is_code_block);
-                    uow.create_inline_element(&element, created_block.id, -1)?;
+                // Insert an inter-block `\n` into the global rope
+                // before every block after the first.
+                if emitted_any_main_block {
+                    rope_insert_block_boundary(&uow.store());
+                }
+                rope_append_block(&uow.store(), created_block.id, &plain_text);
+                emitted_any_main_block = true;
+
+                {
+                    let store = uow.store();
+                    let mut runs_map = store.format_runs.write().unwrap();
+                    if !format_runs.is_empty() {
+                        runs_map.insert(created_block.id, format_runs);
+                    } else {
+                        runs_map.remove(&created_block.id);
+                    }
                 }
 
                 // Handle list items
@@ -275,44 +274,48 @@ fn import_parsed_elements(
                 };
                 let created_table = uow.create_table(&table, doc_id, -1)?;
 
+                // 1b. Mirror the table-anchor sentinel into the global
+                // rope. Appended at the end (the importer processes
+                // elements linearly).
+                rope_append_table_anchor(&uow.store(), created_table.id);
+
                 // 2. Create cell frames with content + TableCell entities
                 let current_frame_id = frame_stack.last().unwrap().frame_id;
                 let total_cells = num_rows * num_cols;
                 let mut cell_count: i64 = 0;
+                let mut created_cell_frame_ids: Vec<common::types::EntityId> = Vec::new();
 
                 for (r, row) in parsed_table.rows.iter().enumerate() {
                     for (c, cell) in row.iter().enumerate() {
                         // Create cell frame
                         let cell_frame = Frame::default();
                         let created_cell_frame = uow.create_frame(&cell_frame, doc_id, -1)?;
+                        created_cell_frame_ids.push(created_cell_frame.id);
 
-                        // Build plain text from spans
-                        let plain_text: String =
-                            cell.spans.iter().map(|s| s.text.as_str()).collect();
-                        let text_length = plain_text.chars().count() as i64;
+                        let (plain_text, format_runs) = format_runs_from_spans(&cell.spans, false);
 
                         // Create block in cell frame
                         let block = Block {
-                            plain_text,
-                            text_length,
                             document_position,
                             ..Block::default()
                         };
                         let created_block = uow.create_block(&block, created_cell_frame.id, -1)?;
 
-                        // Create inline elements from spans
-                        if cell.spans.is_empty() || cell.spans.iter().all(|s| s.text.is_empty()) {
-                            let elem = InlineElement {
-                                content: InlineContent::Empty,
-                                ..InlineElement::default()
-                            };
-                            uow.create_inline_element(&elem, created_block.id, -1)?;
-                        } else {
-                            for span in &cell.spans {
-                                let element = create_inline_element_from_span(span, false);
-                                uow.create_inline_element(&element, created_block.id, -1)?;
+                        {
+                            let store = uow.store();
+                            let mut runs_map = store.format_runs.write().unwrap();
+                            if !format_runs.is_empty() {
+                                runs_map.insert(created_block.id, format_runs);
+                            } else {
+                                runs_map.remove(&created_block.id);
                             }
                         }
+
+                        // Mirror the cell block into the global rope:
+                        // insert a `\n` boundary, then the cell's
+                        // content.
+                        rope_insert_block_boundary(&uow.store());
+                        rope_append_block(&uow.store(), created_block.id, &plain_text);
 
                         // Update cell frame's child_order
                         let mut updated_cell_frame = created_cell_frame.clone();
@@ -330,6 +333,7 @@ fn import_parsed_elements(
                         };
                         uow.create_table_cell(&table_cell, created_table.id, -1)?;
 
+                        let text_length = plain_text.chars().count() as i64;
                         total_chars += text_length;
                         total_block_count += 1;
                         cell_count += 1;
@@ -348,12 +352,37 @@ fn import_parsed_elements(
                 };
                 let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
 
+                // Backfill each cell frame's `parent_frame` to point at
+                // the anchor frame. Cell frames are created before the
+                // anchor (we don't know the anchor id yet), so this
+                // can't be set at creation time. Without this, walking
+                // up from a cell to find its containing table fails —
+                // breaking `insert_table_uc`'s "is the cursor inside an
+                // existing table?" check.
+                for cell_frame_id in &created_cell_frame_ids {
+                    if let Some(cf) = uow.get_frame(cell_frame_id)? {
+                        let mut updated = cf;
+                        updated.parent_frame = Some(created_anchor.id);
+                        // `update_frame` is scalar-only and preserves
+                        // the existing parent_frame to guard against
+                        // stale-entity writes; use the relationship-
+                        // aware variant so this write actually lands.
+                        uow.update_frame_with_relationships(&updated)?;
+                    }
+                }
+
                 // Add anchor to parent's child_order (negative = frame reference)
                 frame_stack
                     .last_mut()
                     .unwrap()
                     .child_order
                     .push(-(created_anchor.id as i64));
+
+                // Tables put content in the rope (the anchor sentinel
+                // + cell blocks) — any subsequent main-flow block must
+                // be preceded by a `\n` boundary, same as after a
+                // Block.
+                emitted_any_main_block = true;
 
                 // Separator after the table
                 if i < total_elements - 1 {
@@ -435,6 +464,8 @@ impl LongOperation for ImportMarkdownUseCase {
                     uow.rollback()?;
                     return Err(anyhow!("Operation was cancelled"));
                 }
+                // Plan §1.6 Frame.byte_range maintenance happens in
+                // Transaction::commit.
                 uow.commit()?;
 
                 progress_callback(common::long_operation::OperationProgress::new(

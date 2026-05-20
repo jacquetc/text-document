@@ -21,9 +21,6 @@ pub mod frame;
 // Block
 pub mod block;
 
-// InlineElement
-pub mod inline_element;
-
 // List
 pub mod list;
 
@@ -49,9 +46,6 @@ pub use frame::frame_controller;
 
 pub use block::block_controller;
 pub use block::dtos::*;
-
-pub use inline_element::dtos::*;
-pub use inline_element::inline_element_controller;
 
 pub use list::dtos::*;
 pub use list::list_controller;

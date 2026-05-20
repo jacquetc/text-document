@@ -7,9 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::QueryUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{
-    Block, Document, Frame, InlineElement, List, Resource, Root, Table, TableCell,
-};
+use common::entities::{Block, Document, Frame, List, Resource, Root, Table, TableCell};
 #[allow(unused_imports)]
 use common::types;
 #[allow(unused_imports)]
@@ -42,6 +40,10 @@ impl QueryUnitOfWork for ExportDocxUnitOfWork {
         transaction.take().unwrap().end_read_transaction()?;
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 #[macros::uow_action(entity = "Root", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Root", action = "GetRelationshipRO", thread_safe = true)]
@@ -51,7 +53,6 @@ impl QueryUnitOfWork for ExportDocxUnitOfWork {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO", thread_safe = true)]

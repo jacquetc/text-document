@@ -9,7 +9,6 @@
 
 use anyhow::Result;
 use common::database::db_context::DbContext;
-use common::entities::InlineContent;
 use common::event::EventHub;
 use common::types::EntityId;
 use common::undo_redo::UndoRedoManager;
@@ -20,17 +19,20 @@ pub use common::direct_access::block::block_repository::BlockRelationshipField;
 pub use common::direct_access::document::document_repository::DocumentRelationshipField;
 pub use common::direct_access::frame::frame_repository::FrameRelationshipField;
 pub use common::direct_access::root::root_repository::RootRelationshipField;
+pub use common::format_runs::InlineSegment;
+pub use common::format_runs::{FormatRun, ImageAnchor};
+pub use common::format_runs_query::{get_block_images, get_format_runs, inline_segments_for_block};
 
 pub use common::direct_access::table::table_repository::TableRelationshipField;
 pub use common::direct_access::table_cell::table_cell_repository::TableCellRelationshipField;
 pub use direct_access::block::block_controller;
-pub use direct_access::block::dtos::{BlockRelationshipDto, CreateBlockDto, UpdateBlockDto};
+pub use direct_access::block::dtos::{
+    BlockDto, BlockRelationshipDto, CreateBlockDto, UpdateBlockDto,
+};
 pub use direct_access::document::document_controller;
 pub use direct_access::document::dtos::CreateDocumentDto;
 pub use direct_access::frame::dtos::CreateFrameDto;
 pub use direct_access::frame::frame_controller;
-pub use direct_access::inline_element::dtos::{CreateInlineElementDto, UpdateInlineElementDto};
-pub use direct_access::inline_element::inline_element_controller;
 pub use direct_access::list::dtos::CreateListDto as CreateListEntityDto;
 pub use direct_access::list::list_controller;
 pub use direct_access::root::dtos::CreateRootDto;
@@ -65,9 +67,13 @@ pub fn setup() -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
 
 /// Create an in-memory database with a Root, Document, and imported text content.
 ///
-/// Splits the text on `\n` and creates one Block + InlineElement per line,
-/// mirroring what `document_io::import_plain_text` does but without depending
+/// Splits the text on `\n` and creates one Block per line carrying its
+/// `plain_text` field. `format_runs` and `block_images` stay empty —
+/// matches what `document_io::import_plain_text` does without depending
 /// on the `document_io` crate.
+///
+/// Does NOT populate the global rope — for tests that need rope state
+/// to be seeded, use `setup_with_imported_text` instead.
 ///
 /// Returns `(DbContext, Arc<EventHub>, UndoRedoManager)`.
 pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
@@ -87,6 +93,11 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
     for fid in &frame_ids {
         frame_controller::remove(&db_context, &event_hub, &mut undo_redo_manager, None, fid)?;
     }
+
+    // Frame removal cascades entities but does not clean up the rope-side
+    // offset index. Reset the rope so the new block we're about to create
+    // starts from a clean slate (no stale Block(b0) entry from initialize()).
+    common::database::rope_helpers::rope_reset(db_context.get_store());
 
     // Create a fresh frame
     let frame = frame_controller::create(
@@ -110,8 +121,6 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
         let line_len = line.chars().count() as i64;
 
         let block_dto = CreateBlockDto {
-            plain_text: line.to_string(),
-            text_length: line_len,
             document_position,
             ..Default::default()
         };
@@ -126,22 +135,15 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
             i as i32,
         )?;
 
+        // Seed the rope with the line's content so block_content_via_store
+        // returns the right value. Mirrors what document_io::import_plain_text
+        // does at the use-case layer.
+        if i > 0 {
+            common::database::rope_helpers::rope_insert_block_boundary(db_context.get_store());
+        }
+        common::database::rope_helpers::rope_append_block(db_context.get_store(), block.id, line);
+
         child_order.push(block.id as i64);
-
-        let elem_dto = CreateInlineElementDto {
-            content: InlineContent::Text(line.to_string()),
-            ..Default::default()
-        };
-
-        inline_element_controller::create(
-            &db_context,
-            &event_hub,
-            &mut undo_redo_manager,
-            None,
-            &elem_dto,
-            block.id,
-            0,
-        )?;
 
         total_chars += line_len;
         document_position += line_len;
@@ -181,6 +183,13 @@ pub fn setup_with_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedo
     Ok((db_context, event_hub, undo_redo_manager))
 }
 
+/// Alias for [`setup_with_text`]. The rope is the sole content
+/// source, so `setup_with_text` always seeds it. Kept for
+/// source-compatibility with existing tests.
+pub fn setup_with_imported_text(text: &str) -> Result<(DbContext, Arc<EventHub>, UndoRedoManager)> {
+    setup_with_text(text)
+}
+
 /// Export the current document as plain text by reading blocks and
 /// concatenating their `plain_text` fields with `\n` separators.
 pub fn export_text(db_context: &DbContext, _event_hub: &Arc<EventHub>) -> Result<String> {
@@ -192,12 +201,15 @@ pub fn export_text(db_context: &DbContext, _event_hub: &Arc<EventHub>) -> Result
         }
     }
     blocks.sort_by_key(|b| b.document_position);
-    let text = blocks
+    let store = db_context.get_store();
+    let parts: Vec<String> = blocks
         .iter()
-        .map(|b| b.plain_text.as_str())
-        .collect::<Vec<&str>>()
-        .join("\n");
-    Ok(text)
+        .map(|b| {
+            let entity: common::entities::Block = b.clone().into();
+            common::database::rope_helpers::block_content_via_store(&entity, store)
+        })
+        .collect();
+    Ok(parts.join("\n"))
 }
 
 /// Get the first frame's block IDs.
@@ -214,15 +226,106 @@ pub fn get_block_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
     frame_controller::get_relationship(db_context, &frame_id, &FrameRelationshipField::Blocks)
 }
 
-/// Get the element IDs for a given block.
+/// Get the synthesized element IDs for a given block.
+///
+/// After Phase 1.14 the `inline_elements` table no longer exists; the
+/// "elements" of a block are now synthesized on demand from its
+/// `(plain_text, format_runs, block_images)`. The returned IDs are
+/// stable derivations of `(block_id, byte_start)` produced by
+/// [`common::format_runs::synth_element_id`], so callers can
+/// round-trip an id through [`inline_element_controller::get`] (the
+/// shim below) to fetch the corresponding `InlineSegment` view.
 pub fn get_element_ids(db_context: &DbContext, block_id: &EntityId) -> Result<Vec<EntityId>> {
-    block_controller::get_relationship(db_context, block_id, &BlockRelationshipField::Elements)
+    use common::format_runs::{InlineContent, synth_element_id};
+
+    let segments = synth_block_elements(db_context, *block_id)?;
+    let mut ids = Vec::new();
+    let mut byte_offset: u32 = 0;
+
+    for seg in segments {
+        ids.push(synth_element_id(*block_id, byte_offset));
+        // Advance byte offset (Text contributes UTF-8 length, Image/Empty contributes 0)
+        if let InlineContent::Text(s) = &seg.content {
+            byte_offset += s.len() as u32;
+        }
+    }
+
+    Ok(ids)
 }
 
-/// Get the first block's element IDs.
+/// Get the first block's synthesized element IDs.
 pub fn get_first_block_element_ids(db_context: &DbContext) -> Result<Vec<EntityId>> {
     let block_ids = get_block_ids(db_context)?;
     get_element_ids(db_context, &block_ids[0])
+}
+
+/// Compatibility shim: the legacy `inline_element_controller::get`
+/// looked up an entity row in the `inline_elements` table by id. After
+/// Phase 1.14 the table is gone; this shim walks every block's
+/// synthesized inline-segment view to find the matching synthetic id. Used by
+/// tests that previously did `inline_element_controller::get(db, &id)`.
+pub mod inline_element_controller {
+    use super::*;
+    use common::format_runs::synth_element_id;
+
+    pub fn get(db_context: &DbContext, elem_id: &EntityId) -> Result<Option<InlineSegment>> {
+        for bid in get_all_block_ids(db_context)? {
+            let _block = block_controller::get(db_context, &bid)?
+                .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+            let segments = synth_block_elements(db_context, bid)?;
+
+            let mut byte_offset: u32 = 0;
+            for seg in segments {
+                let synth_id = synth_element_id(bid, byte_offset);
+                if synth_id == *elem_id {
+                    return Ok(Some(seg));
+                }
+                // Advance byte offset (Text contributes UTF-8 length, Image/Empty contributes 0)
+                if let common::format_runs::InlineContent::Text(s) = &seg.content {
+                    byte_offset += s.len() as u32;
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// Synthesize the inline-element view of a block from format_runs +
+/// block_images. Use this in tests that previously called
+/// `inline_element_controller::get` on each element id — after the
+/// writer migration, the inline_elements table no longer reflects
+/// images created by feature use cases.
+pub fn synth_block_elements(
+    db_context: &DbContext,
+    block_id: EntityId,
+) -> Result<Vec<InlineSegment>> {
+    let block_dto = block_controller::get(db_context, &block_id)?
+        .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
+    let block: common::entities::Block = block_dto.into();
+    let plain_text =
+        common::database::rope_helpers::block_content_via_store(&block, db_context.get_store());
+    Ok(inline_segments_for_block(
+        db_context.get_store(),
+        block_id,
+        &plain_text,
+    ))
+}
+
+/// Synthesized inline-segment view of the first block.
+pub fn synth_first_block_elements(db_context: &DbContext) -> Result<Vec<InlineSegment>> {
+    let block_ids = get_block_ids(db_context)?;
+    synth_block_elements(db_context, block_ids[0])
+}
+
+/// Image anchors stored on a block (post-Phase-1 source of truth for images).
+pub fn get_block_image_anchors(db_context: &DbContext, block_id: EntityId) -> Vec<ImageAnchor> {
+    get_block_images(db_context.get_store(), block_id)
+}
+
+/// Read a block's content from the rope via a `BlockDto`.
+pub fn block_text_dto(db_context: &DbContext, dto: &BlockDto) -> String {
+    let entity: common::entities::Block = dto.clone().into();
+    common::database::rope_helpers::block_content_via_store(&entity, db_context.get_store())
 }
 
 /// Get the first frame ID for the document.
@@ -370,20 +473,6 @@ pub fn insert_table(
                 0,
             )?;
 
-            // Create empty element in block
-            inline_element_controller::create(
-                db_context,
-                event_hub,
-                undo_redo_manager,
-                None,
-                &CreateInlineElementDto {
-                    content: InlineContent::Empty,
-                    ..Default::default()
-                },
-                block.id,
-                0,
-            )?;
-
             // Create table cell owned by table
             table_cell_controller::create(
                 db_context,
@@ -406,14 +495,22 @@ pub fn insert_table(
         }
     }
 
-    // Assign document_positions to cell blocks
-    let mut current_pos = position;
+    // Mirror cell-block creation into the global rope so subsequent
+    // `rope_replace_block_content` / `block_content_via_store` calls
+    // see them. The harness skips the anchor-frame/sentinel layout from
+    // `insert_table_uc`; cells are simply appended as empty blocks at
+    // the rope tail, which is enough for tests that only care about
+    // per-cell content addressability.
     for &bid in &cell_blocks {
+        common::database::rope_helpers::rope_append_empty_block(db_context.get_store(), bid);
+    }
+
+    // Assign document_positions to cell blocks
+    for (current_pos, &bid) in (position..).zip(cell_blocks.iter()) {
         let mut b = block_controller::get(db_context, &bid)?
             .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
         b.document_position = current_pos;
         block_controller::update(db_context, event_hub, undo_redo_manager, None, &b.into())?;
-        current_pos += 1;
     }
 
     // Shift existing blocks (not cell blocks) that are at or after position
@@ -473,11 +570,13 @@ pub fn create_list(
 
     // Find overlapping blocks and assign them to the list
     let all_bids = get_all_block_ids(db_context)?;
+    let store = db_context.get_store();
     for bid in &all_bids {
         let b = block_controller::get(db_context, bid)?
             .ok_or_else(|| anyhow::anyhow!("Block not found"))?;
         let block_start = b.document_position;
-        let block_end = block_start + b.text_length;
+        let block_end = block_start
+            + common::database::rope_helpers::block_char_length(&b.clone().into(), store);
         if block_end >= sel_start && block_start <= sel_end {
             block_controller::set_relationship(
                 db_context,
@@ -499,12 +598,17 @@ pub fn create_list(
 
 pub struct InsertImageResult {
     pub new_position: i64,
-    pub element_id: EntityId,
+    /// Byte offset of the anchored image inside the target block's
+    /// `plain_text`. Used by tests that want to assert the new image's
+    /// position; the legacy element-id no longer exists.
+    pub byte_offset: u32,
 }
 
-/// Insert an image inline element at `position` using entity controllers.
+/// Insert an image anchor at `position` by writing directly to the
+/// store's `block_images` table.
 ///
-/// Splits the text element at the insertion offset when needed.
+/// The image is a single logical character at `position`, contributing
+/// zero bytes to `plain_text`. Subsequent blocks shift by +1.
 pub fn insert_image(
     db_context: &DbContext,
     event_hub: &Arc<EventHub>,
@@ -514,7 +618,9 @@ pub fn insert_image(
     width: i64,
     height: i64,
 ) -> Result<InsertImageResult> {
-    // Find block containing position
+    use common::format_runs::{ImageAnchor, logical_offset_to_byte};
+
+    // Find block containing position.
     let all_bids = get_all_block_ids(db_context)?;
     let mut blocks = Vec::new();
     for bid in &all_bids {
@@ -525,105 +631,59 @@ pub fn insert_image(
     }
     blocks.sort_by_key(|b| b.document_position);
 
+    let store = db_context.get_store();
     let (target_block, offset) = blocks
         .iter()
         .find_map(|b| {
             let s = b.document_position;
-            let e = s + b.text_length;
+            let e = s + common::database::rope_helpers::block_char_length(&b.clone().into(), store);
             if position >= s && position <= e {
-                Some((b.clone(), (position - s) as usize))
+                Some((b.clone(), position - s))
             } else {
                 None
             }
         })
         .ok_or_else(|| anyhow::anyhow!("No block at position {}", position))?;
 
-    // Walk elements to find the one at offset
-    let elem_ids = block_controller::get_relationship(
-        db_context,
-        &target_block.id,
-        &BlockRelationshipField::Elements,
-    )?;
+    let store = db_context.get_store();
+    let images_at_block = store
+        .block_images
+        .read()
+        .unwrap()
+        .get(&target_block.id)
+        .cloned()
+        .unwrap_or_default();
+    let target_entity: common::entities::Block = target_block.clone().into();
+    let target_text =
+        common::database::rope_helpers::block_content_via_store(&target_entity, store);
+    let byte_offset = logical_offset_to_byte(&target_text, &images_at_block, offset);
 
-    let mut running = 0usize;
-    let mut insert_after_idx: i32 = -1;
-    for (idx, eid) in elem_ids.iter().enumerate() {
-        let elem = inline_element_controller::get(db_context, eid)?
-            .ok_or_else(|| anyhow::anyhow!("Element not found"))?;
-        let elen = match &elem.content {
-            InlineContent::Text(s) => s.chars().count(),
-            InlineContent::Image { .. } => 1,
-            InlineContent::Empty => 0,
-        };
-
-        if running + elen > offset && offset > running {
-            // Split text element
-            if let InlineContent::Text(ref text) = elem.content {
-                let chars: Vec<char> = text.chars().collect();
-                let local = offset - running;
-                let before: String = chars[..local].iter().collect();
-                let after: String = chars[local..].iter().collect();
-
-                // Shrink original to 'before'
-                let mut upd: UpdateInlineElementDto = elem.clone().into();
-                upd.content = InlineContent::Text(before);
-                inline_element_controller::update(
-                    db_context,
-                    event_hub,
-                    undo_redo_manager,
-                    None,
-                    &upd,
-                )?;
-
-                // Create 'after' element
-                let after_entity: common::entities::InlineElement = elem.clone().into();
-                let mut after_create = CreateInlineElementDto::from(after_entity);
-                after_create.content = InlineContent::Text(after);
-                inline_element_controller::create(
-                    db_context,
-                    event_hub,
-                    undo_redo_manager,
-                    None,
-                    &after_create,
-                    target_block.id,
-                    (idx as i32) + 1,
-                )?;
-            }
-            insert_after_idx = (idx as i32) + 1;
-            break;
-        }
-        running += elen;
-        if running >= offset {
-            insert_after_idx = (idx as i32) + 1;
-            break;
-        }
-    }
-    if insert_after_idx < 0 {
-        insert_after_idx = elem_ids.len() as i32;
-    }
-
-    // Create image element
-    let img = inline_element_controller::create(
-        db_context,
-        event_hub,
-        undo_redo_manager,
-        None,
-        &CreateInlineElementDto {
-            content: InlineContent::Image {
+    // Insert into block_images, keeping sort order by byte_offset (new
+    // image goes AFTER any anchors at the same byte position to match
+    // insert_image_uc's convention).
+    {
+        let mut images_map = store.block_images.write().unwrap();
+        let images = images_map.entry(target_block.id).or_default();
+        let insert_idx = images
+            .iter()
+            .position(|a| a.byte_offset > byte_offset)
+            .unwrap_or(images.len());
+        images.insert(
+            insert_idx,
+            ImageAnchor {
+                byte_offset,
                 name: image_name.to_string(),
                 width,
                 height,
                 quality: 100,
+                format: Default::default(),
             },
-            ..Default::default()
-        },
-        target_block.id,
-        insert_after_idx,
-    )?;
+        );
+    }
 
-    // Update block text_length (+1) and shift subsequent blocks
-    let mut upd_block = target_block.clone();
-    upd_block.text_length += 1;
+    // Update block text_length (+1 for the new image's logical position)
+    // and shift subsequent blocks.
+    let upd_block = target_block.clone();
     block_controller::update(
         db_context,
         event_hub,
@@ -649,7 +709,7 @@ pub fn insert_image(
     undo_redo_manager.clear_all_stacks();
     Ok(InsertImageResult {
         new_position: position + 1,
-        element_id: img.id,
+        byte_offset,
     })
 }
 
@@ -679,7 +739,7 @@ pub fn insert_frame(
         -1,
     )?;
 
-    let block = block_controller::create(
+    let _block = block_controller::create(
         db_context,
         event_hub,
         undo_redo_manager,
@@ -689,19 +749,6 @@ pub fn insert_frame(
             ..Default::default()
         },
         new_frame.id,
-        0,
-    )?;
-
-    inline_element_controller::create(
-        db_context,
-        event_hub,
-        undo_redo_manager,
-        None,
-        &CreateInlineElementDto {
-            content: InlineContent::Empty,
-            ..Default::default()
-        },
-        block.id,
         0,
     )?;
 

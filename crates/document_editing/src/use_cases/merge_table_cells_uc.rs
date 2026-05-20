@@ -5,11 +5,12 @@ use crate::MergeTableCellsDto;
 use crate::MergeTableCellsResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::rope_remove_block;
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
 use common::direct_access::table::table_repository::TableRelationshipField;
-use common::entities::{Block, Document, Frame, InlineElement, Root, Table, TableCell};
+use common::entities::{Block, Document, Frame, Root, Table, TableCell};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -31,7 +32,6 @@ pub trait MergeTableCellsUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
 #[macros::uow_action(entity = "Table", action = "Get")]
 #[macros::uow_action(entity = "Table", action = "GetRelationship")]
 #[macros::uow_action(entity = "TableCell", action = "GetMulti")]
@@ -161,13 +161,27 @@ fn execute_merge_table_cells(
         cells.iter().filter_map(|c| c.cell_frame).collect();
     let base_pos = compute_table_base_pos(&*uow, &existing_cell_frame_ids)?;
 
-    // Remove the other cells' frames (cascade removes blocks/elements) and the cell entities
+    // Remove the other cells' frames (cascade removes blocks/elements) and the cell entities.
+    // Before removal, collect the block IDs owned by those cell frames so we
+    // can strip their entries from the global rope.
     let remove_frame_ids: Vec<EntityId> = cells_to_remove
         .iter()
         .filter_map(|c| c.cell_frame)
         .collect();
+    let mut removed_cell_block_ids: Vec<EntityId> = Vec::new();
+    for fid in &remove_frame_ids {
+        let bids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
+        removed_cell_block_ids.extend(bids);
+    }
     for fid in &remove_frame_ids {
         uow.remove_frame(fid)?;
+    }
+    // Mirror the cell removal into the global rope.
+    {
+        let store = uow.store();
+        for bid in &removed_cell_block_ids {
+            rope_remove_block(&store, *bid);
+        }
     }
 
     let remove_cell_ids: Vec<EntityId> = cells_to_remove.iter().map(|c| c.id).collect();

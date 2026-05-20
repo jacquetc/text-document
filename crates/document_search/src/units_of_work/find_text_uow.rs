@@ -39,6 +39,10 @@ impl QueryUnitOfWork for FindTextUnitOfWork {
         self.transaction.take().unwrap().end_read_transaction()?;
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 #[macros::uow_action(entity = "Root", action = "GetRO")]

@@ -1,7 +1,7 @@
 //! Tests for the SyntaxHighlighter trait system.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use text_document::{
     Color, FlowElement, FlowElementSnapshot, FragmentContent, HighlightContext, HighlightFormat,
@@ -157,17 +157,21 @@ impl SyntaxHighlighter for CountingHighlighter {
     }
 }
 
-/// A highlighter that stores user data (a counter) on each block.
-struct UserDataHighlighter;
+/// A highlighter that stores user data (a counter) on each block and
+/// records the counter value it observed on entry, so tests can assert
+/// that user data persisted across rehighlights.
+struct UserDataHighlighter {
+    observations: Arc<Mutex<Vec<u32>>>,
+}
 
 impl SyntaxHighlighter for UserDataHighlighter {
     fn highlight_block(&self, _text: &str, ctx: &mut HighlightContext) {
-        // Increment a counter stored as user data.
         let count: u32 = ctx
             .user_data()
             .and_then(|d| d.downcast_ref::<u32>())
             .copied()
             .unwrap_or(0);
+        self.observations.lock().unwrap().push(count);
         ctx.set_user_data(Box::new(count + 1));
     }
 }
@@ -362,6 +366,7 @@ fn highlight_partial_splits_fragment() {
             format,
             offset,
             length,
+            ..
         } => {
             assert_eq!(text, "He");
             assert_eq!(*offset, 0);
@@ -376,6 +381,7 @@ fn highlight_partial_splits_fragment() {
             format,
             offset,
             length,
+            ..
         } => {
             assert_eq!(text, "llo w");
             assert_eq!(*offset, 2);
@@ -390,6 +396,7 @@ fn highlight_partial_splits_fragment() {
             format,
             offset,
             length,
+            ..
         } => {
             assert_eq!(text, "orld");
             assert_eq!(*offset, 7);
@@ -402,7 +409,7 @@ fn highlight_partial_splits_fragment() {
 
 #[test]
 fn highlight_across_fragment_boundary() {
-    // Create a document with two different inline elements (via formatting)
+    // Create a document with two different format runs (via formatting)
     let doc = new_doc("AABB");
     let c = doc.cursor();
     c.set_position(0, MoveMode::MoveAnchor);
@@ -641,7 +648,7 @@ fn highlight_invisible_to_entity_format() {
     let read_c = doc.cursor_at(0);
     let entity_fmt = read_c.char_format().unwrap();
     assert_eq!(entity_fmt.font_bold, Some(true));
-    // char_format reads from InlineElement, not from merged fragments
+    // char_format reads from format_runs, not from merged fragments;
     // italic should NOT be there (it's shadow only)
     assert_ne!(entity_fmt.font_italic, Some(true));
 }
@@ -1049,20 +1056,41 @@ fn cascade_terminates_at_document_end() {
 #[test]
 fn user_data_persists_across_rehighlights() {
     let doc = new_doc("Hello\nworld");
-    doc.set_syntax_highlighter(Some(Arc::new(UserDataHighlighter)));
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    doc.set_syntax_highlighter(Some(Arc::new(UserDataHighlighter {
+        observations: observations.clone(),
+    })));
 
-    // After initial rehighlight, each block's user data counter should be 1.
-    // Trigger rehighlight on block 0 by editing it.
+    // Initial highlight pass: no user data exists yet, so every block
+    // observed on entry must see 0.
+    let initial_obs = observations.lock().unwrap().clone();
+    assert!(
+        !initial_obs.is_empty(),
+        "highlighter should have been invoked on initial attach"
+    );
+    assert!(
+        initial_obs.iter().all(|&v| v == 0),
+        "initial pass must see no stored user data, got {:?}",
+        initial_obs
+    );
+    let initial_calls = initial_obs.len();
+
+    // Edit-triggered incremental rehighlight must read back the value
+    // stored on the previous pass. This is the actual persistence
+    // contract — full `rehighlight()` intentionally resets state.
     let c = doc.cursor_at(0);
     c.insert_text("X").unwrap();
-
-    // Block 0 was rehighlighted with existing user data (counter was 1),
-    // so it should now be 2. Block 1 should still have counter = 1
-    // (or be re-highlighted with counter going to 2 depending on cascade).
-    // The key assertion is that user data survived and was passed back in.
-    // We verify by doing another rehighlight and checking the counter grows.
-    doc.rehighlight();
-    // No crash, and the highlighter received and incremented user data.
+    let after_edit = observations.lock().unwrap().clone();
+    let new_obs: Vec<u32> = after_edit[initial_calls..].to_vec();
+    assert!(
+        !new_obs.is_empty(),
+        "edit should have re-invoked the highlighter"
+    );
+    assert!(
+        new_obs.iter().all(|&v| v >= 1),
+        "incremental rehighlight must read back the previously-stored counter (>= 1), got {:?}",
+        new_obs
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

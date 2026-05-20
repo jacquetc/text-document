@@ -1,0 +1,688 @@
+creation/document_new   time:   [18.686 µs 18.704 µs 18.722 µs]
+                        change: [−19.404% −19.143% −18.856%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low severe
+  4 (4.00%) low mild
+  1 (1.00%) high mild
+creation/document_new_with_text
+                        time:   [24.313 µs 24.348 µs 24.386 µs]
+                        change: [−22.610% −22.460% −22.306%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+
+insertion/insert_char_at_start/small/1para
+                        time:   [7.1162 µs 7.2874 µs 7.4231 µs]
+                        change: [−24.986% −22.771% −20.571%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_char_at_middle/small/1para
+                        time:   [7.3789 µs 7.5413 µs 7.6724 µs]
+                        change: [−24.101% −22.111% −19.881%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_char_at_end/small/1para
+                        time:   [7.8536 µs 8.1116 µs 8.3954 µs]
+                        change: [−21.261% −18.152% −14.491%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high mild
+insertion/insert_word/small/1para
+                        time:   [7.8197 µs 8.1903 µs 8.7087 µs]
+                        change: [−21.405% −18.207% −14.234%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high severe
+insertion/insert_paragraph/small/1para
+                        time:   [7.5790 µs 7.7514 µs 7.8815 µs]
+                        change: [−22.911% −20.557% −18.127%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_block/small/1para
+                        time:   [9.8388 µs 9.9799 µs 10.091 µs]
+                        change: [−30.814% −29.670% −28.463%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_char_at_start/medium/100para
+                        time:   [16.256 µs 16.669 µs 16.993 µs]
+                        change: [−47.317% −45.296% −43.048%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_char_at_middle/medium/100para
+                        time:   [25.831 µs 26.455 µs 26.990 µs]
+                        change: [−31.878% −29.162% −26.298%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+insertion/insert_char_at_end/medium/100para
+                        time:   [34.525 µs 35.296 µs 35.888 µs]
+                        change: [−24.091% −21.087% −17.899%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_word/medium/100para
+                        time:   [25.622 µs 26.116 µs 26.500 µs]
+                        change: [−32.686% −29.800% −27.013%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_paragraph/medium/100para
+                        time:   [25.527 µs 26.021 µs 26.402 µs]
+                        change: [−32.164% −29.465% −26.751%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_block/medium/100para
+                        time:   [52.331 µs 53.185 µs 53.865 µs]
+                        change: [−45.847% −44.410% −43.008%] (p = 0.00 < 0.05)
+                        Performance has improved.
+insertion/insert_char_at_start/large/1000para
+                        time:   [180.17 µs 181.21 µs 182.22 µs]
+                        change: [+8.3789% +9.7812% +11.154%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+insertion/insert_char_at_middle/large/1000para
+                        time:   [300.18 µs 301.21 µs 302.24 µs]
+                        change: [+30.939% +33.130% +35.078%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+insertion/insert_char_at_end/large/1000para
+                        time:   [485.40 µs 486.58 µs 487.79 µs]
+                        change: [+65.547% +66.784% +68.069%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+insertion/insert_word/large/1000para
+                        time:   [301.38 µs 302.20 µs 303.00 µs]
+                        change: [+36.601% +37.631% +38.670%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+insertion/insert_paragraph/large/1000para
+                        time:   [304.00 µs 319.41 µs 339.50 µs]
+                        change: [+38.045% +45.532% +53.232%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 5 outliers among 50 measurements (10.00%)
+  5 (10.00%) high severe
+insertion/insert_block/large/1000para
+                        time:   [534.11 µs 535.80 µs 537.53 µs]
+                        change: [−32.919% −32.411% −31.897%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+deletion/delete_char_forward/small/1para
+                        time:   [13.955 µs 14.046 µs 14.119 µs]
+                        change: [−10.975% −9.9232% −8.8714%] (p = 0.00 < 0.05)
+                        Performance has improved.
+deletion/delete_char_backward/small/1para
+                        time:   [12.286 µs 12.410 µs 12.504 µs]
+                        change: [−10.873% −9.2130% −7.4774%] (p = 0.00 < 0.05)
+                        Performance has improved.
+deletion/delete_selection/small/1para
+                        time:   [8.8089 µs 8.9088 µs 8.9892 µs]
+                        change: [−18.736% −16.955% −15.108%] (p = 0.00 < 0.05)
+                        Performance has improved.
+deletion/delete_char_forward/medium/100para
+                        time:   [177.50 µs 177.86 µs 178.19 µs]
+                        change: [−11.887% −10.943% −9.9980%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high mild
+deletion/delete_char_backward/medium/100para
+                        time:   [115.19 µs 115.74 µs 116.23 µs]
+                        change: [+8.1118% +9.8778% +11.651%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+deletion/delete_selection/medium/100para
+                        time:   [81.607 µs 81.965 µs 82.285 µs]
+                        change: [−21.731% −20.387% −19.056%] (p = 0.00 < 0.05)
+                        Performance has improved.
+deletion/delete_char_forward/large/1000para
+                        time:   [2.5994 ms 2.6272 ms 2.6581 ms]
+                        change: [+31.554% +33.859% +36.178%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 5 outliers among 50 measurements (10.00%)
+  5 (10.00%) high mild
+deletion/delete_char_backward/large/1000para
+                        time:   [1.8079 ms 1.8374 ms 1.8689 ms]
+                        change: [+79.484% +82.904% +86.128%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+deletion/delete_selection/large/1000para
+                        time:   [1.2719 ms 1.2832 ms 1.2957 ms]
+                        change: [+27.067% +28.374% +29.901%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 50 measurements (6.00%)
+  3 (6.00%) high mild
+
+cursor_movement/move_next_char/small/1para
+                        time:   [10.957 µs 11.000 µs 11.042 µs]
+                        change: [−21.885% −21.512% −21.151%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high mild
+cursor_movement/move_next_word/small/1para
+                        time:   [10.128 µs 10.153 µs 10.180 µs]
+                        change: [−18.260% −17.328% −16.559%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 4 outliers among 50 measurements (8.00%)
+  3 (6.00%) low mild
+  1 (2.00%) high mild
+cursor_movement/move_next_block/small/1para
+                        time:   [6.1159 µs 6.1397 µs 6.1618 µs]
+                        change: [−23.213% −22.723% −22.225%] (p = 0.00 < 0.05)
+                        Performance has improved.
+cursor_movement/move_to_end/small/1para
+                        time:   [6.2821 µs 6.3286 µs 6.3705 µs]
+                        change: [−29.278% −28.808% −28.279%] (p = 0.00 < 0.05)
+                        Performance has improved.
+cursor_movement/move_to_start/small/1para
+                        time:   [5.1883 µs 5.2087 µs 5.2318 µs]
+                        change: [−33.993% −32.658% −31.424%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+cursor_movement/select_word/small/1para
+                        time:   [2.7348 µs 2.7426 µs 2.7513 µs]
+                        change: [+9.5610% +10.071% +10.549%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 50 measurements (6.00%)
+  3 (6.00%) high mild
+cursor_movement/select_block/small/1para
+                        time:   [1.0968 µs 1.1014 µs 1.1060 µs]
+                        change: [+7.0545% +7.7162% +8.3462%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+cursor_movement/move_next_char/medium/100para
+                        time:   [183.95 µs 184.28 µs 184.63 µs]
+                        change: [−17.218% −16.738% −16.280%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) high mild
+  1 (2.00%) high severe
+cursor_movement/move_next_word/medium/100para
+                        time:   [154.39 µs 154.71 µs 155.07 µs]
+                        change: [−17.037% −16.527% −16.006%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high severe
+cursor_movement/move_next_block/medium/100para
+                        time:   [113.04 µs 113.39 µs 113.73 µs]
+                        change: [−22.945% −22.436% −21.922%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+cursor_movement/move_to_end/medium/100para
+                        time:   [139.05 µs 139.34 µs 139.70 µs]
+                        change: [−22.372% −21.851% −21.319%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 3 outliers among 50 measurements (6.00%)
+  3 (6.00%) high mild
+cursor_movement/move_to_start/medium/100para
+                        time:   [111.54 µs 111.73 µs 111.94 µs]
+                        change: [−23.276% −22.698% −22.132%] (p = 0.00 < 0.05)
+                        Performance has improved.
+cursor_movement/select_word/medium/100para
+                        time:   [39.959 µs 40.089 µs 40.229 µs]
+                        change: [+62.098% +62.964% +63.912%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+cursor_movement/select_block/medium/100para
+                        time:   [44.985 µs 45.060 µs 45.127 µs]
+                        change: [+60.882% +62.899% +64.899%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 6 outliers among 50 measurements (12.00%)
+  3 (6.00%) low severe
+  3 (6.00%) low mild
+cursor_movement/move_next_char/large/1000para
+                        time:   [2.4431 ms 2.4469 ms 2.4508 ms]
+                        change: [+18.818% +19.518% +20.208%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 50 measurements (6.00%)
+  3 (6.00%) high mild
+cursor_movement/move_next_word/large/1000para
+                        time:   [2.0649 ms 2.0688 ms 2.0728 ms]
+                        change: [+20.834% +21.637% +22.465%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) low mild
+cursor_movement/move_next_block/large/1000para
+                        time:   [1.4856 ms 1.4897 ms 1.4938 ms]
+                        change: [+6.5144% +7.4095% +8.2504%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+cursor_movement/move_to_end/large/1000para
+                        time:   [1.8498 ms 1.8555 ms 1.8640 ms]
+                        change: [+6.9945% +7.9650% +8.9237%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high severe
+cursor_movement/move_to_start/large/1000para
+                        time:   [1.4841 ms 1.4896 ms 1.4976 ms]
+                        change: [+6.4749% +7.4443% +8.3979%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 4 outliers among 50 measurements (8.00%)
+  1 (2.00%) low mild
+  2 (4.00%) high mild
+  1 (2.00%) high severe
+cursor_movement/select_word/large/1000para
+                        time:   [583.95 µs 585.25 µs 586.55 µs]
+                        change: [+149.10% +150.61% +152.13%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 4 outliers among 50 measurements (8.00%)
+  2 (4.00%) low mild
+  2 (4.00%) high mild
+cursor_movement/select_block/large/1000para
+                        time:   [337.92 µs 358.69 µs 375.80 µs]
+                        change: [+61.253% +79.310% +100.73%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+search/find_first/small/1para
+                        time:   [1.8254 µs 1.8348 µs 1.8459 µs]
+                        change: [+5.7790% +6.3740% +7.0722%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) high mild
+  1 (2.00%) high severe
+search/find_all/small/1para
+                        time:   [1.8649 µs 1.8715 µs 1.8774 µs]
+                        change: [+3.5365% +3.9661% +4.3473%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+search/find_regex/small/1para
+                        time:   [45.826 µs 45.888 µs 45.950 µs]
+                        change: [−0.7685% −0.0541% +0.4085%] (p = 0.89 > 0.05)
+                        No change in performance detected.
+search/find_all_case_insensitive/small/1para
+                        time:   [1.8820 µs 1.8911 µs 1.9009 µs]
+                        change: [+6.3539% +7.0155% +7.7220%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high mild
+search/find_first/medium/100para
+                        time:   [87.077 µs 87.392 µs 87.819 µs]
+                        change: [+3.4929% +4.0270% +4.5475%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 10 outliers among 50 measurements (20.00%)
+  1 (2.00%) low mild
+  1 (2.00%) high mild
+  8 (16.00%) high severe
+search/find_all/medium/100para
+                        time:   [86.084 µs 86.243 µs 86.437 µs]
+                        change: [+2.6274% +2.9551% +3.3020%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) low mild
+search/find_regex/medium/100para
+                        time:   [74.968 µs 75.145 µs 75.331 µs]
+                        change: [+0.8891% +1.7653% +2.4572%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+search/find_all_case_insensitive/medium/100para
+                        time:   [86.720 µs 86.881 µs 87.057 µs]
+                        change: [+2.5210% +2.8990% +3.2737%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+search/find_first/large/1000para
+                        time:   [923.94 µs 926.04 µs 928.45 µs]
+                        change: [+16.364% +16.909% +17.448%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 50 measurements (6.00%)
+  1 (2.00%) low mild
+  2 (4.00%) high severe
+search/find_all/large/1000para
+                        time:   [925.42 µs 927.67 µs 930.19 µs]
+                        change: [+15.652% +16.161% +16.701%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) low severe
+  1 (2.00%) low mild
+search/find_regex/large/1000para
+                        time:   [463.44 µs 464.42 µs 465.44 µs]
+                        change: [+38.623% +39.117% +39.594%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high mild
+search/find_all_case_insensitive/large/1000para
+                        time:   [927.36 µs 930.28 µs 933.08 µs]
+                        change: [+15.289% +15.717% +16.117%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+undo_redo/undo_single   time:   [96.595 µs 96.833 µs 97.077 µs]
+                        change: [+13.910% +14.351% +14.789%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+undo_redo/redo_single   time:   [105.69 µs 105.96 µs 106.25 µs]
+                        change: [+12.089% +13.300% +14.323%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+undo_redo/undo_chain_10 time:   [868.55 µs 870.31 µs 872.14 µs]
+                        change: [+30.970% +31.593% +32.165%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+formatting/insert_formatted_text
+                        time:   [14.571 µs 14.673 µs 14.772 µs]
+                        change: [−49.091% −48.753% −48.408%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+formatting/merge_char_format_bold
+                        time:   [27.560 µs 27.627 µs 27.702 µs]
+                        change: [−27.642% −27.120% −26.608%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 6 outliers among 100 measurements (6.00%)
+  6 (6.00%) high mild
+formatting/set_block_format_center
+                        time:   [37.019 µs 37.637 µs 38.668 µs]
+                        change: [+8.8078% +9.9516% +11.634%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+
+tables/insert_table_3x3 time:   [39.066 µs 39.190 µs 39.323 µs]
+                        change: [−24.147% −23.703% −23.220%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 7 outliers among 100 measurements (7.00%)
+  7 (7.00%) high mild
+tables/insert_table_10x10
+                        time:   [843.59 µs 845.79 µs 848.21 µs]
+                        change: [−39.664% −39.477% −39.287%] (p = 0.00 < 0.05)
+                        Performance has improved.
+tables/table_cell_access
+                        time:   [854.51 ns 859.40 ns 864.15 ns]
+                        change: [−37.421% −36.329% −35.287%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+tables/insert_table_row time:   [75.665 µs 75.876 µs 76.093 µs]
+                        change: [−29.900% −29.572% −29.276%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+tables/insert_table_column
+                        time:   [75.945 µs 76.121 µs 76.303 µs]
+                        change: [−29.290% −29.017% −28.719%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+
+lists/create_list       time:   [29.266 µs 29.521 µs 29.914 µs]
+                        change: [−17.719% −17.032% −16.202%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) high mild
+  4 (4.00%) high severe
+lists/insert_list       time:   [46.543 µs 46.736 µs 46.936 µs]
+                        change: [−46.050% −45.089% −44.361%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+editing_session/mixed_operations_30
+                        time:   [5.0629 ms 5.0716 ms 5.0805 ms]
+                        change: [+3.6927% +4.1628% +4.6848%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 30 measurements (10.00%)
+  3 (10.00%) high mild
+editing_session/mixed_operations_30_large
+                        time:   [80.061 ms 80.312 ms 80.543 ms]
+                        change: [+79.596% +80.446% +81.246%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+
+xl/set_plain_text_1mb   time:   [465.56 µs 466.40 µs 467.31 µs]
+                        change: [+7.5765% +8.2419% +8.8929%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 10 measurements (30.00%)
+  2 (20.00%) low mild
+  1 (10.00%) high mild
+xl/insert_char_at_end_of_1mb
+                        time:   [724.94 µs 726.86 µs 728.83 µs]
+                        change: [−53.423% −53.310% −53.199%] (p = 0.00 < 0.05)
+                        Performance has improved.
+xl/insert_char_at_mid_of_1mb
+                        time:   [497.94 µs 501.55 µs 503.86 µs]
+                        change: [−47.546% −47.128% −46.698%] (p = 0.00 < 0.05)
+                        Performance has improved.
+xl/insert_1kb_at_mid_of_1mb
+                        time:   [480.53 µs 483.52 µs 488.72 µs]
+                        change: [−48.159% −47.605% −47.000%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) low mild
+  1 (10.00%) high severe
+xl/undo_single_char_on_1mb
+                        time:   [1.6188 ms 1.6258 ms 1.6294 ms]
+                        change: [+3.4770% +4.2773% +4.9523%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) low mild
+xl/undo_redo_cycle_single_char_on_1mb
+                        time:   [3.5712 ms 3.5785 ms 3.5825 ms]
+                        change: [−9.0713% −8.6200% −8.2361%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low severe
+xl/find_all_100_matches_in_1mb
+                        time:   [5.6370 ms 5.6577 ms 5.6972 ms]
+                        change: [+1.6306% +2.3936% +3.1007%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+xl/set_bold_on_100kb_selection
+                        time:   [96.471 µs 99.629 µs 103.15 µs]
+                        change: [+144.87% +154.59% +164.98%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+plain_text_io/set_plain_text/small/1para
+                        time:   [10.561 µs 10.687 µs 10.785 µs]
+                        change: [−25.453% −24.254% −23.060%] (p = 0.00 < 0.05)
+                        Performance has improved.
+plain_text_io/to_plain_text/small/1para
+                        time:   [17.921 ns 18.014 ns 18.115 ns]
+                        change: [+10.457% +11.097% +11.874%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) high mild
+  1 (2.00%) high severe
+plain_text_io/set_plain_text/medium/100para
+                        time:   [326.11 µs 326.63 µs 327.19 µs]
+                        change: [−58.796% −58.561% −58.367%] (p = 0.00 < 0.05)
+                        Performance has improved.
+plain_text_io/to_plain_text/medium/100para
+                        time:   [145.53 ns 148.86 ns 152.78 ns]
+                        change: [−1.8513% +1.2327% +4.4820%] (p = 0.44 > 0.05)
+                        No change in performance detected.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+plain_text_io/set_plain_text/large/1000para
+                        time:   [27.772 ms 27.854 ms 27.936 ms]
+                        change: [−63.417% −63.222% −63.043%] (p = 0.00 < 0.05)
+                        Performance has improved.
+plain_text_io/to_plain_text/large/1000para
+                        time:   [1.2188 µs 1.2835 µs 1.3550 µs]
+                        change: [−3.4823% +1.6470% +7.5223%] (p = 0.56 > 0.05)
+                        No change in performance detected.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+
+markdown_io/set_markdown/small/1para
+                        time:   [58.035 ms 58.316 ms 58.586 ms]
+                        change: [+5.5491% +6.3808% +7.1128%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low severe
+  1 (3.33%) high mild
+markdown_io/to_markdown/small/1para
+                        time:   [1.2656 µs 1.2744 µs 1.2849 µs]
+                        change: [−11.396% −10.271% −9.3809%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high severe
+markdown_io/set_markdown/medium/100para
+                        time:   [57.931 ms 58.237 ms 58.538 ms]
+                        change: [+5.4591% +6.0924% +6.7644%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+markdown_io/to_markdown/medium/100para
+                        time:   [67.800 µs 67.999 µs 68.206 µs]
+                        change: [−6.6397% −5.8214% −5.2161%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+markdown_io/set_markdown/large/1000para
+                        time:   [59.550 ms 59.761 ms 59.927 ms]
+                        change: [−64.019% −63.854% −63.714%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+markdown_io/to_markdown/large/1000para
+                        time:   [789.80 µs 793.13 µs 796.23 µs]
+                        change: [+8.0444% +9.1671% +10.084%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+html_io/set_html/small/1para
+                        time:   [57.885 ms 58.137 ms 58.383 ms]
+                        change: [+4.9264% +5.7470% +6.4160%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low severe
+  1 (3.33%) low mild
+html_io/to_html/small/1para
+                        time:   [1.3586 µs 1.3658 µs 1.3743 µs]
+                        change: [−11.141% −9.7108% −8.6340%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) low mild
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+html_io/set_html/medium/100para
+                        time:   [57.630 ms 57.952 ms 58.289 ms]
+                        change: [−1.5433% −0.5490% +0.3583%] (p = 0.27 > 0.05)
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+html_io/to_html/medium/100para
+                        time:   [57.978 µs 58.142 µs 58.287 µs]
+                        change: [−11.114% −10.644% −10.170%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+html_io/set_html/large/1000para
+                        time:   [59.288 ms 59.513 ms 59.705 ms]
+                        change: [−50.573% −50.324% −50.053%] (p = 0.00 < 0.05)
+                        Performance has improved.
+html_io/to_html/large/1000para
+                        time:   [665.08 µs 666.87 µs 668.73 µs]
+                        change: [+2.6361% +3.1343% +3.6106%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+snapshot/snapshot_flow/small/1para
+                        time:   [2.3268 µs 2.4511 µs 2.6075 µs]
+                        change: [−2.9474% −0.5579% +2.1418%] (p = 0.74 > 0.05)
+                        No change in performance detected.
+Found 4 outliers among 50 measurements (8.00%)
+  4 (8.00%) high severe
+snapshot/snapshot_block_at_position/small/1para
+                        time:   [2.5576 µs 2.6630 µs 2.8350 µs]
+                        change: [+0.6189% +6.1919% +14.055%] (p = 0.07 > 0.05)
+                        No change in performance detected.
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high severe
+snapshot/flow_traversal/small/1para
+                        time:   [186.21 ns 188.11 ns 189.97 ns]
+                        change: [−16.586% −15.395% −14.216%] (p = 0.00 < 0.05)
+                        Performance has improved.
+snapshot/snapshot_flow/medium/100para
+                        time:   [211.46 µs 212.43 µs 213.42 µs]
+                        change: [−9.2510% −8.8674% −8.4951%] (p = 0.00 < 0.05)
+                        Performance has improved.
+snapshot/snapshot_block_at_position/medium/100para
+                        time:   [12.232 µs 12.260 µs 12.290 µs]
+                        change: [+10.847% +13.138% +15.424%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 7 outliers among 50 measurements (14.00%)
+  1 (2.00%) low mild
+  5 (10.00%) high mild
+  1 (2.00%) high severe
+snapshot/flow_traversal/medium/100para
+                        time:   [553.03 ns 555.14 ns 557.29 ns]
+                        change: [−8.9411% −8.4124% −7.8764%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) low mild
+snapshot/snapshot_flow/large/1000para
+                        time:   [3.0233 ms 3.0374 ms 3.0523 ms]
+                        change: [−4.1250% −3.1121% −1.8176%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 3 outliers among 50 measurements (6.00%)
+  2 (4.00%) high mild
+  1 (2.00%) high severe
+snapshot/snapshot_block_at_position/large/1000para
+                        time:   [144.47 µs 144.83 µs 145.22 µs]
+                        change: [+41.787% +43.839% +45.895%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+snapshot/flow_traversal/large/1000para
+                        time:   [3.6478 µs 3.6579 µs 3.6681 µs]
+                        change: [−6.0760% −5.7638% −5.4284%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+document_queries/stats/small/1para
+                        time:   [1.0033 µs 1.0068 µs 1.0104 µs]
+                        change: [−23.669% −23.302% −22.960%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 4 outliers among 50 measurements (8.00%)
+  1 (2.00%) low mild
+  2 (4.00%) high mild
+  1 (2.00%) high severe
+document_queries/block_at_position/small/1para
+                        time:   [846.66 ns 850.88 ns 855.55 ns]
+                        change: [+11.668% +12.291% +12.884%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+document_queries/text_at/small/1para
+                        time:   [1.5162 µs 1.5259 µs 1.5368 µs]
+                        change: [+18.596% +19.552% +20.637%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+document_queries/blocks/small/1para
+                        time:   [115.16 ns 118.05 ns 120.97 ns]
+                        change: [−42.580% −41.133% −39.534%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) low mild
+document_queries/blocks_in_range/small/1para
+                        time:   [269.02 ns 272.43 ns 276.20 ns]
+                        change: [+35.072% +37.288% +39.706%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+document_queries/stats/medium/100para
+                        time:   [27.005 µs 27.058 µs 27.113 µs]
+                        change: [−27.342% −27.055% −26.765%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 4 outliers among 50 measurements (8.00%)
+  4 (8.00%) high mild
+document_queries/block_at_position/medium/100para
+                        time:   [14.585 µs 14.636 µs 14.689 µs]
+                        change: [+84.375% +85.200% +86.081%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+document_queries/text_at/medium/100para
+                        time:   [24.215 µs 24.267 µs 24.325 µs]
+                        change: [+38.290% +39.132% +39.991%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 3 outliers among 50 measurements (6.00%)
+  3 (6.00%) high mild
+document_queries/blocks/medium/100para
+                        time:   [5.6446 µs 5.7113 µs 5.7787 µs]
+                        change: [−58.917% −58.466% −58.009%] (p = 0.00 < 0.05)
+                        Performance has improved.
+document_queries/blocks_in_range/medium/100para
+                        time:   [15.786 µs 15.840 µs 15.898 µs]
+                        change: [+15.306% +16.125% +16.899%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+document_queries/stats/large/1000para
+                        time:   [367.05 µs 367.61 µs 368.25 µs]
+                        change: [+6.7222% +7.2168% +7.7054%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 4 outliers among 50 measurements (8.00%)
+  2 (4.00%) low mild
+  2 (4.00%) high mild
+document_queries/block_at_position/large/1000para
+                        time:   [201.44 µs 202.08 µs 202.72 µs]
+                        change: [+154.41% +156.17% +157.95%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+document_queries/text_at/large/1000para
+                        time:   [370.76 µs 371.76 µs 372.73 µs]
+                        change: [+142.34% +143.90% +145.52%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) low mild
+document_queries/blocks/large/1000para
+                        time:   [95.835 µs 96.265 µs 96.722 µs]
+                        change: [−51.362% −51.085% −50.816%] (p = 0.00 < 0.05)
+                        Performance has improved.
+document_queries/blocks_in_range/large/1000para
+                        time:   [326.28 µs 327.16 µs 328.07 µs]
+                        change: [+68.363% +69.158% +69.925%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+

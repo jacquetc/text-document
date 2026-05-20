@@ -186,3 +186,4 @@ tested_project
 .aider*
 .codeium/
 .continue/
+bench/results/run-log-*.txt

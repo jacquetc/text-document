@@ -73,6 +73,10 @@ impl CommandUnitOfWork for SetListFormatUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 #[macros::uow_action(entity = "Root", action = "Get")]

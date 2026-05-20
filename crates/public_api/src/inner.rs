@@ -28,6 +28,7 @@ use anyhow::Result;
 use frontend::AppContext;
 use frontend::EventHubClient;
 use frontend::common::types::EntityId;
+use frontend::event_hub_client::SubscriptionToken;
 
 use crate::DocumentEvent;
 use crate::highlight::HighlightData;
@@ -95,6 +96,10 @@ pub(crate) struct TextDocumentInner {
 
     // Syntax highlighting state (shadow formatting layer).
     pub highlight: Option<HighlightData>,
+
+    // Holds SubscriptionTokens for LongOperation event bridges. Dropping a
+    // token unsubscribes the callback, so these must outlive the document.
+    pub long_op_subscriptions: Vec<SubscriptionToken>,
 }
 
 impl TextDocumentInner {
@@ -311,24 +316,22 @@ impl TextDocumentInner {
         Ok(self.plain_text_cache.as_deref().unwrap())
     }
 
-    /// Initialize the document: create Root → Document → Frame → Block → InlineElement.
+    /// Initialize the document: create Root → Document → Frame → Block.
     pub fn initialize(ctx: AppContext) -> Result<Self> {
         use frontend::block::dtos::CreateBlockDto;
         use frontend::commands::{
-            block_commands, document_commands, frame_commands, inline_element_commands,
-            root_commands, undo_redo_commands,
+            block_commands, document_commands, frame_commands, root_commands, undo_redo_commands,
         };
         use frontend::document::dtos::CreateDocumentDto;
         use frontend::frame::dtos::CreateFrameDto;
-        use frontend::inline_element::dtos::CreateInlineElementDto;
         use frontend::root::dtos::CreateRootDto;
 
         let event_client = EventHubClient::new(&ctx.event_hub);
-        event_client.start(ctx.quit_signal.clone());
+        event_client.start(ctx.shutdown_rx.clone());
 
         let stack_id = undo_redo_commands::create_new_stack(&ctx);
 
-        // Create entity tree: Root → Document → Frame → Block → InlineElement
+        // Create entity tree: Root → Document → Frame → Block
         let root = root_commands::create_orphan_root(&ctx, &CreateRootDto::default())?;
         let doc = document_commands::create_document(
             &ctx,
@@ -351,13 +354,15 @@ impl TextDocumentInner {
             frame.id,
             -1,
         )?;
-        let _element = inline_element_commands::create_inline_element(
-            &ctx,
-            Some(stack_id),
-            &CreateInlineElementDto::default(),
+
+        // Register the initial empty block in `block_offsets` so
+        // subsequent rope mirrors (insert_text, insert_fragment, etc.)
+        // can resolve its byte position. The generic create_block CRUD
+        // path doesn't touch the rope.
+        common::database::rope_helpers::rope_append_empty_block(
+            ctx.db_context.get_store(),
             block.id,
-            -1,
-        )?;
+        );
 
         // Fix child_order on the main frame — the generic create_block path
         // adds the block to the blocks junction table but does not update
@@ -386,6 +391,7 @@ impl TextDocumentInner {
             last_block_count: 1, // new document starts with one block
             last_child_order: vec![block.id as i64],
             highlight: None,
+            long_op_subscriptions: Vec::new(),
         })
     }
 }
@@ -418,5 +424,41 @@ pub(crate) fn adjust_offset(offset: usize, edit_pos: usize, removed: usize, adde
         edit_pos + added
     } else {
         offset - removed + added
+    }
+}
+
+/// Refresh `BlockDto::document_position` in-place using the rope-derived
+/// position from `BlockOffsetIndex`. No-op for documents containing
+/// tables or unmirrored sub-frames — for those, the stored field
+/// (maintained by use-case-side position-refresh loops, plus catch-up
+/// refreshes when tables are inserted) is the authoritative source.
+pub(crate) fn refresh_block_positions(
+    dtos: &mut [frontend::block::dtos::BlockDto],
+    store: &frontend::common::database::Store,
+) {
+    if !frontend::common::database::rope_helpers::rope_positions_match_flow(store) {
+        return;
+    }
+    let offsets = store.block_offsets.read().unwrap();
+    let rope = store.rope.read().unwrap();
+    for dto in dtos.iter_mut() {
+        if let Some((byte_start, _)) = offsets.range_of_block(dto.id) {
+            dto.document_position = rope.byte_to_char(byte_start as usize) as i64;
+        }
+    }
+}
+
+/// Like [`refresh_block_positions`] but for a single DTO.
+pub(crate) fn refresh_block_position(
+    dto: &mut frontend::block::dtos::BlockDto,
+    store: &frontend::common::database::Store,
+) {
+    if !frontend::common::database::rope_helpers::rope_positions_match_flow(store) {
+        return;
+    }
+    let offsets = store.block_offsets.read().unwrap();
+    if let Some((byte_start, _)) = offsets.range_of_block(dto.id) {
+        let rope = store.rope.read().unwrap();
+        dto.document_position = rope.byte_to_char(byte_start as usize) as i64;
     }
 }

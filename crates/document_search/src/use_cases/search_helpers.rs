@@ -1,19 +1,33 @@
 use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};
+use common::database::Store;
+use common::database::rope_helpers::block_content_via_store;
 use common::entities::Block;
 use regex::RegexBuilder;
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Build the full document text by concatenating block plain_text with '\n' separators.
-/// Blocks must already be sorted by `document_position`.
-/// Returns the concatenated text string.
-pub fn build_full_text_from_blocks(blocks: &[Block]) -> String {
-    blocks
-        .iter()
-        .map(|b| b.plain_text.as_str())
-        .collect::<Vec<&str>>()
-        .join("\n")
+/// Build the full document text from main-flow blocks by reading
+/// content from the global rope via `block_offsets`. Blocks whose
+/// content isn't in the rope (e.g. table-cell blocks not yet covered
+/// by plan §1.6's `Frame.byte_range` model) contribute the empty
+/// string — see `block_content_via_store`.
+///
+/// The returned string has main-flow blocks joined by single `\n`
+/// separators — matching the position semantics that
+/// `document_position` is computed against.
+///
+/// Blocks must be sorted by `document_position` (caller's
+/// responsibility).
+pub fn build_full_text_via_store(blocks: &[Block], store: &Store) -> String {
+    let mut out = String::new();
+    for (i, block) in blocks.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(&block_content_via_store(block, store));
+    }
+    out
 }
 
 /// Build a mapping from byte offset to char index for a string.

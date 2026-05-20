@@ -2,10 +2,13 @@ use crate::InsertTableDto;
 use crate::InsertTableResultDto;
 use anyhow::{Result, anyhow};
 use common::database::CommandUnitOfWork;
+use common::database::rope_helpers::{
+    block_char_length, rope_insert_block_at, rope_insert_table_anchor, top_level_frame_end_byte,
+};
 use common::direct_access::document::document_repository::DocumentRelationshipField;
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::direct_access::root::root_repository::RootRelationshipField;
-use common::entities::{Block, Document, Frame, InlineElement, Root, Table, TableCell};
+use common::entities::{Block, Document, Frame, Root, Table, TableCell};
 use common::snapshot::EntityTreeSnapshot;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use common::undo_redo::UndoRedoCommand;
@@ -29,12 +32,12 @@ pub trait InsertTableUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "Get")]
 #[macros::uow_action(entity = "Frame", action = "Create")]
 #[macros::uow_action(entity = "Frame", action = "Update")]
+#[macros::uow_action(entity = "Frame", action = "UpdateWithRelationships")]
 #[macros::uow_action(entity = "Frame", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "GetMulti")]
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "Update")]
 #[macros::uow_action(entity = "Block", action = "UpdateMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
 #[macros::uow_action(entity = "Table", action = "Create")]
 #[macros::uow_action(entity = "TableCell", action = "Create")]
 pub trait InsertTableUnitOfWorkTrait: CommandUnitOfWork {}
@@ -73,6 +76,54 @@ fn execute_insert_table(
     // Snapshot for undo before mutation
     let snapshot = uow.snapshot_document(&[doc_id])?;
 
+    // Catch up stored `Block.document_position` from the rope for all
+    // top-level blocks. `insert_text_uc` skips its position-refresh
+    // loop for rope-clean documents (readers derive from
+    // `BlockOffsetIndex` directly), so the stored field may be stale.
+    // Inserting a table transitions the doc to tabled state — after
+    // which cells contribute to flow positions but not to the rope,
+    // so the rope can no longer derive flow positions and the stored
+    // field becomes the authoritative source. Bring it up to date now
+    // before any cell-position computations below use it.
+    {
+        let store = uow.store();
+        let catchup: Vec<(common::types::EntityId, i64)> =
+            if common::database::rope_helpers::rope_positions_match_flow(&store) {
+                let offsets = store.block_offsets.read().unwrap();
+                let rope = store.rope.read().unwrap();
+                offsets
+                    .entries
+                    .iter()
+                    .filter_map(|(marker, byte_start)| match marker {
+                        common::database::block_offset_index::OffsetMarker::Block(id) => {
+                            Some((*id, rope.byte_to_char(*byte_start as usize) as i64))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        if !catchup.is_empty() {
+            let ids: Vec<common::types::EntityId> = catchup.iter().map(|(id, _)| *id).collect();
+            let blocks_opt = uow.get_block_multi(&ids)?;
+            let mut updates: Vec<Block> = Vec::new();
+            for ((_, fresh_pos), maybe_b) in catchup.into_iter().zip(blocks_opt) {
+                if let Some(b) = maybe_b
+                    && b.document_position != fresh_pos
+                {
+                    let mut ub = b;
+                    ub.document_position = fresh_pos;
+                    ub.updated_at = chrono::Utc::now();
+                    updates.push(ub);
+                }
+            }
+            if !updates.is_empty() {
+                uow.update_block_multi(&updates)?;
+            }
+        }
+    }
+
     // Find the insertion position — determine the parent frame and where in child_order
     let frame_ids = uow.get_document_relationship(&doc_id, &DocumentRelationshipField::Frames)?;
 
@@ -90,32 +141,162 @@ fn execute_insert_table(
     // Resolve selection: use min position, delete selection if any
     let insert_pos = dto.position.min(dto.anchor);
 
-    // Find the frame containing the insertion position
-    let (parent_frame_id, child_order_insert_idx) = if all_blocks.is_empty() {
-        // Empty document — use the first frame
+    // Find the frame containing the insertion position. Also remember
+    // the cursor-adjacent block id (None for empty docs) so the rope
+    // mirror knows where to place the U+FFFC sentinel, and compute
+    // `cell_start_pos` — the document-position-space coordinate where
+    // the first cell will live, *matching what `snapshot_from_child_order`
+    // will compute* once the table anchor is inserted into the parent
+    // frame's child_order. That's the critical invariant: cell
+    // `document_position` values must equal the snapshot's running_pos,
+    // otherwise lookups like `insert_text` (which sort blocks by
+    // `document_position`) drift from the cursor positions the
+    // rendered snapshot reports.
+    let (parent_frame_id, child_order_insert_idx, rope_anchor, cell_start_pos): (
+        EntityId,
+        usize,
+        Option<(EntityId, bool)>,
+        i64,
+    ) = if all_blocks.is_empty() {
+        // Empty document — use the first frame. No host block, so the
+        // table goes first in child_order; cells start at the cursor
+        // position (which is 0 in a fresh empty doc).
         let first_frame_id = frame_ids
             .first()
             .ok_or_else(|| anyhow!("Document has no frames"))?;
-        (*first_frame_id, 0usize)
+        (*first_frame_id, 0usize, None, insert_pos)
     } else {
-        let (target_block, _, offset) = find_block_at_position(&all_blocks, insert_pos)?;
-        // Find which frame owns this block
+        let (target_block, _, offset) =
+            find_block_at_position(&all_blocks, insert_pos, &uow.store())?;
+        let target_length = block_char_length(&target_block, &uow.store());
+
+        // Find which frame owns this block AND the block's position in
+        // that frame's `child_order` (not the blocks-only list!). The
+        // anchor frame for the new table is inserted into `child_order`,
+        // which interleaves positive block ids and negative sub-frame
+        // ids. Using the blocks-only index here drifts whenever the
+        // parent frame contains sub-frames before the target — concretely:
+        // an imported GFM table earlier in the same frame makes
+        // `blocks.index_of(target)` smaller than
+        // `child_order.index_of(target)` by the number of preceding
+        // sub-frames, so the new table gets inserted that many slots
+        // too early in flow order. Reproduced by
+        // `insert_table_after_imported_gfm_table_lands_at_doc_end` and
+        // `rich_text_editor_demo_end_to_end_insert_table_at_end` in
+        // `crates/public_api/tests/table_editing_tests.rs`.
+        let target_block_entry = target_block.id as i64;
         let mut found_frame_id = frame_ids[0];
-        let mut found_block_idx = 0usize;
+        let mut found_child_idx = 0usize;
         'outer: for fid in &frame_ids {
-            let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
-            for (bi, bid) in block_ids.iter().enumerate() {
-                if *bid == target_block.id {
+            let frame = uow
+                .get_frame(fid)?
+                .ok_or_else(|| anyhow!("Frame {fid} not found"))?;
+            for (ci, entry) in frame.child_order.iter().enumerate() {
+                if *entry == target_block_entry {
                     found_frame_id = *fid;
-                    found_block_idx = bi;
+                    found_child_idx = ci;
                     break 'outer;
                 }
             }
         }
         // When at the very start of the block (offset == 0), place the
         // table before it so the table can be the first flow element.
-        let after = if offset > 0 { 1 } else { 0 };
-        (found_frame_id, found_block_idx + after)
+        // Otherwise (cursor anywhere inside or at the end of the host
+        // block) the table goes after the whole host block — it is
+        // NOT split — so cell positions follow the host block's full
+        // extent, regardless of how far in the cursor sits.
+        let after = offset > 0;
+        let after_idx = if after { 1 } else { 0 };
+        let cell_start = if after {
+            // Cells live one boundary past the host block's end.
+            target_block.document_position + target_length + 1
+        } else {
+            // Cells take the host block's current spot; the host
+            // shifts to past the cells (handled by the shift loop
+            // below at `document_position >= insert_pos`).
+            target_block.document_position
+        };
+
+        // If the target block lives inside a table cell, the user
+        // clicked "Insert Table" from within an existing table. Don't
+        // nest — that produces an invisible block because the renderer
+        // doesn't recurse into cell-nested anchor frames. Instead,
+        // hoist the new table OUT to be a sibling of the containing
+        // table, immediately after it. Reproduced by
+        // `insert_table_from_inside_cell_lands_after_containing_table`.
+        let owning_frame = uow
+            .get_frame(&found_frame_id)?
+            .ok_or_else(|| anyhow!("Owning frame {found_frame_id} not found"))?;
+        let mut cell_anchor: Option<(EntityId, EntityId)> = None;
+        if let Some(parent_id) = owning_frame.parent_frame {
+            let parent = uow
+                .get_frame(&parent_id)?
+                .ok_or_else(|| anyhow!("Parent frame {parent_id} not found"))?;
+            if parent.table.is_some()
+                && let Some(grandparent_id) = parent.parent_frame
+            {
+                cell_anchor = Some((parent_id, grandparent_id));
+            }
+        }
+
+        if let Some((anchor_frame_id, grandparent_id)) = cell_anchor {
+            let grandparent = uow
+                .get_frame(&grandparent_id)?
+                .ok_or_else(|| anyhow!("Grandparent frame {grandparent_id} not found"))?;
+            let anchor_entry = -(anchor_frame_id as i64);
+            let anchor_idx = grandparent
+                .child_order
+                .iter()
+                .position(|e| *e == anchor_entry)
+                .ok_or_else(|| anyhow!("Anchor frame missing from grandparent child_order"))?;
+
+            // cell_start: position right after the existing table's
+            // last cell. Cells of the existing table are blocks in
+            // frames whose `parent_frame == anchor_frame_id`. The
+            // snapshot walker assigns running positions where each
+            // block contributes (length + 1) — the +1 is the per-block
+            // boundary the walker emits between siblings. So the next
+            // free slot in the grandparent's flow is
+            // `max(cell_block.document_position + cell_block.length) + 1`.
+            let mut last_end: i64 = 0;
+            let mut any = false;
+            for fid in &frame_ids {
+                let f = uow
+                    .get_frame(fid)?
+                    .ok_or_else(|| anyhow!("Frame {fid} not found"))?;
+                if f.parent_frame != Some(anchor_frame_id) {
+                    continue;
+                }
+                let block_ids = uow.get_frame_relationship(fid, &FrameRelationshipField::Blocks)?;
+                if block_ids.is_empty() {
+                    continue;
+                }
+                let blocks_opt = uow.get_block_multi(&block_ids)?;
+                for b in blocks_opt.into_iter().flatten() {
+                    let end = b.document_position + block_char_length(&b, &uow.store());
+                    if !any || end > last_end {
+                        last_end = end;
+                        any = true;
+                    }
+                }
+            }
+            let hoisted_cell_start = last_end + 1;
+            (
+                grandparent_id,
+                anchor_idx + 1,
+                // Rope mirror: anchor after target_block (a cell of the
+                // existing table). No-op under the default backend.
+                Some((target_block.id, true)),
+                hoisted_cell_start,
+            )
+        } else {
+            (
+                found_frame_id,
+                found_child_idx + after_idx,
+                Some((target_block.id, after)),
+                cell_start,
+            )
+        }
     };
 
     // 1. Create the Table entity (owned by Document)
@@ -138,6 +319,7 @@ fn execute_insert_table(
     // 2. Create cell frames and TableCells in row-major order
     let total_cells = dto.rows * dto.columns;
     let mut cell_blocks: Vec<Block> = Vec::with_capacity(total_cells as usize);
+    let mut cell_frame_ids: Vec<EntityId> = Vec::with_capacity(total_cells as usize);
 
     for r in 0..dto.rows {
         for c in 0..dto.columns {
@@ -145,6 +327,7 @@ fn execute_insert_table(
             let (cell_frame_id, created_block) = create_cell_frame(uow, doc_id, now)?;
 
             cell_blocks.push(created_block);
+            cell_frame_ids.push(cell_frame_id);
 
             // Create the TableCell entity
             let cell = TableCell {
@@ -184,8 +367,29 @@ fn execute_insert_table(
         fmt_position: None,
         fmt_is_blockquote: None,
         table: Some(created_table.id),
+        byte_range: (0, 0),
     };
     let created_anchor = uow.create_frame(&anchor_frame, doc_id, -1)?;
+
+    // Backfill each cell frame's `parent_frame` to point at the anchor
+    // frame we just created. Cell frames are created before the anchor
+    // (we don't know the anchor id yet), so this can't be set at
+    // creation time. Without it, walking up from a cell to find its
+    // containing table fails — which breaks the "is the cursor inside
+    // an existing table?" check below in a future insert_table call.
+    //
+    // Use `update_with_relationships` (not the scalar `update_frame`):
+    // the latter intentionally preserves the existing `parent_frame`
+    // to keep stale-entity writes from clobbering the relationship,
+    // which would silently no-op us. See
+    // crates/common/src/direct_access/frame/frame_table.rs `update`.
+    for cell_frame_id in &cell_frame_ids {
+        if let Some(cf) = uow.get_frame(cell_frame_id)? {
+            let mut updated = cf;
+            updated.parent_frame = Some(created_anchor.id);
+            uow.update_frame_with_relationships(&updated)?;
+        }
+    }
 
     // Insert the anchor frame into the parent frame's child_order
     let parent_frame = uow
@@ -200,28 +404,106 @@ fn execute_insert_table(
     updated_parent.updated_at = now;
     uow.update_frame(&updated_parent)?;
 
-    // 4. Assign document_position to all cell blocks in row-major order
-    // The table's blocks start at insert_pos, each cell block gets 1 position
-    // (the separator character between blocks, like a newline)
-    let mut current_pos = insert_pos;
+    // Inserts a U+FFFC sentinel + boundary newline into the global
+    // rope and registers a TableAnchor(table_id) marker in the
+    // offset index. Cell-internal content is not yet tracked in
+    // BlockOffsetIndex — plan §1.6's Frame.byte_range model is a
+    // follow-up commit.
+    if let Some((target_block_id, after)) = rope_anchor {
+        rope_insert_table_anchor(&uow.store(), created_table.id, target_block_id, after);
+    }
+
+    // 4. Assign document_position to all cell blocks in row-major
+    // order. `cell_start_pos` was computed up front to match exactly
+    // what `snapshot_from_child_order` (text_frame.rs) will report
+    // for the first cell once the table anchor is part of the parent
+    // frame's child_order. Each subsequent empty cell adds 1 (the
+    // per-cell boundary) so cells occupy a contiguous run of N
+    // positions starting at `cell_start_pos`.
+    //
+    // The two cases that contribute to `cell_start_pos` correctness:
+    //
+    //   * "after" insertion (cursor offset > 0 within the host block):
+    //     the table goes *after* the whole host block in child_order
+    //     — it is not split. So cells must start at
+    //     `host.document_position + host.length + 1`, not at
+    //     `insert_pos + 1`. The two are equal only when the cursor
+    //     is exactly at the end of the host block (offset == length);
+    //     elsewhere, `insert_pos + 1` lands inside the host's
+    //     document-position range, putting cell positions out of
+    //     sync with the snapshot the user sees.
+    //
+    //   * "before" insertion (cursor offset == 0) and empty doc:
+    //     cells take the cursor's position; the displaced host
+    //     block (if any) shifts to past the cells via the
+    //     `document_position >= insert_pos` loop below.
+    //
+    // Tests: `inserted_3x3_typing_in_each_cell_lands_in_that_cell`
+    // (after-at-end-of-block), `inserted_2x2_at_start_of_block_lands_before_it`
+    // (before), `inserted_2x2_in_empty_document_starts_at_zero` (empty),
+    // `inserted_2x2_deep_in_long_block_document_position_matches_snapshot`
+    // (after-deep-in-block — the user-reported "table inserted before
+    // the current block" regression, where document_position drifted
+    // from snapshot in proportion to `host.length - offset`).
     let mut blocks_to_update: Vec<Block> = Vec::new();
-    for cell_block in &cell_blocks {
+    for (offset, cell_block) in cell_blocks.iter().enumerate() {
         let mut updated_block = cell_block.clone();
-        updated_block.document_position = current_pos;
+        updated_block.document_position = cell_start_pos + offset as i64;
         updated_block.updated_at = now;
         blocks_to_update.push(updated_block);
-        // Each empty block takes 1 position (the block separator)
-        current_pos += 1;
     }
     if !blocks_to_update.is_empty() {
         uow.update_block_multi(&blocks_to_update)?;
     }
 
-    // 5. Shift document_position for all blocks after the table
+    // Mirror cell-block creation into the global rope. Per plan §1.6
+    // cells of a table live AT THE END of the containing top-level
+    // frame's rope range — ideally BEFORE any following top-level
+    // frame's content. Each cell is preceded by a `\n` boundary.
+    //
+    // The anchor sentinel was just inserted, so the top-level frame's
+    // current end byte (computed fresh from block_offsets, not from
+    // the stale Frame.byte_range) already includes that sentinel.
+    //
+    // LIMITATION (deferred): when a following top-level frame's content
+    // coincides with frame 1's end byte (typical when the following
+    // frame's first block is empty), `rope_insert_block_at`'s shift
+    // semantics leave the following entry at the colliding byte and
+    // place the cell at byte_pos+1 — so cells end up AFTER the
+    // following frame in the rope. Real public-API workloads do not
+    // currently produce multi-top-level-frame docs, so this layout
+    // anomaly is invisible to users.
+    //
+    // No-op under default backend.
+    {
+        let store = uow.store();
+        let start_byte = top_level_frame_end_byte(&store, parent_frame_id);
+        for (next_byte, cell_block) in (start_byte..).zip(cell_blocks.iter()) {
+            // Newly-created cells via `create_cell_frame` are empty,
+            // so we know the content is "" — no need to read from the
+            // store/entity (the block hasn't been registered in the
+            // rope yet anyway).
+            rope_insert_block_at(&store, next_byte, cell_block.id, "");
+        }
+    }
+
+    // 5. Shift document_position for all blocks that end up positioned
+    // at or past the new table's first cell. Use `cell_start_pos` (not
+    // `insert_pos`) as the threshold so the cell-inside-existing-table
+    // branch shifts the right set: when the user clicks inside cell
+    // (i, j) of an existing table and the new table is hoisted to land
+    // immediately AFTER that table, the threshold is the position
+    // right after the existing table — not the cursor inside the cell.
+    // For the normal branches, `cell_start_pos` either equals
+    // `insert_pos` (offset == 0) or differs by exactly `target.length`
+    // (offset > 0, after=true). In the latter case the gap
+    // `[insert_pos, cell_start_pos)` is wholly inside the host block,
+    // so no other block sits there and either threshold shifts the
+    // same set.
     let table_size = total_cells; // Each cell block occupies 1 position (empty block = separator)
     let mut shifted_blocks: Vec<Block> = Vec::new();
     for block in &all_blocks {
-        if block.document_position >= insert_pos {
+        if block.document_position >= cell_start_pos {
             let mut shifted = block.clone();
             shifted.document_position += table_size;
             shifted.updated_at = now;

@@ -204,6 +204,8 @@ impl TextTableCell {
                     .flatten()
             })
             .collect();
+        let store = inner.ctx.db_context.get_store();
+        crate::inner::refresh_block_positions(&mut block_dtos, store);
         block_dtos.sort_by_key(|b| b.document_position);
 
         block_dtos

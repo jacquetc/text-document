@@ -12,7 +12,7 @@ pub struct EntityTreeSnapshot {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Store-level snapshot (type-erased so snapshot.rs doesn't depend on HashMapStore)
+// Store-level snapshot (type-erased so snapshot.rs has no concrete store dependency)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Trait for type-erased store snapshots.

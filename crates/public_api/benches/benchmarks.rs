@@ -777,6 +777,152 @@ fn bench_editing_session(c: &mut Criterion) {
     group.finish();
 }
 
+// ── Migration-relevant XL workloads ─────────────────────────────
+// 1 MB-scale and format-run-heavy benches added for the rope-backend
+// migration baseline. The existing SIZES top out at ~130 KB ("large").
+// These workloads are where the rope migration is expected to win
+// hardest. Sample size is small to keep total runtime reasonable.
+
+fn make_doc_xl(bytes: usize) -> TextDocument {
+    let body: String = "a".repeat(bytes);
+    let doc = TextDocument::new();
+    doc.set_plain_text(&body).unwrap();
+    doc
+}
+
+fn bench_xl_workloads(c: &mut Criterion) {
+    let mut group = c.benchmark_group("xl");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(15));
+
+    // 1 MB plain doc construction (data + format_runs/block_images clone cost).
+    group.bench_function("set_plain_text_1mb", |b| {
+        b.iter_batched(
+            || "a".repeat(1_000_000),
+            |text| {
+                let doc = TextDocument::new();
+                doc.set_plain_text(black_box(&text)).unwrap();
+                doc
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    // Single-char insert at end of 1 MB doc.
+    group.bench_function("insert_char_at_end_of_1mb", |b| {
+        b.iter_batched(
+            || {
+                let doc = make_doc_xl(1_000_000);
+                let cursor = doc.cursor_at(1_000_000);
+                (doc, cursor)
+            },
+            |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Single-char insert at mid of 1 MB doc.
+    group.bench_function("insert_char_at_mid_of_1mb", |b| {
+        b.iter_batched(
+            || {
+                let doc = make_doc_xl(1_000_000);
+                let cursor = doc.cursor_at(500_000);
+                (doc, cursor)
+            },
+            |(_doc, cursor)| cursor.insert_text(black_box("X")).unwrap(),
+            BatchSize::SmallInput,
+        );
+    });
+
+    // 1 KB bulk insert into 1 MB doc.
+    group.bench_function("insert_1kb_at_mid_of_1mb", |b| {
+        b.iter_batched(
+            || {
+                let doc = make_doc_xl(1_000_000);
+                let cursor = doc.cursor_at(500_000);
+                let chunk = "x".repeat(1024);
+                (doc, cursor, chunk)
+            },
+            |(_doc, cursor, chunk)| cursor.insert_text(black_box(&chunk)).unwrap(),
+            BatchSize::LargeInput,
+        );
+    });
+
+    // Undo of single-char insert on 1 MB doc.
+    group.bench_function("undo_single_char_on_1mb", |b| {
+        b.iter_batched(
+            || {
+                let doc = make_doc_xl(1_000_000);
+                let cursor = doc.cursor_at(500_000);
+                cursor.insert_text("X").unwrap();
+                doc
+            },
+            |doc| doc.undo().unwrap(),
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Undo-redo cycle of single-char insert on 1 MB doc.
+    group.bench_function("undo_redo_cycle_single_char_on_1mb", |b| {
+        b.iter_batched(
+            || {
+                let doc = make_doc_xl(1_000_000);
+                let cursor = doc.cursor_at(500_000);
+                cursor.insert_text("X").unwrap();
+                doc
+            },
+            |doc| {
+                doc.undo().unwrap();
+                doc.redo().unwrap();
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // find_all across 1 MB doc with ~100 matches.
+    group.bench_function("find_all_100_matches_in_1mb", |b| {
+        let needle = "needle";
+        b.iter_batched(
+            || {
+                // 100 needles spread across ~1 MB.
+                let padding = "a".repeat(10_000 - needle.len());
+                let unit = format!("{padding}{needle}");
+                let text = unit.repeat(100);
+                let doc = TextDocument::new();
+                doc.set_plain_text(&text).unwrap();
+                doc
+            },
+            |doc| {
+                doc.find_all(black_box(needle), &text_document::FindOptions::default())
+                    .unwrap()
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    // Format toggle on 100 KB selection (format-run-heavy regime).
+    group.bench_function("set_bold_on_100kb_selection", |b| {
+        b.iter_batched(
+            || {
+                let doc = make_doc_xl(100_000);
+                let cursor = doc.cursor_at(0);
+                cursor.move_position(MoveOperation::Right, MoveMode::KeepAnchor, 100_000);
+                (doc, cursor)
+            },
+            |(_doc, cursor)| {
+                let bold = TextFormat {
+                    font_bold: Some(true),
+                    ..Default::default()
+                };
+                cursor.merge_char_format(black_box(&bold)).unwrap();
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.finish();
+}
+
 // ── Main ────────────────────────────────────────────────────────
 
 criterion_group!(creation, bench_document_creation);
@@ -790,11 +936,13 @@ criterion_group!(
     bench_lists
 );
 criterion_group!(session, bench_editing_session);
+criterion_group!(xl, bench_xl_workloads);
 criterion_main!(
     creation,
     editing,
     navigation,
     history,
     formatting_group,
-    session
+    session,
+    xl
 );

@@ -44,7 +44,9 @@ jobs:
           if [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.check.result }}" != "success" ]] || \
              [[ "${{ needs.rustfmt.result }}" != "success" ]] || \
-             [[ "${{ needs.docs.result }}" != "success" ]]; then
+             [[ "${{ needs.clippy.result }}" != "success" ]] || \
+             [[ "${{ needs.docs.result }}" != "success" ]] || \
+             [[ "${{ needs.coverage.result }}" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi

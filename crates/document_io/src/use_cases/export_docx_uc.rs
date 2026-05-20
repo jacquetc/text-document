@@ -3,9 +3,9 @@ use crate::ExportDocxDto;
 use crate::ExportDocxResultDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, Root, Table, TableCell,
-};
+use common::database::rope_helpers::block_content_via_store;
+use common::entities::{Block, Document, Frame, List, Root, Table, TableCell};
+use common::format_runs::InlineContent;
 use common::long_operation::LongOperation;
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
@@ -23,7 +23,6 @@ pub trait ExportDocxUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Frame", action = "GetRelationshipRO", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO", thread_safe = true)]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO", thread_safe = true)]
 #[macros::uow_action(entity = "List", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "GetRO", thread_safe = true)]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO", thread_safe = true)]
@@ -165,13 +164,12 @@ impl LongOperation for ExportDocxUseCase {
                     return Err(anyhow!("Operation was cancelled"));
                 }
 
-                let element_ids = uow.get_block_relationship(
-                    &block.id,
-                    &common::direct_access::block::BlockRelationshipField::Elements,
-                )?;
-
-                let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+                let block_text = block_content_via_store(block, &uow.store());
+                let elements = common::format_runs_query::inline_segments_for_block(
+                    &uow.store(),
+                    block.id,
+                    &block_text,
+                );
 
                 let mut paragraph = Paragraph::new();
 
@@ -358,13 +356,12 @@ impl ExportDocxUseCase {
                         blocks.sort_by_key(|b| b.document_position);
 
                         for block in &blocks {
-                            let element_ids = uow.get_block_relationship(
-                                &block.id,
-                                &common::direct_access::block::BlockRelationshipField::Elements,
-                            )?;
-                            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-                            let elements: Vec<InlineElement> =
-                                elements_opt.into_iter().flatten().collect();
+                            let block_text = block_content_via_store(block, &uow.store());
+                            let elements = common::format_runs_query::inline_segments_for_block(
+                                &uow.store(),
+                                block.id,
+                                &block_text,
+                            );
 
                             let mut paragraph = Paragraph::new();
                             for elem in &elements {

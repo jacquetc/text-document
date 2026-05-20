@@ -2,9 +2,9 @@
 use crate::ExportMarkdownDto;
 use anyhow::{Result, anyhow};
 use common::database::QueryUnitOfWork;
-use common::entities::{
-    Block, Document, Frame, InlineContent, InlineElement, List, ListStyle, Root, Table, TableCell,
-};
+use common::database::rope_helpers::block_content_via_store;
+use common::entities::{Block, Document, Frame, List, ListStyle, Root, Table, TableCell};
+use common::format_runs::{InlineContent, InlineSegment};
 use common::types::{EntityId, ROOT_ENTITY_ID};
 use std::collections::HashSet;
 
@@ -22,7 +22,6 @@ pub trait ExportMarkdownUnitOfWorkFactoryTrait: Send + Sync {
 #[macros::uow_action(entity = "Block", action = "GetRO")]
 #[macros::uow_action(entity = "Block", action = "GetMultiRO")]
 #[macros::uow_action(entity = "Block", action = "GetRelationshipRO")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMultiRO")]
 #[macros::uow_action(entity = "List", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRO")]
 #[macros::uow_action(entity = "Table", action = "GetRelationshipRO")]
@@ -259,12 +258,12 @@ impl ExportMarkdownUseCase {
         // Check if this is a code block
         if block.fmt_is_code_block == Some(true) {
             let lang = block.fmt_code_language.as_deref().unwrap_or("");
-            let element_ids = uow.get_block_relationship(
-                &block.id,
-                &common::direct_access::block::BlockRelationshipField::Elements,
-            )?;
-            let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-            let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+            let block_text = block_content_via_store(block, &uow.store());
+            let elements = common::format_runs_query::inline_segments_for_block(
+                &uow.store(),
+                block.id,
+                &block_text,
+            );
 
             // Concatenate raw text from elements, no formatting
             let mut raw_text = String::new();
@@ -297,14 +296,13 @@ impl ExportMarkdownUseCase {
             return Ok((code_block, false));
         }
 
-        // Get inline elements
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
-
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
+        // Synthesize inline segments view
+        let block_text = block_content_via_store(block, &uow.store());
+        let elements = common::format_runs_query::inline_segments_for_block(
+            &uow.store(),
+            block.id,
+            &block_text,
+        );
 
         // Check if block has a list
         let list_ids = uow.get_block_relationship(
@@ -320,7 +318,7 @@ impl ExportMarkdownUseCase {
         let is_list_item = list.is_some();
 
         // Build inline markdown text
-        let inline_md = self.render_inline_elements(&elements)?;
+        let inline_md = self.render_inline_segments(&elements)?;
 
         // Build the block line
         let block_line = if let Some(level) = block.fmt_heading_level {
@@ -357,8 +355,8 @@ impl ExportMarkdownUseCase {
         Ok((block_line, is_list_item))
     }
 
-    /// Render inline elements into markdown text with formatting.
-    fn render_inline_elements(&self, elements: &[InlineElement]) -> Result<String> {
+    /// Render inline segments into markdown text with formatting.
+    fn render_inline_segments(&self, elements: &[InlineSegment]) -> Result<String> {
         let mut inline_md = String::new();
         for elem in elements {
             let is_code = elem.fmt_font_family.as_deref() == Some("monospace");
@@ -493,15 +491,14 @@ impl ExportMarkdownUseCase {
         uow: &dyn ExportMarkdownUnitOfWorkTrait,
         block: &Block,
     ) -> Result<String> {
-        let element_ids = uow.get_block_relationship(
-            &block.id,
-            &common::direct_access::block::BlockRelationshipField::Elements,
-        )?;
+        let block_text = block_content_via_store(block, &uow.store());
+        let elements = common::format_runs_query::inline_segments_for_block(
+            &uow.store(),
+            block.id,
+            &block_text,
+        );
 
-        let elements_opt = uow.get_inline_element_multi(&element_ids)?;
-        let elements: Vec<InlineElement> = elements_opt.into_iter().flatten().collect();
-
-        self.render_inline_elements(&elements)
+        self.render_inline_segments(&elements)
     }
 }
 

@@ -7,7 +7,7 @@ use anyhow::{Ok, Result};
 use common::database::CommandUnitOfWork;
 use common::database::{db_context::DbContext, transactions::Transaction};
 #[allow(unused_imports)]
-use common::entities::{Block, Document, Frame, InlineElement, List, Root};
+use common::entities::{Block, Document, Frame, List, Root};
 use common::event::{AllEvent, DirectAccessEntity, Event, EventBuffer, EventHub, Origin};
 #[allow(unused_imports)]
 use common::types;
@@ -80,6 +80,10 @@ impl CommandUnitOfWork for InsertHtmlAtPositionUnitOfWork {
 
         Ok(())
     }
+
+    fn store(&self) -> std::sync::Arc<common::database::Store> {
+        self.context.get_store().clone()
+    }
 }
 
 //TODO: adapt entities and actions to real use :
@@ -113,11 +117,6 @@ impl CommandUnitOfWork for InsertHtmlAtPositionUnitOfWork {
 #[macros::uow_action(entity = "Block", action = "Create")]
 #[macros::uow_action(entity = "Block", action = "GetRelationship")]
 #[macros::uow_action(entity = "Block", action = "UpdateWithRelationships")]
-#[macros::uow_action(entity = "InlineElement", action = "Get")]
-#[macros::uow_action(entity = "InlineElement", action = "GetMulti")]
-#[macros::uow_action(entity = "InlineElement", action = "Update")]
-#[macros::uow_action(entity = "InlineElement", action = "Create")]
-#[macros::uow_action(entity = "InlineElement", action = "Remove")]
 #[macros::uow_action(entity = "List", action = "Get")]
 #[macros::uow_action(entity = "List", action = "Create")]
 impl InsertHtmlAtPositionUnitOfWorkTrait for InsertHtmlAtPositionUnitOfWork {}

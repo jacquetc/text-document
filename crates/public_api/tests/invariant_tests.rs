@@ -1,0 +1,455 @@
+//! Semantic invariants of the cursor / document model, expressed as
+//! proptest properties.
+//!
+//! These tests complement `fuzz_robustness_tests.rs` (which asserts
+//! "no input causes a panic") by checking the deeper contract: given
+//! any sequence of operations, which logical relationships must hold?
+//!
+//! Each invariant is derivable from the type-level API alone, so a
+//! violation signals a bug in the implementation rather than a
+//! test/code mismatch. The properties are small, named, and aimed at
+//! one relationship apiece — when one fails, the shrunken counter-
+//! example points directly at the bug, not the test's composite
+//! scenario.
+//!
+//! Run as `cargo test --test invariant_tests`. Tune iteration count
+//! with `PROPTEST_CASES=N`.
+
+use proptest::prelude::*;
+use text_document::{MoveMode, MoveOperation, TextDocument};
+
+fn new_doc(plain: &str) -> TextDocument {
+    let doc = TextDocument::new();
+    doc.set_plain_text(plain).unwrap();
+    doc
+}
+
+// ── Invariant 1 ─────────────────────────────────────────────────────
+// For any initial text, `character_count + (block_count - 1)`
+// equals the Unicode-scalar length of `to_plain_text()`. This is
+// the single cursor-position-space invariant the whole navigation
+// layer depends on.
+
+proptest! {
+    #[test]
+    fn cursor_position_space_is_consistent(text in "[a-zA-Z0-9 \n]{0,100}") {
+        let doc = new_doc(&text);
+        let plain = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            doc.character_count() + doc.block_count() - 1,
+            plain.chars().count()
+        );
+    }
+}
+
+// ── Invariant 2 ─────────────────────────────────────────────────────
+// `delete_char` then `insert_text(deleted)` restores the document,
+// on a reachable range. If `delete_char` removed a grapheme cluster
+// larger than one scalar, `insert_text` puts those same scalars
+// back; the plain text is identical.
+
+proptest! {
+    #[test]
+    fn insert_after_delete_restores_text(
+        text in "[a-zA-Z0-9 \n]{1,60}",
+        pos_frac in 0.0f64..1.0,
+    ) {
+        let doc = new_doc(&text);
+        let before = doc.to_plain_text().unwrap();
+        let max_pos = doc.character_count() + doc.block_count() - 1;
+        if max_pos == 0 { return Ok(()); }
+        let pos = ((pos_frac * max_pos as f64).floor() as usize).min(max_pos.saturating_sub(1));
+        let c = doc.cursor_at(pos);
+        // Capture the cluster that `delete_char` will remove.
+        let c_probe = doc.cursor_at(pos);
+        c_probe.move_position(MoveOperation::NextCharacter, MoveMode::KeepAnchor, 1);
+        let cluster = c_probe.selected_text().unwrap_or_default();
+        if cluster.is_empty() { return Ok(()); }
+
+        if c.delete_char().is_err() { return Ok(()); }
+        let c2 = doc.cursor_at(pos);
+        c2.insert_text(&cluster).unwrap();
+        let after = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            before, after,
+            "delete + insert of the same cluster must round-trip"
+        );
+    }
+}
+
+// ── Invariant 3 ─────────────────────────────────────────────────────
+// Undo of a single edit restores exactly the pre-edit plain text.
+
+proptest! {
+    #[test]
+    fn undo_single_edit_restores_text(
+        seed in "[a-zA-Z ]{0,40}",
+        insert in "[a-z]{0,10}",
+        pos_frac in 0.0f64..=1.0,
+    ) {
+        let doc = new_doc(&seed);
+        let before = doc.to_plain_text().unwrap();
+        let max_pos = doc.character_count() + doc.block_count().saturating_sub(1);
+        let pos = ((pos_frac * max_pos as f64).floor() as usize).min(max_pos);
+        let c = doc.cursor_at(pos);
+        if insert.is_empty() { return Ok(()); }
+        c.insert_text(&insert).unwrap();
+        // Precondition: edit actually changed something, otherwise
+        // there's nothing to undo.
+        prop_assume!(doc.to_plain_text().unwrap() != before);
+        doc.undo().unwrap();
+        let after_undo = doc.to_plain_text().unwrap();
+        prop_assert_eq!(before, after_undo);
+    }
+}
+
+// ── Invariant 4 ─────────────────────────────────────────────────────
+// Undo followed by redo returns to the post-edit state.
+
+proptest! {
+    #[test]
+    fn undo_then_redo_is_identity(
+        seed in "[a-zA-Z ]{0,40}",
+        insert in "[a-z]{1,10}",
+        pos_frac in 0.0f64..=1.0,
+    ) {
+        let doc = new_doc(&seed);
+        let max_pos = doc.character_count() + doc.block_count().saturating_sub(1);
+        let pos = ((pos_frac * max_pos as f64).floor() as usize).min(max_pos);
+        let c = doc.cursor_at(pos);
+        c.insert_text(&insert).unwrap();
+        let after_edit = doc.to_plain_text().unwrap();
+        prop_assume!(doc.can_undo());
+        doc.undo().unwrap();
+        if !doc.can_redo() { return Ok(()); }
+        doc.redo().unwrap();
+        prop_assert_eq!(after_edit, doc.to_plain_text().unwrap());
+    }
+}
+
+// ── Invariant 5 ─────────────────────────────────────────────────────
+// Arrow-right then arrow-left returns to the starting position for
+// any cursor. `cursor_at` snaps to a grapheme cluster boundary, so
+// every starting position is trivially round-trippable. Includes
+// mid-cluster targets (combining marks, skin-tone, ZWJ, flags) to
+// exercise the snap.
+
+proptest! {
+    #[test]
+    fn next_then_prev_character_is_identity(
+        text in r"[a-zA-Z0-9 \u{0301}\u{1F44B}\u{1F3FB}]{1,40}",
+        pos_frac in 0.0f64..=1.0,
+    ) {
+        let doc = new_doc(&text);
+        let max_pos = doc.character_count() + doc.block_count().saturating_sub(1);
+        let requested = ((pos_frac * max_pos as f64).floor() as usize).min(max_pos);
+        let c = doc.cursor_at(requested);
+        // cursor_at snaps to the nearest grapheme boundary; the
+        // round-trip invariant is against the snapped start, not the
+        // raw requested index.
+        let start = c.position();
+        let moved = c.move_position(MoveOperation::NextCharacter, MoveMode::MoveAnchor, 1);
+        if !moved { return Ok(()); } // Already at end: no move to reverse.
+        c.move_position(MoveOperation::PreviousCharacter, MoveMode::MoveAnchor, 1);
+        prop_assert_eq!(
+            c.position(),
+            start,
+            "NextCharacter then PreviousCharacter must return to start"
+        );
+    }
+}
+
+// ── Invariant 6 ─────────────────────────────────────────────────────
+// Multi-cursor coordinate adjustment: after a cursor c1 at position
+// p inserts text of length n, any other cursor c2 at position q
+// satisfies:
+//   q' == q         if q < p
+//   q' == q + n     if q >= p
+// (Strictly `>=`: a cursor sitting exactly at the insertion point
+// moves forward, per the standard word-processor convention.)
+
+proptest! {
+    #[test]
+    fn insert_shifts_downstream_cursors_by_length(
+        seed in "[a-zA-Z ]{5,40}",
+        insert in "[a-z]{1,10}",
+        p_frac in 0.0f64..1.0,
+        q_frac in 0.0f64..1.0,
+    ) {
+        let doc = new_doc(&seed);
+        let max = doc.character_count();
+        let p = ((p_frac * max as f64).floor() as usize).min(max);
+        let q = ((q_frac * max as f64).floor() as usize).min(max);
+        let c1 = doc.cursor_at(p);
+        let c2 = doc.cursor_at(q);
+        let n = insert.chars().count();
+        c1.insert_text(&insert).unwrap();
+        let q_prime = c2.position();
+        if q < p {
+            prop_assert_eq!(q_prime, q, "cursor strictly before insert must not move");
+        } else if q > p {
+            prop_assert_eq!(
+                q_prime, q + n,
+                "cursor strictly after insert must shift by n chars"
+            );
+        } else {
+            // q == p: the cursor is collocated with the insertion
+            // point. Either staying put or shifting forward is a
+            // valid implementation choice (the two cursors started
+            // indistinguishable). Just check the position stayed
+            // within a reasonable range.
+            prop_assert!(
+                q_prime == q || q_prime == q + n,
+                "collocated cursor must resolve to either q or q+n, got {}",
+                q_prime
+            );
+        }
+    }
+}
+
+// ── Invariant 7 ─────────────────────────────────────────────────────
+// Fragment round-trip: selecting a range, copying to a fragment, and
+// reinserting that fragment at the same position yields a document
+// whose plain text is identical to the original.
+
+proptest! {
+    #[test]
+    fn fragment_reinsert_is_identity(
+        seed in "[a-zA-Z ]{5,40}",
+        start_frac in 0.0f64..1.0,
+        end_frac in 0.0f64..=1.0,
+    ) {
+        let doc = new_doc(&seed);
+        let max = doc.character_count();
+        if max == 0 { return Ok(()); }
+        let mut start = ((start_frac * max as f64).floor() as usize).min(max);
+        let mut end = ((end_frac * max as f64).floor() as usize).min(max);
+        if start > end { std::mem::swap(&mut start, &mut end); }
+        if start == end { return Ok(()); }
+
+        let before = doc.to_plain_text().unwrap();
+        let c = doc.cursor_at(start);
+        c.set_position(end, MoveMode::KeepAnchor);
+        let frag = c.selection();
+        if frag.is_empty() { return Ok(()); }
+
+        // Delete the selection then reinsert the fragment at `start`.
+        c.remove_selected_text().unwrap();
+        let c2 = doc.cursor_at(start);
+        c2.insert_fragment(&frag).unwrap();
+        prop_assert_eq!(before, doc.to_plain_text().unwrap());
+    }
+}
+
+// ── Invariant 8 ─────────────────────────────────────────────────────
+// Monotonicity: a pure `insert_text(s)` increases `character_count`
+// by exactly `s.chars().count()` and leaves `block_count`
+// unchanged (insert_text doesn't split blocks — newlines stay
+// literal, per cursor_edge_case_tests.rs:196-205).
+
+proptest! {
+    #[test]
+    fn insert_text_is_monotone_and_additive(
+        seed in "[a-zA-Z ]{0,30}",
+        insert in "[a-z0-9 ]{0,20}",
+        pos_frac in 0.0f64..=1.0,
+    ) {
+        let doc = new_doc(&seed);
+        let cc_before = doc.character_count();
+        let bc_before = doc.block_count();
+        let max_pos = cc_before + bc_before.saturating_sub(1);
+        let pos = ((pos_frac * max_pos as f64).floor() as usize).min(max_pos);
+        let c = doc.cursor_at(pos);
+        c.insert_text(&insert).unwrap();
+        prop_assert_eq!(
+            doc.character_count(),
+            cc_before + insert.chars().count(),
+            "character_count must grow by exactly insert.chars().count()"
+        );
+        prop_assert_eq!(
+            doc.block_count(), bc_before,
+            "insert_text must not split blocks"
+        );
+    }
+}
+
+// ── Invariant 9 ─────────────────────────────────────────────────────
+// Backspace at the very start of a multi-block document with no
+// selection removes exactly one block separator (merges two blocks)
+// or is a no-op at position 0 of block 0.
+
+proptest! {
+    #[test]
+    fn backspace_at_block_start_merges_or_noops(
+        a in "[a-z]{1,10}",
+        b in "[a-z]{1,10}",
+    ) {
+        let doc = TextDocument::new();
+        doc.set_plain_text(&a).unwrap();
+        // Add a second block.
+        let c = doc.cursor_at(a.chars().count());
+        c.insert_block().unwrap();
+        c.insert_text(&b).unwrap();
+
+        let bc_before = doc.block_count();
+        prop_assert_eq!(bc_before, 2);
+
+        // Cursor at start of block 1 (the second block).
+        let start_of_b = a.chars().count() + 1;
+        let c2 = doc.cursor_at(start_of_b);
+        c2.delete_previous_char().unwrap();
+        prop_assert_eq!(doc.block_count(), 1, "blocks must merge");
+        prop_assert_eq!(
+            doc.to_plain_text().unwrap(),
+            format!("{}{}", a, b),
+            "merged text must equal concatenation"
+        );
+    }
+}
+
+// ── Invariant 10 ────────────────────────────────────────────────────
+// `cursor_at(p)` accepts any position without panicking, but the
+// cursor is only semantically meaningful when `p <= max`.
+// Out-of-range cursors are a no-op for edit operations (see the
+// `if pos >= end { return Ok(()); }` guards in delete_char). This
+// property locks in the safety contract even though `position()`
+// itself doesn't clamp.
+
+proptest! {
+    #[test]
+    fn cursor_at_out_of_range_is_safe(
+        seed in "[a-zA-Z ]{0,30}",
+        requested in 0usize..10_000,
+    ) {
+        // Empty seed now accepted — the grapheme-cursor snap
+        // (commit e6eb374) and the delete_text position refresh
+        // (commit d648b52) together eliminated the panics that
+        // used to force this strategy to `{1,30}`.
+        let doc = new_doc(&seed);
+        let max = doc.character_count() + doc.block_count().saturating_sub(1);
+        let c = doc.cursor_at(requested);
+        let before = doc.to_plain_text().unwrap();
+        let _ = c.delete_char();
+        let _ = c.delete_previous_char();
+        let after = doc.to_plain_text().unwrap();
+        if requested > max {
+            prop_assert_eq!(
+                before, after,
+                "out-of-range cursor edit ops must not mutate"
+            );
+        }
+    }
+}
+
+// ── Invariant 11 ────────────────────────────────────────────────────
+// The entity-ID counter is monotone across undo. After undo rolls
+// back a block-creating edit, the next block-creating edit must
+// receive an ID strictly greater than the rolled-back one.
+//
+// This guards the contract of `RopeStore::restore_without_counters`
+// (counters are NOT restored on undo). A regression here means
+// entity IDs can collide across undo/redo cycles, corrupting any
+// reference held by a still-open handle.
+
+proptest! {
+    #[test]
+    fn undo_does_not_reset_id_counter(seed in "[a-zA-Z ]{1,40}") {
+        let doc = new_doc(&seed);
+
+        // Move to end and create a fresh block. `insert_block` is the
+        // public block-creating API (unlike `insert_text("\n")`, which
+        // inserts a literal newline inside the current block).
+        let pos1 = doc.character_count() + doc.block_count().saturating_sub(1);
+        let c1 = doc.cursor_at(pos1);
+        c1.insert_block().unwrap();
+        let max_first = doc
+            .blocks()
+            .iter()
+            .map(|b| b.id())
+            .max()
+            .unwrap_or(0);
+
+        // Undo: the newly-created block disappears from the document,
+        // but its ID is gone forever (the counter is not rewound).
+        doc.undo().unwrap();
+
+        // Insert again: this MUST allocate a new id strictly greater
+        // than max_first. If the counter had reset, max_second could
+        // equal max_first and a stale handle to the rolled-back block
+        // would now silently refer to a different block.
+        let pos2 = doc.character_count() + doc.block_count().saturating_sub(1);
+        let c2 = doc.cursor_at(pos2);
+        c2.insert_block().unwrap();
+        let max_second = doc
+            .blocks()
+            .iter()
+            .map(|b| b.id())
+            .max()
+            .unwrap_or(0);
+
+        prop_assert!(
+            max_second > max_first,
+            "id counter must not rewind on undo: max_first={}, max_second={}",
+            max_first,
+            max_second
+        );
+    }
+}
+
+// ── Invariant 12 ────────────────────────────────────────────────────
+// A composite edit block undoes and redoes as a single unit. Wrapping
+// N edits in `begin_edit_block`/`end_edit_block` must produce exactly
+// one undo step, not N. One `undo()` call returns the document to the
+// pre-composite state; one `redo()` call restores the post-composite
+// state; a second `undo()` reverts again to pre-composite.
+//
+// This guards the composite-command atomicity contract in
+// `undo_redo.rs:296-372`. The contract must survive the rope backend
+// migration unchanged.
+
+proptest! {
+    #[test]
+    fn composite_undoes_as_one_unit(
+        seed in "[a-zA-Z ]{1,30}",
+        edits in proptest::collection::vec("[a-z]{1,3}", 2..6),
+    ) {
+        let doc = new_doc(&seed);
+        let before = doc.to_plain_text().unwrap();
+        let pos = doc.character_count() + doc.block_count().saturating_sub(1);
+        let c = doc.cursor_at(pos);
+
+        c.begin_edit_block();
+        for chunk in &edits {
+            c.insert_text(chunk).unwrap();
+        }
+        c.end_edit_block();
+
+        let after = doc.to_plain_text().unwrap();
+        // If the composite produced no net change, there's nothing to test.
+        prop_assume!(before != after);
+
+        doc.undo().unwrap();
+        let after_undo = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            &before,
+            &after_undo,
+            "one undo of a composite must revert ALL inner edits"
+        );
+
+        doc.redo().unwrap();
+        let after_redo = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            &after,
+            &after_redo,
+            "one redo of a composite must restore the post-composite state"
+        );
+
+        doc.undo().unwrap();
+        let after_undo2 = doc.to_plain_text().unwrap();
+        prop_assert_eq!(
+            before,
+            after_undo2,
+            "second undo of a composite must also revert ALL inner edits"
+        );
+    }
+}

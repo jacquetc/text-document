@@ -2,8 +2,8 @@
 //!
 //! Provides a [`SyntaxHighlighter`] trait inspired by Qt's `QSyntaxHighlighter`.
 //! Implementors produce shadow formatting that is merged into
-//! [`FragmentContent`] at layout time but never
-//! touches the stored `InlineElement` entities — export, cursor, undo, and
+//! [`FragmentContent`] at layout time but never touches the stored
+//! `format_runs` / `block_images` tables — export, cursor, undo, and
 //! search remain unaffected.
 
 use std::any::Any;
@@ -272,6 +272,33 @@ fn merge_overlapping_highlights(spans: &[&HighlightSpan]) -> HighlightFormat {
 /// Text fragments that overlap with highlight spans are split at span
 /// boundaries. The highlight format is overlaid onto the base `TextFormat`.
 /// Image fragments receive the overlay without splitting.
+/// Local copy of the word-start computation from `text_block.rs`:
+/// returns character indices (not byte offsets) where a Unicode word
+/// starts, per UAX #29. Mirrors the upstream helper so highlight
+/// splits produce accessibility-correct word_starts for each
+/// sub-fragment without reaching into `text_block`.
+fn compute_word_starts_local(text: &str) -> Vec<u8> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut result = Vec::new();
+    let mut byte_to_char: Vec<(usize, usize)> = Vec::new();
+    for (ci, (bi, _)) in text.char_indices().enumerate() {
+        byte_to_char.push((bi, ci));
+    }
+    for (byte_off, _word) in text.unicode_word_indices() {
+        let char_idx = byte_to_char
+            .iter()
+            .find(|(bi, _)| *bi == byte_off)
+            .map(|(_, ci)| *ci)
+            .unwrap_or(0);
+        if let Ok(idx) = u8::try_from(char_idx) {
+            result.push(idx);
+        } else {
+            break;
+        }
+    }
+    result
+}
+
 pub(crate) fn merge_highlight_spans(
     fragments: Vec<FragmentContent>,
     spans: &[HighlightSpan],
@@ -289,6 +316,8 @@ pub(crate) fn merge_highlight_spans(
                 ref format,
                 offset,
                 length,
+                element_id,
+                word_starts: _,
             } => {
                 let frag_end = offset + length;
 
@@ -343,11 +372,26 @@ pub(crate) fn merge_highlight_spans(
                         apply_highlight(format, &merged_hl)
                     };
 
+                    let sub_word_starts = compute_word_starts_local(&sub_text);
                     result.push(FragmentContent::Text {
                         text: sub_text,
                         format: sub_format,
                         offset: sub_start,
                         length: sub_len,
+                        // All sub-fragments split from one source
+                        // `FragmentContent::Text` reference the same
+                        // underlying format run — only the highlight
+                        // formatting differs. Sharing the id is
+                        // correct for accessibility (the underlying
+                        // text belongs to one stable run) at the cost
+                        // that synthetic NodeIds for highlighted
+                        // sub-runs collide unless the caller further
+                        // disambiguates.
+                        // The fern-widgets layer handles that by
+                        // mixing the `offset` into the synthetic-id
+                        // hash alongside `element_id`.
+                        element_id,
+                        word_starts: sub_word_starts,
                     });
                 }
             }
@@ -358,6 +402,7 @@ pub(crate) fn merge_highlight_spans(
                 quality,
                 ref format,
                 offset,
+                element_id,
             } => {
                 // Find overlapping highlights for this single-char position.
                 let active: Vec<&HighlightSpan> = spans
@@ -382,6 +427,7 @@ pub(crate) fn merge_highlight_spans(
                     quality,
                     format: img_format,
                     offset,
+                    element_id,
                 });
             }
         }
@@ -397,8 +443,17 @@ pub(crate) fn merge_highlight_spans(
 /// Get all block IDs sorted by document_position.
 fn ordered_block_ids(inner: &TextDocumentInner) -> Vec<(u64, String)> {
     let mut blocks = block_commands::get_all_block(&inner.ctx).unwrap_or_default();
+    let store = inner.ctx.db_context.get_store();
+    crate::inner::refresh_block_positions(&mut blocks, store);
     blocks.sort_by_key(|b| b.document_position);
-    blocks.into_iter().map(|b| (b.id, b.plain_text)).collect()
+    blocks
+        .into_iter()
+        .map(|b| {
+            let entity: common::entities::Block = b.clone().into();
+            let text = common::database::rope_helpers::block_content_via_store(&entity, store);
+            (b.id, text)
+        })
+        .collect()
 }
 
 impl TextDocumentInner {
@@ -518,12 +573,14 @@ impl TextDocumentInner {
 
         let blocks = ordered_block_ids(self);
 
+        let store = self.ctx.db_context.get_store();
         // Find the block that contains `position`.
         let target_bid = blocks
             .iter()
             .rev()
             .find_map(|(id, _)| {
-                let dto = block_commands::get_block(&self.ctx, id).ok().flatten()?;
+                let mut dto = block_commands::get_block(&self.ctx, id).ok().flatten()?;
+                crate::inner::refresh_block_position(&mut dto, store);
                 let bp = dto.document_position as usize;
                 if position >= bp {
                     Some(*id as usize)
