@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use common::database::Store;
-use common::database::rope_helpers::block_char_length;
+use common::database::rope_helpers::{block_char_length, find_block_at_char_position};
 use common::direct_access::frame::frame_repository::FrameRelationshipField;
 use common::entities::{Block, Frame};
 use common::format_runs::{InlineContent, InlineSegment};
@@ -168,6 +168,25 @@ pub fn find_block_at_position(
     position: i64,
     store: &Store,
 ) -> Result<(Block, usize, i64)> {
+    // Fast/authoritative path: when the rope index mirrors every block,
+    // it — not `Block.document_position` — is the source of truth for
+    // positions. Delete paths deliberately skip refreshing the stored
+    // `document_position` fields when the rope is clean (see the
+    // position-refresh gate in `delete_text_uc`), so those fields can be
+    // stale here. Locate via the rope and return the block with its
+    // `document_position` corrected to the rope-derived char start, so
+    // callers that derive new positions from it (e.g. `insert_block_uc`)
+    // don't compound the staleness. `find_block_at_char_position` returns
+    // `None` for documents with tables/sub-frames, where the rope's char
+    // space diverges from flow order — those fall through to the linear
+    // walk below.
+    if let Some((block_id, offset, block_char_start)) = find_block_at_char_position(store, position)
+        && let Some((i, block)) = blocks.iter().enumerate().find(|(_, b)| b.id == block_id)
+    {
+        let mut corrected = block.clone();
+        corrected.document_position = block_char_start;
+        return Ok((corrected, i, offset));
+    }
     for (i, block) in blocks.iter().enumerate() {
         let block_start = block.document_position;
         let block_end = block_start + block_char_length(block, store);
