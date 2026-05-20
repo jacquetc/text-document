@@ -365,6 +365,11 @@ fn escape_html(s: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&#x27;"),
+            // A raw CR in text content is normalised to LF by the HTML5 input
+            // preprocessor on re-import (CR-from-`&#xD;` survives, literal CR
+            // does not), which breaks serialiser idempotency. Emit it as a
+            // numeric reference so it round-trips losslessly.
+            '\r' => out.push_str("&#13;"),
             _ => out.push(c),
         }
     }

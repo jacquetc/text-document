@@ -11,3 +11,4 @@ cc 41b09c2b595bf0be11c1d5ebe6f1696c8cc2a73ddc967a046f2117591fdc021b # shrinks to
 cc c0c3aa774756c7cc37ae89bea3584260fe3f17d10ee69ad3c704afa7db12e5d4 # shrinks to seed = "", ops = [InsertBlock, DeletePrev, Undo, InsertText("a "), InsertBlock, Undo, InsertBlock]
 cc 726a13e6138459f64a78e0cb9e1310f1471810b84a4df2c9b41e53b967c6d572 # shrinks to seed = "", ops = [InsertText(""), InsertText(" "), Undo]
 cc 053fa73a2c7230e00cb6316c52df5b7b0a62134cfe2ed9582a5822836cbe1558 # shrinks to seed = "\n\n"
+cc 413d17480987e479479c04da90da0f02898e771ee8447a4fdf7b96c7c22901c6 # shrinks to seed = "&#xDg"

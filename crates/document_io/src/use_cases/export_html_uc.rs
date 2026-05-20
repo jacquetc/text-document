@@ -525,4 +525,9 @@ fn escape_html(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+        // A raw CR in text content is normalised to LF by the HTML5 input
+        // preprocessor on re-import (CR-from-`&#xD;` survives, literal CR
+        // does not), which breaks serialiser idempotency. Emit it as a
+        // numeric reference so it round-trips losslessly.
+        .replace('\r', "&#13;")
 }
