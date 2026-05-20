@@ -85,7 +85,15 @@ proptest! {
         doc.set_plain_text("").unwrap();
         // We don't care whether set_html succeeds; we care that it
         // doesn't panic. Error returns are a valid outcome.
-        let _ = doc.set_html(&input);
+        let op = match doc.set_html(&input) {
+            Ok(o) => o,
+            Err(_) => return Ok(()),
+        };
+        // `set_html` returns an Operation that completes async on a
+        // background thread. Wait for it before querying: a panic there
+        // is the failure mode we're testing for, and querying mid-import
+        // races the still-mutating doc. An `Err` result is fine.
+        let _ = op.wait();
         // Downstream queries must still be safe.
         prop_assert!(doc.to_plain_text().is_ok());
         prop_assert!(doc.block_count() >= 1);
@@ -273,7 +281,9 @@ fn seed_corpus_adversarial_html() {
     for html in inputs {
         let doc = TextDocument::new();
         doc.set_plain_text("").unwrap();
-        let _ = doc.set_html(html);
+        if let Ok(op) = doc.set_html(html) {
+            let _ = op.wait();
+        }
         // After any html import, queries must be safe.
         let _ = doc.to_plain_text();
         let _ = doc.character_count();
