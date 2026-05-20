@@ -4,7 +4,9 @@
 //! position computation (`find_block_at_position_sequential`) stay in sync
 //! when text is inserted, deleted, or replaced inside table cells.
 
-use text_document::{Alignment, BlockFormat, FlowElement, FlowElementSnapshot, MoveMode, TextDocument};
+use text_document::{
+    Alignment, BlockFormat, FlowElement, FlowElementSnapshot, MoveMode, TextDocument,
+};
 
 /// Create a document: "Before" + 2x2 table + "After"
 /// Create a document: "Before" + 2x2 empty table + "After" using insert_table
@@ -1419,7 +1421,9 @@ fn rich_text_editor_demo_end_to_end_insert_table_at_end() {
     // the new table really lands at the END (not 4 blocks before).
     let pre_top_level_count = doc.flow().len();
 
-    cursor.insert_table(3, 3).expect("insert_table at end of doc");
+    cursor
+        .insert_table(3, 3)
+        .expect("insert_table at end of doc");
 
     assert_doc_pos_matches_snapshot(&doc, "after insert_table at end-of-doc");
 
